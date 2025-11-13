@@ -1,0 +1,8 @@
+(library
+ (name nod_test)
+ (preprocess
+  (pps ppx_jane))
+ (inline_tests)
+ (libraries core core_unix vec feel)
+ (flags
+  (:standard -extension-universe beta)))

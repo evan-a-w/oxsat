@@ -1,0 +1,8 @@
+(library
+ (name ds)
+ (preprocess
+  (pps ppx_jane))
+ (inline_tests)
+ (libraries core core_unix unboxed)
+ (flags
+  (:standard -extension-universe beta)))

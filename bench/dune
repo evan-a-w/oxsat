@@ -1,0 +1,43 @@
+(library
+ (name benchmark)
+ (modules benchmark)
+ (libraries core core_unix)
+ (preprocess (pps ppx_jane)))
+
+(library
+ (name rb_bench)
+ (modules rb_bench)
+ (libraries core ds benchmark)
+ (preprocess (pps ppx_jane ppx_optional)))
+
+(library
+ (name map_bench)
+ (modules map_bench)
+(libraries core benchmark)
+(preprocess (pps ppx_jane)))
+
+(library
+ (name sat_bench)
+ (modules sat_bench)
+ (libraries core feel benchmark)
+ (preprocess (pps ppx_jane)))
+
+(executable
+  (public_name feel_bench)
+ (name feel_bench)
+ (modules feel_bench)
+ (preprocess
+  (pps ppx_jane ppx_optional))
+ (libraries
+   feel
+  core
+  core_unix
+  core_unix.command_unix
+  ds
+  unboxed
+  benchmark
+  rb_bench
+  map_bench
+  sat_bench)
+ (flags
+  (:standard -extension-universe beta)))
