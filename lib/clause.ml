@@ -77,9 +77,11 @@ let value_exn t ~var =
 let clear t = Tf_pair.iter t ~f:Bitset.clear_all
 
 let can_resolve t ~other ~on_var =
-  contains t ~var:on_var
-  && contains other ~var:on_var
-  && Bool.(value_exn t ~var:on_var <> value_exn other ~var:on_var)
+  let t_pos = Bitset.get t.#Tf_pair.t on_var in
+  let t_neg = Bitset.get t.#f on_var in
+  let other_pos = Bitset.get other.#Tf_pair.t on_var in
+  let other_neg = Bitset.get other.#f on_var in
+  (t_pos && other_neg) || (t_neg && other_pos)
 ;;
 
 let resolve_exn t ~other ~on_var =

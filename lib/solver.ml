@@ -594,11 +594,12 @@ let%template make_decision t : _ @ m =
 ;;
 
 let restart t =
+  t.conflicts <- #0L;
+  t.decision_level <- #0L;
   Bitset.clear_all t.unprocessed_unit_clauses;
   while Trail_entry.Vec.length t.trail <> 0 do
     undo_entry t ~trail_entry:(Trail_entry.Vec.pop_exn t.trail)
   done;
-  t.decision_level <- #0L;
   Clause.Pool.iter t.clauses ~f:(fun ptr ->
     let clause = Clause.Pool.get t.clauses ptr in
     match%optional_u
@@ -746,7 +747,6 @@ let%template rec solve' t : Sat_result.t @ m =
      t.conflicts <- I64.O.(t.conflicts + #1L);
      if I64.O.(t.conflicts >= Luby.value t.luby && t.decision_level > #0L)
      then (
-       t.conflicts <- #0L;
        ignore (Luby.next t.luby);
        restart t);
      solve' t)
@@ -755,7 +755,9 @@ let%template rec solve' t : Sat_result.t @ m =
 ;;
 
 let%template solve t : Sat_result.t @ m =
-  (if t.iterations > 0 then restart t;
+  (if t.iterations > 0 then
+     t.iterations <- 0;
+     restart t;
    if t.has_empty_clause
    then Unsat { unsat_core = Clause.of_int_array [||] }
    else (solve' [@alloc a]) t)
