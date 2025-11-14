@@ -83,17 +83,6 @@ let can_resolve t ~other ~on_var =
   let other_neg = Bitset.get other.#f on_var in
   (t_pos && other_neg) || (t_neg && other_pos)
 ;;
-
-let resolve_exn t ~other ~on_var =
-  if not (can_resolve t ~other ~on_var)
-  then Error.raise_s [%message "Can't resolve clauses" (on_var : int)]
-  else (
-    Bitset.lor_inplace ~dest:t.#Tf_pair.t t.#t other.#Tf_pair.t;
-    Bitset.lor_inplace ~dest:t.#f t.#f other.#f;
-    Bitset.clear t.#t on_var;
-    Bitset.clear t.#f on_var)
-;;
-
 let of_int_array arr =
   let t = create_for_vec () in
   Array.iter arr ~f:(fun i ->
@@ -110,6 +99,18 @@ let to_int_array t =
   iter_literals t ~f:(fun literal -> Vec.Value.push v (Literal.to_int literal));
   Vec.Value.to_array v
 ;;
+
+
+let resolve_exn t ~other ~on_var =
+  if not (can_resolve t ~other ~on_var)
+  then Error.raise_s [%message "Can't resolve clauses" (on_var : int) ~t:(to_int_array t : int array) ~other:(to_int_array other : int array)]
+  else (
+    Bitset.lor_inplace ~dest:t.#Tf_pair.t t.#t other.#Tf_pair.t;
+    Bitset.lor_inplace ~dest:t.#f t.#f other.#f;
+    Bitset.clear t.#t on_var;
+    Bitset.clear t.#f on_var)
+;;
+
 
 module Or_trivial0 = struct
   type (_ : value & value) tag =
