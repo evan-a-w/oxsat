@@ -474,6 +474,8 @@ module Value = struct
     new_
   ;;
 
+  let sort t ~compare = Array.sort t.arr ~len:t.length ~compare
+
   let reverse_inplace t =
     let end_ = ref (length t - 1) in
     let start = ref 0 in

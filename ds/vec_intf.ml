@@ -93,6 +93,7 @@ module type S_value = sig
   val pop_exn : 'a t -> 'a
   val fill_to_length : 'a t -> length:int -> f:(int -> 'a) @ local -> unit
   val map : 'a t -> f:('a -> 'b) -> 'b t
+  val sort : 'a t -> compare:('a -> 'a -> int) @ local -> unit
 
   val fold_map
     :  'a t

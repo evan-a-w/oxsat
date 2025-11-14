@@ -74,6 +74,9 @@ type t =
   ; trail_entry_idx_by_var : I64.Option.Vec.t
   ; watched_clauses_by_literal : Bitset.t Vec.Value.t Tf_pair.t
   ; vsids : Vsids.t
+  ; learned_clauses : Bitset.t
+  ; simplify_clauses_every : int
+  ; clause_sorting_buckets : int Vec.Value.t
   }
 
 let assignment t ~var = exclave_
@@ -203,6 +206,9 @@ let on_new_var
   ; clauses_with_active_unit = _
   ; clause_scores = _
   ; clause_adjusting_score = _
+  ; learned_clauses = _
+  ; simplify_clauses_every = _
+  ; clause_sorting_buckets = _
   }
   ~var
   =
@@ -305,6 +311,9 @@ let populate_watched_literals_for_new_clause
    ; clauses_with_active_unit = _
    ; clause_scores = _
    ; clause_adjusting_score = _
+   ; learned_clauses = _
+   ; simplify_clauses_every = _
+   ; clause_sorting_buckets = _
    } as t)
   ~ptr
   =
@@ -353,7 +362,7 @@ let populate_watched_literals_for_new_clause
 ;;
 
 (** can NOT be called multiple times for the same clause *)
-let add_clause
+let push_clause
   ({ clauses
    ; clauses_by_literal
    ; clause_scores
@@ -371,6 +380,9 @@ let add_clause
        (* populated in [populate_watched_literals_for_new_clause] which we call inside this function *)
    ; debug = _
    ; clauses_with_active_unit = _
+   ; learned_clauses = _
+   ; simplify_clauses_every = _
+   ; clause_sorting_buckets = _
    } as t)
   ~clause
   =
@@ -386,7 +398,7 @@ let add_clause
     Bitset.set clauses_for_lit (Ptr.to_int ptr));
   F64.Option.Vec.push clause_scores (F64.Option.some (Adjusting_score.unit clause_adjusting_score));
   populate_watched_literals_for_new_clause t ~ptr;
-  t
+  ptr
 ;;
 
 let free_clause
@@ -405,6 +417,9 @@ let free_clause
    ; vsids = _
    ; has_empty_clause = _
    ; debug = _
+   ; learned_clauses = _
+   ; simplify_clauses_every = _
+   ; clause_sorting_buckets = _
    } as t)
   ptr
   =
@@ -542,7 +557,8 @@ let backtrack t ~failed_clause =
   remove_greater_than_decision_level
     t
     ~decision_level:(second_highest_decision_level t ~clause:learned_clause);
-  ignore (add_clause t ~clause:learned_clause : t)
+  let ptr = push_clause t ~clause:learned_clause in
+  Bitset.set t.learned_clauses (Ptr.to_int ptr)
 ;;
 
 let%template make_decision t : _ @ m =
@@ -629,9 +645,50 @@ let%template can_trim_clause t ~clause_idx =
     && enough_literals
     && enough_lbd
 
+let simplify_clauses t =
+  Vec.Value.clear t.clause_sorting_buckets;
+  Clause.Pool.iter t.clauses ~f:(fun ptr ->
+    let clause_idx = Ptr.to_int ptr in
+    if Bitset.get t.learned_clauses clause_idx
+       && not (Bitset.get t.clauses_with_active_unit clause_idx)
+       && can_trim_clause t ~clause_idx
+    then Vec.Value.push t.clause_sorting_buckets clause_idx);
+  let compare_by_score a b =
+    F64.Option.compare
+      (F64.Option.Vec.get t.clause_scores a)
+      (F64.Option.Vec.get t.clause_scores b)
+  in
+  Vec.Value.sort t.clause_sorting_buckets ~compare:compare_by_score;
+  let num_to_drop = Vec.Value.length t.clause_sorting_buckets / 2 in
+  for i = 0 to num_to_drop - 1 do
+    let clause_idx = Vec.Value.get t.clause_sorting_buckets i in
+    if t.debug then begin
+      let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
+      print_s [%message
+        "Deleting clause"
+          (clause_idx : int)
+          ~clause:(Clause.to_int_array clause : int array)]
+    end;
+    free_clause t (Ptr.of_int clause_idx);
+    Bitset.clear t.learned_clauses clause_idx
+  done
+;;
+
 
 let%template rec solve' t : Sat_result.t @ m =
   (t.iterations <- t.iterations + 1;
+   if t.iterations mod t.simplify_clauses_every = 0
+   then (
+     if t.debug
+     then
+       print_s
+         [%message
+           "simplifying clauses"
+             (t.iterations : int)
+             ~num_clauses:(Clause.Pool.outstanding t.clauses : int)
+             (t.decision_level : I64.t)];
+     simplify_clauses t;
+     decay_clause_activities t);
    let rec try_unit_propagate () = exclave_
      match Bitset.find_first_set t.unprocessed_unit_clauses ~start_pos:0 with
      | Null -> None
@@ -707,11 +764,20 @@ let create ?(debug = false) () =
   ; watched_clauses_by_literal =
       Tf_pair.create (fun (_ : bool) -> Vec.Value.create ())
   ; vsids = Vsids.create ()
+  ; learned_clauses = Bitset.create ()
+  ; simplify_clauses_every = 2500
+  ; clause_sorting_buckets = Vec.Value.create ()
   ; debug
   }
 ;;
 
+let add_clause t ~clause =
+  ignore (push_clause t ~clause);
+  t
+
+
 let add_clause' t ~clause = add_clause t ~clause:(Clause.of_int_array clause)
+
 
 (* TODO: will use these later *)
 let _ = free_clause
