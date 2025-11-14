@@ -162,7 +162,8 @@ struct
     }
 
   let create ?(chunk_size = 4096) () =
-    assert (chunk_size = (1 lsl Int.clz chunk_size));
+    (* chunk_size is a power of 2 *)
+    assert (chunk_size > 0 && chunk_size land (chunk_size - 1) = 0);
     { first_free = Null
     ; chunk_size
     ; chunks = Vec.Value.create ()

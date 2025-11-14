@@ -90,7 +90,7 @@ let%expect_test "pool iteration across multiple chunks" =
   end
   in
   let module P = Pool.Make [@kind value & value] (Elt) in
-  let pool = P.create ~chunk_size:3 () in
+  let pool = P.create ~chunk_size:4 () in
   (* Allocate more elements than chunk_size to trigger multiple chunks *)
   let p0 = P.alloc pool in
   let p1 = P.alloc pool in
