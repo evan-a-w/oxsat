@@ -63,11 +63,11 @@ type t =
   ; mutable has_empty_clause : bool (* always unsat *)
   ; mutable decision_level : int64#
   ; mutable iterations : int
+  ; mutable clause_adjusting_score : Adjusting_score.t
   ; assignments : Bitset.t Tf_pair.t
   ; trail : Trail_entry.Vec.t
   ; clauses : Clause.Pool.t
   ; clause_scores : F64.Option.Vec.t
-  ; clause_adjusting_score : Adjusting_score.t
   ; clauses_with_active_unit : Bitset.t
   ; unprocessed_unit_clauses : Bitset.t
   ; clauses_by_literal : Bitset.t Vec.Value.t Tf_pair.t
@@ -457,16 +457,18 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
     (I64.Option.none ())
 ;;
 
-(* let add_clause_activity t ~clause_idx = *)
-(*   let inc = t.clause_adjusting_score.#inc in *)
-(*   let to_set = match%optional_u (F64.Option.Vec.get t.clause_scores clause_idx : F64.Option.t) with *)
-(*   | None -> inc *)
-(*   | Some x -> F64.O.(inc + x) *)
-(*   in *)
-(*   F64.Option.Vec.set t.clause_scores clause_idx (F64.Option.some to_set); *)
-(*   exclave_ *)
-(*   `Should_rescale F64.O.(to_set > t.clause_adjusting_score.#rescale) *)
-(* ;; *)
+let add_clause_activity t ~clause_idx =
+  let inc = t.clause_adjusting_score.#inc in
+  let to_set = match%optional_u (F64.Option.Vec.get t.clause_scores clause_idx : F64.Option.t) with
+  | None -> inc
+  | Some x -> F64.O.(inc + x)
+  in
+  F64.Option.Vec.set t.clause_scores clause_idx (F64.Option.some to_set);
+  exclave_
+  `Should_rescale F64.O.(to_set > t.clause_adjusting_score.#rescale)
+;;
+
+let decay_clause_activities t = t.clause_adjusting_score <- Adjusting_score.decay t.clause_adjusting_score
 
 let rec remove_greater_than_decision_level t ~decision_level =
   let remaining_level =
