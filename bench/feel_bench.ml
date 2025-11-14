@@ -77,6 +77,14 @@ let run_sat ~max_num_vars =
   ()
 ;;
 
+let run_dimacs () =
+  print_endline "DIMACS example benchmarks:";
+  let (_ : Benchmark.Result.t list) =
+    Dimacs_bench.run_dimacs_examples ()
+  in
+  ()
+;;
+
 let command =
   Command.basic
     ~summary:"Run benchmarks"
@@ -85,7 +93,7 @@ let command =
        flag
          "bench"
          (optional string)
-         ~doc:"BENCH Which benchmark to run (examples, rb, map, sat, or all). Default: all"
+         ~doc:"BENCH Which benchmark to run (examples, rb, map, sat, dimacs, or all). Default: all"
      and sat_max_n =
        flag
          "sat-max-n"
@@ -103,14 +111,17 @@ let command =
          print_endline "\n";
          run_map ();
          print_endline "\n";
-         run_sat ~max_num_vars:sat_max_n
+         run_sat ~max_num_vars:sat_max_n;
+         print_endline "\n";
+         run_dimacs ()
        | Some "examples" -> run_examples ()
        | Some "rb" -> run_rb ()
        | Some "map" -> run_map ()
        | Some "sat" -> run_sat ~max_num_vars:sat_max_n
+       | Some "dimacs" -> run_dimacs ()
        | Some other ->
          eprintf "Unknown benchmark: %s\n" other;
-         eprintf "Valid options: examples, rb, map, sat, all\n";
+         eprintf "Valid options: examples, rb, map, sat, dimacs, all\n";
          exit 1)
 ;;
 

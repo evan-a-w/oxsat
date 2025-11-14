@@ -31,7 +31,7 @@ module Option : sig
 end
 
 module Private : sig
-  val chunk : t -> int
-  val idx : t -> int
-  val create : chunk:int -> idx:int -> t
+  val chunk : chunk_bits:int -> t -> int
+  val idx : chunk_bits:int -> t -> int
+  val create : chunk_bits:int -> chunk:int -> idx:int -> t
 end

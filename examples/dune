@@ -1,0 +1,8 @@
+(library
+ (name examples)
+ (preprocess
+  (pps ppx_jane))
+ (inline_tests)
+ (libraries core core_unix vec)
+ (flags
+  (:standard -extension-universe beta)))

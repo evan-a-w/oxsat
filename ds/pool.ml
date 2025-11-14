@@ -162,6 +162,7 @@ struct
     }
 
   let create ?(chunk_size = 4096) () =
+    assert (chunk_size = (1 lsl Int.clz chunk_size));
     { first_free = Null
     ; chunk_size
     ; chunks = Vec.Value.create ()
@@ -169,18 +170,26 @@ struct
     }
   ;;
 
+  let chunk_bits t = 63 - Int.clz t.chunk_size
+
+  module Ptr_helpers = struct
+    let chunk t ptr = Ptr.Private.chunk ~chunk_bits:(chunk_bits t) ptr
+    let idx t ptr = Ptr.Private.idx ~chunk_bits:(chunk_bits t) ptr
+    let create t ~chunk ~idx = Ptr.Private.create ~chunk_bits:(chunk_bits t) ~chunk ~idx
+  end
+
   let outstanding t = t.outstanding
 
   let get t ptr =
-    (Vec.Value.get t.chunks (Ptr.Private.chunk ptr)).elts.(Ptr.Private.idx ptr)
+    (Vec.Value.get t.chunks (Ptr_helpers.chunk t ptr)).elts.(Ptr_helpers.idx t ptr)
       .#elt
   ;;
 
   let set t ptr elt =
     let chunk_elt =
-      (Vec.Value.get t.chunks (Ptr.Private.chunk ptr)).elts.(Ptr.Private.idx ptr)
+      (Vec.Value.get t.chunks (Ptr_helpers.chunk t ptr)).elts.(Ptr_helpers.idx t ptr)
     in
-    (Vec.Value.get t.chunks (Ptr.Private.chunk ptr)).elts.(Ptr.Private.idx ptr)
+    (Vec.Value.get t.chunks (Ptr_helpers.chunk t ptr)).elts.(Ptr_helpers.idx t ptr)
     <- #{ chunk_elt with elt }
   ;;
 
@@ -199,19 +208,19 @@ struct
       let idx' = Chunk.alloc chunk in
       if Chunk.is_fully_allocated chunk
       then t.first_free <- chunk.next_free_chunk;
-      Ptr.Private.create ~chunk:idx ~idx:idx'
+      Ptr_helpers.create t ~chunk:idx ~idx:idx'
   ;;
 
   let free t ptr =
     t.outstanding <- t.outstanding - 1;
-    let c = Vec.Value.get t.chunks (Ptr.Private.chunk ptr) in
-    let i = Ptr.Private.idx ptr in
+    let c = Vec.Value.get t.chunks (Ptr_helpers.chunk t ptr) in
+    let i = Ptr_helpers.idx t ptr in
     let previously_full = Chunk.is_fully_allocated c in
     Chunk.free c i;
     if previously_full
     then (
       c.next_free_chunk <- t.first_free;
-      t.first_free <- This (Ptr.Private.chunk ptr))
+      t.first_free <- This (Ptr_helpers.chunk t ptr))
   ;;
 
   let iter t ~f =
@@ -222,7 +231,7 @@ struct
         match next with
         | Null -> ()
         | This idx ->
-          f (Ptr.Private.create ~chunk:chunk_idx ~idx);
+          f (Ptr_helpers.create t ~chunk:chunk_idx ~idx);
           iter_taken chunk.elts.(idx).#next_taken
       in
       iter_taken chunk.first_taken

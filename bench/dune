@@ -22,6 +22,12 @@
  (libraries core feel benchmark)
  (preprocess (pps ppx_jane)))
 
+(library
+ (name dimacs_bench)
+ (modules dimacs_bench)
+ (libraries core feel examples benchmark)
+ (preprocess (pps ppx_jane)))
+
 (executable
   (public_name feel_bench)
  (name feel_bench)
@@ -31,6 +37,7 @@
  (libraries
    feel
   core
+  examples
   core_unix
   core_unix.command_unix
   ds
@@ -38,6 +45,7 @@
   benchmark
   rb_bench
   map_bench
-  sat_bench)
+  sat_bench
+  dimacs_bench)
  (flags
   (:standard -extension-universe beta)))
