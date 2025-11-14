@@ -64,7 +64,21 @@ let on_new_var t ~var =
         ~data:())
 ;;
 
-let rescale _t = ()
+let rescale t =
+  Tf_pair.iteri t.score_by_literal ~f:(fun ~key:value ~data:score_by_var ->
+    F64.Option.Vec.iteri score_by_var ~f:(fun i score ->
+      let literal = Literal.create ~var:i ~value in
+      match%optional_u.F64.Option score with
+      | None -> ()
+      | Some score ->
+        let new_score = F64.O.(score / t.adjusting_score.#rescale) in
+        F64.Option.Vec.set score_by_var i (F64.Option.some new_score);
+        match Literal_with_score.Rb.mem t.literals_with_score #{ literal; score } with
+        | false -> ()
+        | true ->
+          Literal_with_score.Rb.remove t.literals_with_score #{ literal; score };
+          Literal_with_score.Rb.insert t.literals_with_score ~key:#{ literal; score = new_score } ~data:()));
+  t.adjusting_score <- Adjusting_score.rescale t.adjusting_score
 
 let add_activity t ~literal =
   let vec = Tf_pair.get t.score_by_literal (Literal.value literal) in

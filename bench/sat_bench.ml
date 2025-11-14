@@ -144,8 +144,7 @@ let run_scaling_benchmark
   let planted_solution_instances =
     List.map sizes ~f:(fun n ->
       let num_clauses = Int.max (4 * n) (Int.of_float (4.5 *. Float.of_int n)) in
-      planted_solution_instance ~num_vars:n ~num_clauses ~k:4 ~min_satisfied:1)
-  in
+      planted_solution_instance ~num_vars:n ~num_clauses ~k:4 ~min_satisfied:1) in
   let forced_backbone_instances =
     List.map sizes ~f:(fun n ->
       let num_clauses = Int.max (3 * n) (Int.of_float (3.8 *. Float.of_int n)) in

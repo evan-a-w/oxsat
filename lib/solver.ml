@@ -84,6 +84,28 @@ let assignment t ~var = exclave_
   else None
 ;;
 
+let add_clause_activity t ~clause_idx =
+  let inc = t.clause_adjusting_score.#inc in
+  let to_set = match%optional_u (F64.Option.Vec.get t.clause_scores clause_idx : F64.Option.t) with
+  | None -> inc
+  | Some x -> F64.O.(inc + x)
+  in
+  F64.Option.Vec.set t.clause_scores clause_idx (F64.Option.some to_set);
+  exclave_
+  F64.O.(to_set > t.clause_adjusting_score.#rescale)
+;;
+
+let rescale_clause_activities t =
+  F64.Option.Vec.iteri t.clause_scores ~f:(fun i score ->
+      match%optional_u.F64.Option score with
+      | None -> ()
+      | Some score ->
+        F64.Option.Vec.set t.clause_scores i F64.O.(score / t.clause_adjusting_score.#rescale |> F64.Option.some));
+  t.clause_adjusting_score <- Adjusting_score.rescale t.clause_adjusting_score
+
+
+let decay_clause_activities t = t.clause_adjusting_score <- Adjusting_score.decay t.clause_adjusting_score
+
 let learn_clause_from_failure ~failed_clause t =
   let learned = Clause.copy failed_clause in
   let num_at_level = ref 0 in
@@ -103,6 +125,7 @@ let learn_clause_from_failure ~failed_clause t =
       let trail_entry = Trail_entry.Vec.get t.trail (I64.to_int_trunc idx) in
       if I64.O.(trail_entry.#decision_level = t.decision_level)
       then incr num_at_level);
+  let rescale = Local_ref.create false in
   Trail_entry.Vec.iter_rev t.trail ~f:(fun trail_entry ->
     match
       #( !num_at_level = 1
@@ -114,6 +137,8 @@ let learn_clause_from_failure ~failed_clause t =
     | #(false, T #(Decision, _, _)) ->
       failwith "found decision walking back from conflict"
     | #(false, T #(Clause_idx, clause_idx, _)) ->
+      Vsids.add_activity t.vsids ~literal:trail_entry.#literal;
+      Local_ref.O.(rescale  := !rescale || add_clause_activity t ~clause_idx);
       let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
       if t.debug
       then
@@ -157,6 +182,7 @@ let learn_clause_from_failure ~failed_clause t =
         learned
         ~other:clause
         ~on_var:(Literal.var trail_entry.#literal));
+  if Local_ref.get rescale then rescale_clause_activities t;
   learned
 ;;
 
@@ -458,18 +484,6 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
     (I64.Option.none ())
 ;;
 
-let add_clause_activity t ~clause_idx =
-  let inc = t.clause_adjusting_score.#inc in
-  let to_set = match%optional_u (F64.Option.Vec.get t.clause_scores clause_idx : F64.Option.t) with
-  | None -> inc
-  | Some x -> F64.O.(inc + x)
-  in
-  F64.Option.Vec.set t.clause_scores clause_idx (F64.Option.some to_set);
-  exclave_
-  `Should_rescale F64.O.(to_set > t.clause_adjusting_score.#rescale)
-;;
-
-let decay_clause_activities t = t.clause_adjusting_score <- Adjusting_score.decay t.clause_adjusting_score
 
 let rec remove_greater_than_decision_level t ~decision_level =
   let remaining_level =
@@ -581,6 +595,41 @@ let%template check_sat_result t ~(sat_result : _ @ m) : _ @ m =
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
+let%template can_trim_clause t ~clause_idx =
+  let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
+  let literals = (Clause.literals_list[@alloc stack]) clause in
+  let enough_literals =
+    match literals with
+    | [] | [_ ] | [ _; _ ] | [ _ ; _ ; _ ] -> false
+    | _ -> true
+  in
+  let rec enough_lbd (local_ distinct_decision_levels) remaining_literals =
+    exclave_
+      match remaining_literals with
+      | [] -> List.length_local distinct_decision_levels >= 4
+      | literal :: remaining_literals ->
+        match%optional_u.I64.Option I64.Option.Vec.get t.trail_entry_idx_by_var (Int.abs literal) with
+        | None -> enough_lbd distinct_decision_levels remaining_literals
+        | Some idx ->
+          let dl = (Trail_entry.Vec.get t.trail (I64.to_int_trunc idx)).#decision_level in
+          match List.find_local
+                  distinct_decision_levels
+                  ~f:(fun dl' -> exclave_ if I64.(dl = of_int dl') then Some () else None)
+          with
+          | Some () -> enough_lbd distinct_decision_levels remaining_literals
+          | None ->
+            let distinct_decision_levels = (I64.to_int_trunc dl) :: distinct_decision_levels in
+            if List.length_local distinct_decision_levels >= 4 then
+              true
+            else
+              enough_lbd distinct_decision_levels remaining_literals
+  in
+  let enough_lbd = enough_lbd [] literals in
+  not (Bitset.get t.clauses_with_active_unit clause_idx)
+    && enough_literals
+    && enough_lbd
+
+
 let%template rec solve' t : Sat_result.t @ m =
   (t.iterations <- t.iterations + 1;
    let rec try_unit_propagate () = exclave_
@@ -666,3 +715,6 @@ let add_clause' t ~clause = add_clause t ~clause:(Clause.of_int_array clause)
 
 (* TODO: will use these later *)
 let _ = free_clause
+let _ = add_clause_activity
+let _ = decay_clause_activities
+let _ = can_trim_clause

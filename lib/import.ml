@@ -74,8 +74,18 @@ module List : sig
     -> 'b option @ local
 
   val iter_local : 'a list @ local -> f:('a @ local -> unit) @ local -> unit
+
+  val length_local : 'a list @ local -> int
 end = struct
   include List
+
+  let length_local l =
+    let rec go acc l =
+      match l with
+      | [] -> 0
+      | _ :: rest -> go (acc + 1) rest
+    in
+    go 0 l
 
   let partition_tf_local t ~f = exclave_
     let rec go l r rest =
