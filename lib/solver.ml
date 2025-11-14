@@ -60,7 +60,7 @@ end
 
 type t =
   { debug : bool
-  ; mutable has_empty_clause : bool (* always unsat *)
+  ; mutable has_empty_clause : bool
   ; mutable decision_level : int64#
   ; mutable iterations : int
   ; mutable clause_adjusting_score : Adjusting_score.t
@@ -77,6 +77,8 @@ type t =
   ; learned_clauses : Bitset.t
   ; simplify_clauses_every : int
   ; clause_sorting_buckets : int Vec.Value.t
+  ; luby : Luby.t
+  ; mutable conflicts : int64#
   }
 
 let assignment t ~var = exclave_
@@ -209,6 +211,8 @@ let on_new_var
   ; learned_clauses = _
   ; simplify_clauses_every = _
   ; clause_sorting_buckets = _
+  ; luby = _
+  ; conflicts = _
   }
   ~var
   =
@@ -314,6 +318,8 @@ let populate_watched_literals_for_new_clause
    ; learned_clauses = _
    ; simplify_clauses_every = _
    ; clause_sorting_buckets = _
+   ; luby = _
+   ; conflicts = _
    } as t)
   ~ptr
   =
@@ -375,14 +381,14 @@ let push_clause
    ; trail = _
    ; trail_entry_idx_by_var = _
    ; vsids = _
-   ; has_empty_clause =
-       _
-       (* populated in [populate_watched_literals_for_new_clause] which we call inside this function *)
+   ; has_empty_clause = _
    ; debug = _
    ; clauses_with_active_unit = _
    ; learned_clauses = _
    ; simplify_clauses_every = _
    ; clause_sorting_buckets = _
+   ; luby = _
+   ; conflicts = _
    } as t)
   ~clause
   =
@@ -420,6 +426,8 @@ let free_clause
    ; learned_clauses = _
    ; simplify_clauses_every = _
    ; clause_sorting_buckets = _
+   ; luby = _
+   ; conflicts = _
    } as t)
   ptr
   =
@@ -590,6 +598,7 @@ let restart t =
   while Trail_entry.Vec.length t.trail <> 0 do
     undo_entry t ~trail_entry:(Trail_entry.Vec.pop_exn t.trail)
   done;
+  t.decision_level <- #0L;
   Clause.Pool.iter t.clauses ~f:(fun ptr ->
     let clause = Clause.Pool.get t.clauses ptr in
     match%optional_u
@@ -734,6 +743,12 @@ let%template rec solve' t : Sat_result.t @ m =
        Clause.Pool.get t.clauses (Ptr.of_int failed_clause_idx)
      in
      backtrack t ~failed_clause;
+     t.conflicts <- I64.O.(t.conflicts + #1L);
+     if I64.O.(t.conflicts >= Luby.value t.luby && t.decision_level > #0L)
+     then (
+       t.conflicts <- #0L;
+       ignore (Luby.next t.luby);
+       restart t);
      solve' t)
   [@exclave_if_stack a]
 [@@alloc a @ m = (stack_local, heap_global)]
@@ -767,6 +782,8 @@ let create ?(debug = false) () =
   ; learned_clauses = Bitset.create ()
   ; simplify_clauses_every = 2500
   ; clause_sorting_buckets = Vec.Value.create ()
+  ; luby = Luby.create ~unit_run:#32L
+  ; conflicts = #0L
   ; debug
   }
 ;;
