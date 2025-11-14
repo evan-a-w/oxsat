@@ -330,6 +330,8 @@ let populate_watched_literals_for_new_clause
 let add_clause
   ({ clauses
    ; clauses_by_literal
+   ; clause_scores
+   ; clause_adjusting_score
    ; watched_clauses_by_literal = _
    ; iterations = _
    ; unprocessed_unit_clauses = _
@@ -343,8 +345,6 @@ let add_clause
        (* populated in [populate_watched_literals_for_new_clause] which we call inside this function *)
    ; debug = _
    ; clauses_with_active_unit = _
-   ; clause_scores = _
-   ; clause_adjusting_score = _
    } as t)
   ~clause
   =
@@ -358,6 +358,7 @@ let add_clause
       Vec.Value.get (Tf_pair.get clauses_by_literal (Literal.value literal)) var
     in
     Bitset.set clauses_for_lit (Ptr.to_int ptr));
+  F64.Option.Vec.push clause_scores (F64.Option.some (Adjusting_score.unit clause_adjusting_score));
   populate_watched_literals_for_new_clause t ~ptr;
   t
 ;;

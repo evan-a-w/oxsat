@@ -64,7 +64,17 @@ let on_new_var t ~var =
         ~data:())
 ;;
 
-let add_activity _t ~literal:(_ : Literal.t) = ()
+let rescale _t = ()
+
+let add_activity t ~literal =
+  let vec = Tf_pair.get t.score_by_literal (Literal.value literal) in
+  match%optional_u (F64.Option.Vec.get vec (Literal.var literal) : F64.Option.t) with
+  | None -> F64.Option.Vec.set vec (Literal.var literal) (Adjusting_score.unit t.adjusting_score |> F64.Option.some)
+  | Some score ->
+    let new_score = F64.O.(score + (Adjusting_score.unit t.adjusting_score)) in
+    F64.Option.Vec.set vec (Literal.var literal) (F64.Option.some new_score);
+    if F64.O.(new_score > t.adjusting_score.#rescale) then rescale t
+
 let decay t = t.adjusting_score <- Adjusting_score.decay t.adjusting_score
 
 let remove_from_pool t ~var =
