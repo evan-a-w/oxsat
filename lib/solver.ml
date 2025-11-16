@@ -156,10 +156,8 @@ let learn_clause_from_failure ~failed_clause t =
               (!num_at_level : int)];
       Clause.iter_literals clause ~f:(fun literal ->
         let var = Literal.var literal in
-        if var = Literal.var trail_entry.#literal
-        then (
-          if I64.O.(trail_entry.#decision_level = t.decision_level)
-          then decr num_at_level)
+        if Literal.equal literal trail_entry.#literal
+        then (decr num_at_level)
         else if Clause.contains_literal learned ~literal
         then ()
         else begin
@@ -392,6 +390,7 @@ let push_clause
    } as t)
   ~clause
   =
+  if Clause.is_tautology clause then Ptr.Option.none () else
   let ptr = Clause.Pool.alloc clauses in
   Clause.Pool.set clauses ptr clause;
   (* bookkeeping for vars *)
@@ -404,7 +403,7 @@ let push_clause
     Bitset.set clauses_for_lit (Ptr.to_int ptr));
   F64.Option.Vec.push clause_scores (F64.Option.some (Adjusting_score.unit clause_adjusting_score));
   populate_watched_literals_for_new_clause t ~ptr;
-  ptr
+  Ptr.Option.some ptr
 ;;
 
 let free_clause
@@ -565,8 +564,9 @@ let backtrack t ~failed_clause =
   remove_greater_than_decision_level
     t
     ~decision_level:(second_highest_decision_level t ~clause:learned_clause);
-  let ptr = push_clause t ~clause:learned_clause in
-  Bitset.set t.learned_clauses (Ptr.to_int ptr)
+  match%optional_u (push_clause t ~clause:learned_clause : Ptr.Option.t) with
+  | None -> ()
+  | Some ptr -> Bitset.set t.learned_clauses (Ptr.to_int ptr)
 ;;
 
 let%template make_decision t : _ @ m =
@@ -737,7 +737,13 @@ let%template rec solve' t : Sat_result.t @ m =
      let failed_clause =
        Clause.Pool.get t.clauses (Ptr.of_int failed_clause_idx)
      in
-     let learned_clause = learn_clause_from_failure t ~failed_clause in
+     let learned_clause =
+       (* raise when it's conflicts from a unit clause we deduced. *)
+       try
+         learn_clause_from_failure t ~failed_clause
+       with
+       | _ -> Clause.copy failed_clause
+     in
      Unsat { unsat_core = learned_clause }
    | Some failed_clause_idx ->
      let failed_clause =
@@ -755,12 +761,12 @@ let%template rec solve' t : Sat_result.t @ m =
 ;;
 
 let%template solve t : Sat_result.t @ m =
-  (if t.iterations > 0 then
-     t.iterations <- 0;
-     restart t;
-   if t.has_empty_clause
-   then Unsat { unsat_core = Clause.of_int_array [||] }
-   else (solve' [@alloc a]) t)
+  if t.iterations > 0 then (
+    t.iterations <- 0;
+    restart t);
+  if t.has_empty_clause
+  then Unsat { unsat_core = Clause.of_int_array [||] }
+  else (solve' [@alloc a]) t
   [@exclave_if_stack a]
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
@@ -796,10 +802,3 @@ let add_clause t ~clause =
 
 
 let add_clause' t ~clause = add_clause t ~clause:(Clause.of_int_array clause)
-
-
-(* TODO: will use these later *)
-let _ = free_clause
-let _ = add_clause_activity
-let _ = decay_clause_activities
-let _ = can_trim_clause

@@ -13,6 +13,8 @@ include T
 
 type clause = t
 
+let is_tautology t = Bitset.popcount (Bitset.land_ t.#Tf_pair.t t.#f) > 0
+
 let is_satisfied t ~assignments =
   let satisfied_vars =
     Bitset.land_ (Tf_pair.get t true) (Tf_pair.get assignments true)
@@ -172,3 +174,4 @@ end
 
 module Vec = Vec.Make [@kind value & value] (T)
 module Pool = Pool.Make [@kind value & value] (T)
+
