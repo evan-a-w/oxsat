@@ -2,7 +2,7 @@ open! Core
 open! Import
 open! Unboxed
 
-type t = I64.t [@@deriving sexp]
+type t = I64.t [@@deriving sexp, equal]
 
 let var t = I64.abs t |> I64.to_int_trunc
 let value t = I64.O.(t > #0L)

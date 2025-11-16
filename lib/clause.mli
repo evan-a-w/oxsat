@@ -8,6 +8,7 @@ val copy : t -> t
 val is_satisfied : t -> assignments:Bitset.t Tf_pair.t -> bool
 val clear : t -> unit
 val iter_literals : t -> f:(Literal.t -> unit) @ local -> unit
+val is_tautology : t -> bool
 
 val%template literals_list : t @ local -> int list @ m
 [@@alloc a @ m = (stack_local, heap_global)]
