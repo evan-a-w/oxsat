@@ -57,15 +57,16 @@ let contains_literal t ~literal =
 ;;
 
 let unit_literal t ~assignments =
-  let un = Bitset.lor_ assignments.#Tf_pair.t assignments.#Tf_pair.f in
-  let tr = Bitset.diff t.#Tf_pair.t un in
-  let fa = Bitset.diff t.#f un in
-  match Bitset.find_first_set tr ~start_pos:0 with
-  | This i -> Literal.of_int i |> Literal.Option.some
-  | Null ->
-    (match Bitset.find_first_set fa ~start_pos:0 with
-     | This i -> Literal.of_int (-i) |> Literal.Option.some
-     | Null -> Literal.Option.none ())
+  if is_satisfied t ~assignments
+  then Literal.Option.none ()
+  else
+    let assigned = Bitset.lor_ assignments.#Tf_pair.t assignments.#Tf_pair.f in
+    let tr = Bitset.diff t.#Tf_pair.t assigned in
+    let fa = Bitset.diff t.#f assigned in
+    match Bitset.popcount tr, Bitset.popcount fa with
+    | 1, 0 -> Bitset.find_first_set tr ~start_pos:0 |> Or_null.value_exn |> Literal.of_int |> Literal.Option.some
+    | 0, 1 -> Bitset.find_first_set fa ~start_pos:0 |> Or_null.value_exn |> Int.neg |> Literal.of_int |> Literal.Option.some
+    | _, _ -> Literal.Option.none ()
 ;;
 
 let value_exn t ~var =
