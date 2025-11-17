@@ -216,9 +216,20 @@ let run_dimacs s =
   (match result with
    | Sat _ ->
      print_endline "SAT"
-   | Unsat _ -> print_endline "UNSAT")
+   | Unsat { unsat_core } -> print_s [%message "UNSAT" ~unsat_core:(Clause.to_int_array unsat_core : int array)])
 
 let%expect_test "sudoku" =
   run_dimacs Examples.Dimacs.sudoku;
+  (* should be SAT *)
+  [%expect {| (UNSAT (unsat_core (5))) |}]
+;;
+
+let%expect_test "succ dimacs" =
+  run_dimacs Examples.Dimacs.succ_eg;
   [%expect {| SAT |}]
+;;
+
+let%expect_test "fail dimacs" =
+  run_dimacs Examples.Dimacs.fail_eg;
+  [%expect {| (UNSAT (unsat_core (-2 -23 -44 -65))) |}]
 ;;
