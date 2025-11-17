@@ -205,3 +205,20 @@ let%expect_test "larger unsatisfiable formula requiring backtracking" =
    | Unsat _ -> print_endline "UNSAT");
   [%expect {| UNSAT |}]
 ;;
+
+
+let run_dimacs s =
+  let solver = Solver.create () in
+  List.iter (Examples.Dimacs.read_string s) ~f:(fun clause ->
+      let clause = Array.of_list clause in
+      ignore (Solver.add_clause' solver ~clause : Solver.t));
+  let result = Solver.solve solver in
+  (match result with
+   | Sat _ ->
+     print_endline "SAT"
+   | Unsat _ -> print_endline "UNSAT")
+
+let%expect_test "sudoku" =
+  run_dimacs Examples.Dimacs.sudoku;
+  [%expect {| SAT |}]
+;;
