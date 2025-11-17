@@ -56,16 +56,24 @@ let contains_literal t ~literal =
   Bitset.get (Tf_pair.get t (Literal.value literal)) (Literal.var literal)
 ;;
 
-let unit_literal t ~assignments =
-  let un = Bitset.lor_ assignments.#Tf_pair.t assignments.#Tf_pair.f in
-  let tr = Bitset.diff t.#Tf_pair.t un in
-  let fa = Bitset.diff t.#f un in
-  match Bitset.find_first_set tr ~start_pos:0 with
-  | This i -> Literal.of_int i |> Literal.Option.some
-  | Null ->
-    (match Bitset.find_first_set fa ~start_pos:0 with
-     | This i -> Literal.of_int (-i) |> Literal.Option.some
-     | Null -> Literal.Option.none ())
+let unit_literal t ~assignments ~assigned =
+  if is_satisfied t ~assignments
+  then Literal.Option.none ()
+  else (
+    let remaining_pos = Bitset.diff t.#Tf_pair.t assigned in
+    let remaining_neg = Bitset.diff t.#f assigned in
+    let count_pos = Bitset.popcount remaining_pos in
+    let count_neg = Bitset.popcount remaining_neg in
+    match count_pos, count_neg with
+    | 1, 0 ->
+      (match Bitset.find_first_set remaining_pos ~start_pos:0 with
+       | This i -> Literal.of_int i |> Literal.Option.some
+       | Null -> Literal.Option.none ())
+    | 0, 1 ->
+      (match Bitset.find_first_set remaining_neg ~start_pos:0 with
+       | This i -> Literal.of_int (-i) |> Literal.Option.some
+       | Null -> Literal.Option.none ())
+    | _ -> Literal.Option.none ())
 ;;
 
 let value_exn t ~var =
@@ -174,4 +182,3 @@ end
 
 module Vec = Vec.Make [@kind value & value] (T)
 module Pool = Pool.Make [@kind value & value] (T)
-

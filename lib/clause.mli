@@ -20,7 +20,11 @@ val can_resolve : t -> other:t -> on_var:int -> bool
 val resolve_exn : t -> other:t -> on_var:int -> unit
 val of_int_array : int array -> t
 val to_int_array : t -> int array
-val unit_literal : t -> assignments:Bitset.t Tf_pair.t -> Literal.Option.t
+val unit_literal
+  :  t
+  -> assignments:Bitset.t Tf_pair.t
+  -> assigned:Bitset.t
+  -> Literal.Option.t
 
 module Or_trivial : sig
   type (_ : value & value) tag =

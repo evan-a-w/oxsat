@@ -221,7 +221,7 @@ let run_dimacs s =
 let%expect_test "sudoku" =
   run_dimacs Examples.Dimacs.sudoku;
   (* should be SAT *)
-  [%expect {| (UNSAT (unsat_core (5))) |}]
+  [%expect {| SAT |}]
 ;;
 
 let%expect_test "succ dimacs" =
@@ -231,5 +231,5 @@ let%expect_test "succ dimacs" =
 
 let%expect_test "fail dimacs" =
   run_dimacs Examples.Dimacs.fail_eg;
-  [%expect {| (UNSAT (unsat_core (-2 -23 -44 -65))) |}]
+  [%expect {| (UNSAT (unsat_core (-112))) |}]
 ;;

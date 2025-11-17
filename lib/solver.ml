@@ -65,6 +65,7 @@ type t =
   ; mutable iterations : int
   ; mutable clause_adjusting_score : Adjusting_score.t
   ; assignments : Bitset.t Tf_pair.t
+  ; assigned_vars : Bitset.t
   ; trail : Trail_entry.Vec.t
   ; clauses : Clause.Pool.t
   ; clause_scores : F64.Option.Vec.t
@@ -196,6 +197,7 @@ let on_new_var
   ; watched_clauses_by_literal
   ; vsids
   ; assignments = _
+  ; assigned_vars = _
   ; iterations = _
   ; decision_level = _
   ; trail = _
@@ -288,7 +290,10 @@ let%template update_watched_clauses t ~set_literal =
             Null
           | None ->
             (match%optional_u
-               (Clause.unit_literal clause ~assignments:t.assignments
+               (Clause.unit_literal
+                  clause
+                  ~assignments:t.assignments
+                  ~assigned:t.assigned_vars
                 : Literal.Option.t)
              with
              | None -> This clause_idx
@@ -300,10 +305,11 @@ let%template update_watched_clauses t ~set_literal =
 let populate_watched_literals_for_new_clause
   ({ clauses
    ; watched_clauses_by_literal
-   ; unprocessed_unit_clauses
-   ; clauses_by_literal = _
-   ; assignments = _
-   ; iterations = _
+  ; unprocessed_unit_clauses
+  ; clauses_by_literal = _
+  ; assignments = _
+  ; assigned_vars = _
+  ; iterations = _
    ; decision_level = _
    ; trail = _
    ; trail_entry_idx_by_var = _
@@ -369,12 +375,13 @@ let populate_watched_literals_for_new_clause
 let push_clause
   ({ clauses
    ; clauses_by_literal
-   ; clause_scores
-   ; clause_adjusting_score
-   ; watched_clauses_by_literal = _
-   ; iterations = _
-   ; unprocessed_unit_clauses = _
-   ; assignments = _
+  ; clause_scores
+  ; clause_adjusting_score
+  ; watched_clauses_by_literal = _
+  ; iterations = _
+  ; unprocessed_unit_clauses = _
+  ; assignments = _
+  ; assigned_vars = _
    ; decision_level = _
    ; trail = _
    ; trail_entry_idx_by_var = _
@@ -411,9 +418,10 @@ let free_clause
    ; watched_clauses_by_literal
    ; unprocessed_unit_clauses
    ; clauses_with_active_unit
-   ; clause_scores
-   ; clause_adjusting_score = _
-   ; assignments = _
+  ; clause_scores
+  ; clause_adjusting_score = _
+  ; assignments = _
+  ; assigned_vars = _
    ; decision_level = _
    ; trail = _
    ; iterations = _
@@ -471,6 +479,7 @@ let add_to_trail t ~(trail_entry : Trail_entry.t) =
   Bitset.set
     (Tf_pair.get t.assignments (Literal.value trail_entry.#literal))
     (Literal.var trail_entry.#literal);
+  Bitset.set t.assigned_vars (Literal.var trail_entry.#literal);
   I64.Option.Vec.set
     t.trail_entry_idx_by_var
     (Literal.var trail_entry.#literal)
@@ -499,6 +508,7 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
   Bitset.clear
     (Tf_pair.get t.assignments (Literal.value trail_entry.#literal))
     (Literal.var trail_entry.#literal);
+  Bitset.clear t.assigned_vars (Literal.var trail_entry.#literal);
   I64.Option.Vec.set
     t.trail_entry_idx_by_var
     (Literal.var trail_entry.#literal)
@@ -601,7 +611,11 @@ let restart t =
   Clause.Pool.iter t.clauses ~f:(fun ptr ->
     let clause = Clause.Pool.get t.clauses ptr in
     match%optional_u
-      (Clause.unit_literal clause ~assignments:t.assignments : Literal.Option.t)
+      (Clause.unit_literal
+         clause
+         ~assignments:t.assignments
+         ~assigned:t.assigned_vars
+       : Literal.Option.t)
     with
     | None -> ()
     | Some _ -> Bitset.set t.unprocessed_unit_clauses (Ptr.to_int ptr))
@@ -702,8 +716,13 @@ let%template rec solve' t : Sat_result.t @ m =
      | Null -> None
      | This clause_idx ->
        Bitset.clear t.unprocessed_unit_clauses clause_idx;
-       let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
-       let literal = Clause.unit_literal clause ~assignments:t.assignments in
+      let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
+      let literal =
+        Clause.unit_literal
+          clause
+          ~assignments:t.assignments
+          ~assigned:t.assigned_vars
+      in
        (match%optional_u (literal : Literal.Option.t) with
         | None -> try_unit_propagate ()
         | Some literal ->
@@ -774,6 +793,7 @@ let create ?(debug = false) () =
   ; decision_level = #0L
   ; iterations = 0
   ; assignments = Tf_pair.create (fun (_ : bool) -> Bitset.create ())
+  ; assigned_vars = Bitset.create ()
   ; trail = Trail_entry.Vec.create ()
   ; clauses = Clause.Pool.create ~chunk_size:4096 ()
   ; unprocessed_unit_clauses = Bitset.create ()
