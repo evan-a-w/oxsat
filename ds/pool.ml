@@ -171,7 +171,7 @@ struct
     }
   ;;
 
-  let chunk_bits t = 63 - Int.clz t.chunk_size
+  let chunk_bits t = Int.floor_log2 t.chunk_size
 
   module Ptr_helpers = struct
     let chunk t ptr = Ptr.Private.chunk ~chunk_bits:(chunk_bits t) ptr
