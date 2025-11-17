@@ -390,7 +390,6 @@ let push_clause
    } as t)
   ~clause
   =
-  if Clause.is_tautology clause then Ptr.Option.none () else
   let ptr = Clause.Pool.alloc clauses in
   Clause.Pool.set clauses ptr clause;
   (* bookkeeping for vars *)
@@ -403,7 +402,7 @@ let push_clause
     Bitset.set clauses_for_lit (Ptr.to_int ptr));
   F64.Option.Vec.push clause_scores (F64.Option.some (Adjusting_score.unit clause_adjusting_score));
   populate_watched_literals_for_new_clause t ~ptr;
-  Ptr.Option.some ptr
+  ptr
 ;;
 
 let free_clause
@@ -564,9 +563,8 @@ let backtrack t ~failed_clause =
   remove_greater_than_decision_level
     t
     ~decision_level:(second_highest_decision_level t ~clause:learned_clause);
-  match%optional_u (push_clause t ~clause:learned_clause : Ptr.Option.t) with
-  | None -> ()
-  | Some ptr -> Bitset.set t.learned_clauses (Ptr.to_int ptr)
+  let ptr = push_clause t ~clause:learned_clause in
+  Bitset.set t.learned_clauses (Ptr.to_int ptr)
 ;;
 
 let%template make_decision t : _ @ m =
