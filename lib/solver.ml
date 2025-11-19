@@ -91,25 +91,32 @@ let assignment t ~var = exclave_
 
 let add_clause_activity t ~clause_idx =
   let inc = t.clause_adjusting_score.#inc in
-  let to_set = match%optional_u (F64.Option.Vec.get t.clause_scores clause_idx : F64.Option.t) with
-  | None -> inc
-  | Some x -> F64.O.(inc + x)
+  let to_set =
+    match%optional_u
+      (F64.Option.Vec.get t.clause_scores clause_idx : F64.Option.t)
+    with
+    | None -> inc
+    | Some x -> F64.O.(inc + x)
   in
   F64.Option.Vec.set t.clause_scores clause_idx (F64.Option.some to_set);
-  exclave_
-  F64.O.(to_set > t.clause_adjusting_score.#rescale)
+  exclave_ F64.O.(to_set > t.clause_adjusting_score.#rescale)
 ;;
 
 let rescale_clause_activities t =
   F64.Option.Vec.iteri t.clause_scores ~f:(fun i score ->
-      match%optional_u.F64.Option score with
-      | None -> ()
-      | Some score ->
-        F64.Option.Vec.set t.clause_scores i F64.O.(score / t.clause_adjusting_score.#rescale |> F64.Option.some));
+    match%optional_u.F64.Option score with
+    | None -> ()
+    | Some score ->
+      F64.Option.Vec.set
+        t.clause_scores
+        i
+        F64.O.(score / t.clause_adjusting_score.#rescale |> F64.Option.some));
   t.clause_adjusting_score <- Adjusting_score.rescale t.clause_adjusting_score
+;;
 
-
-let decay_clause_activities t = t.clause_adjusting_score <- Adjusting_score.decay t.clause_adjusting_score
+let decay_clause_activities t =
+  t.clause_adjusting_score <- Adjusting_score.decay t.clause_adjusting_score
+;;
 
 let learn_clause_from_failure ~failed_clause t =
   let learned = Clause.copy failed_clause in
@@ -143,7 +150,7 @@ let learn_clause_from_failure ~failed_clause t =
       failwith "found decision walking back from conflict"
     | #(false, T #(Clause_idx, clause_idx, _)) ->
       Vsids.add_activity t.vsids ~literal:trail_entry.#literal;
-      Local_ref.O.(rescale  := !rescale || add_clause_activity t ~clause_idx);
+      Local_ref.O.(rescale := !rescale || add_clause_activity t ~clause_idx);
       let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
       if t.debug
       then
@@ -157,10 +164,10 @@ let learn_clause_from_failure ~failed_clause t =
       Clause.iter_literals clause ~f:(fun literal ->
         let var = Literal.var literal in
         if Literal.equal literal trail_entry.#literal
-        then (decr num_at_level)
+        then decr num_at_level
         else if Clause.contains_literal learned ~literal
         then ()
-        else begin
+        else (
           match%optional_u
             (I64.Option.Vec.get t.trail_entry_idx_by_var var : I64.Option.t)
           with
@@ -170,8 +177,7 @@ let learn_clause_from_failure ~failed_clause t =
               Trail_entry.Vec.get t.trail (I64.to_int_trunc idx)
             in
             if I64.O.(trail_entry'.#decision_level = t.decision_level)
-            then incr num_at_level
-        end);
+            then incr num_at_level));
       if t.debug
       then
         print_s
@@ -400,7 +406,9 @@ let push_clause
       Vec.Value.get (Tf_pair.get clauses_by_literal (Literal.value literal)) var
     in
     Bitset.set clauses_for_lit (Ptr.to_int ptr));
-  F64.Option.Vec.push clause_scores (F64.Option.some (Adjusting_score.unit clause_adjusting_score));
+  F64.Option.Vec.push
+    clause_scores
+    (F64.Option.some (Adjusting_score.unit clause_adjusting_score));
   populate_watched_literals_for_new_clause t ~ptr;
   ptr
 ;;
@@ -466,8 +474,9 @@ let add_to_trail t ~(trail_entry : Trail_entry.t) =
             (Tf_pair.get t.assignments false)
             (Literal.var trail_entry.#literal)));
   (match trail_entry.#reason with
-  | T #(Decision, _, _) -> ()
-  | T #(Clause_idx, clause_ptr, _) -> Bitset.set t.clauses_with_active_unit clause_ptr);
+   | T #(Decision, _, _) -> ()
+   | T #(Clause_idx, clause_ptr, _) ->
+     Bitset.set t.clauses_with_active_unit clause_ptr);
   Bitset.set
     (Tf_pair.get t.assignments (Literal.value trail_entry.#literal))
     (Literal.var trail_entry.#literal);
@@ -493,8 +502,9 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
       (Tf_pair.get t.assignments (Literal.value trail_entry.#literal))
       (Literal.var trail_entry.#literal));
   (match trail_entry.#reason with
-  | T #(Decision, _, _) -> ()
-  | T #(Clause_idx, clause_ptr, _) -> Bitset.clear t.clauses_with_active_unit clause_ptr);
+   | T #(Decision, _, _) -> ()
+   | T #(Clause_idx, clause_ptr, _) ->
+     Bitset.clear t.clauses_with_active_unit clause_ptr);
   Vsids.add_to_pool t.vsids ~var:(Literal.var trail_entry.#literal);
   Bitset.clear
     (Tf_pair.get t.assignments (Literal.value trail_entry.#literal))
@@ -504,7 +514,6 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
     (Literal.var trail_entry.#literal)
     (I64.Option.none ())
 ;;
-
 
 let rec remove_greater_than_decision_level t ~decision_level =
   let remaining_level =
@@ -611,54 +620,61 @@ let%template check_sat_result t ~(sat_result : _ @ m) : _ @ m =
   match (sat_result : Sat_result.t) with
   | Unsat _ -> sat_result
   | Sat _ ->
-    if t.debug then
-    (Clause.Pool.iter t.clauses ~f:(fun ptr ->
-      let clause = Clause.Pool.get t.clauses ptr in
-      assert (Clause.is_satisfied clause ~assignments:t.assignments)));
+    if t.debug
+    then
+      Clause.Pool.iter t.clauses ~f:(fun ptr ->
+        let clause = Clause.Pool.get t.clauses ptr in
+        assert (Clause.is_satisfied clause ~assignments:t.assignments));
     sat_result
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
 let%template can_trim_clause t ~clause_idx =
   let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
-  let literals = (Clause.literals_list[@alloc stack]) clause in
+  let literals = (Clause.literals_list [@alloc stack]) clause in
   let enough_literals =
     match literals with
-    | [] | [_ ] | [ _; _ ] | [ _ ; _ ; _ ] -> false
+    | [] | [ _ ] | [ _; _ ] | [ _; _; _ ] -> false
     | _ -> true
   in
-  let rec enough_lbd (local_ distinct_decision_levels) remaining_literals =
-    exclave_
-      match remaining_literals with
-      | [] -> List.length_local distinct_decision_levels >= 4
-      | literal :: remaining_literals ->
-        match%optional_u.I64.Option I64.Option.Vec.get t.trail_entry_idx_by_var (Int.abs literal) with
-        | None -> enough_lbd distinct_decision_levels remaining_literals
-        | Some idx ->
-          let dl = (Trail_entry.Vec.get t.trail (I64.to_int_trunc idx)).#decision_level in
-          match List.find_local
-                  distinct_decision_levels
-                  ~f:(fun dl' -> exclave_ if I64.(dl = of_int dl') then Some () else None)
+  let rec enough_lbd (local_ distinct_decision_levels) remaining_literals
+    = exclave_
+    match remaining_literals with
+    | [] -> List.length_local distinct_decision_levels >= 4
+    | literal :: remaining_literals ->
+      (match%optional_u.I64.Option
+         I64.Option.Vec.get t.trail_entry_idx_by_var (Int.abs literal)
+       with
+       | None -> enough_lbd distinct_decision_levels remaining_literals
+       | Some idx ->
+         let dl =
+           (Trail_entry.Vec.get t.trail (I64.to_int_trunc idx)).#decision_level
+         in
+         (match
+            List.find_local distinct_decision_levels ~f:(fun dl' -> exclave_
+              if I64.(dl = of_int dl') then Some () else None)
           with
           | Some () -> enough_lbd distinct_decision_levels remaining_literals
           | None ->
-            let distinct_decision_levels = (I64.to_int_trunc dl) :: distinct_decision_levels in
-            if List.length_local distinct_decision_levels >= 4 then
-              true
-            else
-              enough_lbd distinct_decision_levels remaining_literals
+            let distinct_decision_levels =
+              I64.to_int_trunc dl :: distinct_decision_levels
+            in
+            if List.length_local distinct_decision_levels >= 4
+            then true
+            else enough_lbd distinct_decision_levels remaining_literals))
   in
   let enough_lbd = enough_lbd [] literals in
-  not (Bitset.get t.clauses_with_active_unit clause_idx)
-    && enough_literals
-    && enough_lbd
+  (not (Bitset.get t.clauses_with_active_unit clause_idx))
+  && enough_literals
+  && enough_lbd
+;;
 
 let simplify_clauses t =
   Vec.Value.clear t.clause_sorting_buckets;
   Clause.Pool.iter t.clauses ~f:(fun ptr ->
     let clause_idx = Ptr.to_int ptr in
     if Bitset.get t.learned_clauses clause_idx
-       && not (Bitset.get t.clauses_with_active_unit clause_idx)
+       && (not (Bitset.get t.clauses_with_active_unit clause_idx))
        && can_trim_clause t ~clause_idx
     then Vec.Value.push t.clause_sorting_buckets clause_idx);
   let compare_by_score a b =
@@ -670,18 +686,18 @@ let simplify_clauses t =
   let num_to_drop = Vec.Value.length t.clause_sorting_buckets / 2 in
   for i = 0 to num_to_drop - 1 do
     let clause_idx = Vec.Value.get t.clause_sorting_buckets i in
-    if t.debug then begin
+    if t.debug
+    then (
       let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
-      print_s [%message
-        "Deleting clause"
-          (clause_idx : int)
-          ~clause:(Clause.to_int_array clause : int array)]
-    end;
+      print_s
+        [%message
+          "Deleting clause"
+            (clause_idx : int)
+            ~clause:(Clause.to_int_array clause : int array)]);
     free_clause t (Ptr.of_int clause_idx);
     Bitset.clear t.learned_clauses clause_idx
   done
 ;;
-
 
 let%template rec solve' t : Sat_result.t @ m =
   (t.iterations <- t.iterations + 1;
@@ -737,9 +753,7 @@ let%template rec solve' t : Sat_result.t @ m =
      in
      let learned_clause =
        (* raise when it's conflicts from a unit clause we deduced. *)
-       try
-         learn_clause_from_failure t ~failed_clause
-       with
+       try learn_clause_from_failure t ~failed_clause with
        | _ -> Clause.copy failed_clause
      in
      Unsat { unsat_core = learned_clause }
@@ -759,13 +773,13 @@ let%template rec solve' t : Sat_result.t @ m =
 ;;
 
 let%template solve t : Sat_result.t @ m =
-  if t.iterations > 0 then (
+  if t.iterations > 0
+  then (
     t.iterations <- 0;
     restart t);
   if t.has_empty_clause
   then Unsat { unsat_core = Clause.of_int_array [||] }
-  else (solve' [@alloc a]) t
-  [@exclave_if_stack a]
+  else (solve' [@alloc a]) t [@exclave_if_stack a]
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
@@ -797,6 +811,6 @@ let create ?(debug = false) () =
 let add_clause t ~clause =
   ignore (push_clause t ~clause);
   t
-
+;;
 
 let add_clause' t ~clause = add_clause t ~clause:(Clause.of_int_array clause)

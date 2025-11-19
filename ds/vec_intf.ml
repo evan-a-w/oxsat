@@ -78,7 +78,7 @@ module type S_value = sig
   type 'a t [@@deriving sexp]
 
   val create : ?capacity:int -> unit -> 'a t
-  val length : 'a t -> int
+  val length : 'a t @ local -> int
   val get : 'a t -> int -> 'a
   val get_opt : 'a t -> int -> 'a option
   val set : 'a t -> int -> 'a -> unit

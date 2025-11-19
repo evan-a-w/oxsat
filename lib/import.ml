@@ -5,6 +5,7 @@ include struct
   module Bitset = Bitset
   module Vec = Vec
   module Pool = Pool
+  module Pool_intf = Pool_intf
   module Ptr = Ptr
   module Rb = Rb
 end
@@ -74,7 +75,6 @@ module List : sig
     -> 'b option @ local
 
   val iter_local : 'a list @ local -> f:('a @ local -> unit) @ local -> unit
-
   val length_local : 'a list @ local -> int
 end = struct
   include List
@@ -86,6 +86,7 @@ end = struct
       | _ :: rest -> go (acc + 1) rest
     in
     go 0 l
+  ;;
 
   let partition_tf_local t ~f = exclave_
     let rec go l r rest =
@@ -120,5 +121,26 @@ end = struct
     | x :: xs ->
       f x;
       iter_local xs ~f
+  ;;
+end
+
+module Array : sig
+  include module type of Array
+
+  val%template fold_local
+    :  'a t @ local
+    -> init:('acc : k) @ local
+    -> f:(('acc : k) @ local -> 'a @ local -> ('acc : k) @ local) @ local
+    -> ('acc : k) @ local
+  [@@kind k = (value, bits64, bits64 & bits64)]
+end = struct
+  include Array
+
+  let%template[@kind k = (value, bits64, bits64 & bits64)] fold_local t ~init ~f
+    = exclave_
+    let rec go (acc : (_ : k)) i = exclave_
+      if length t = i then acc else go (f acc t.(i)) (i + 1)
+    in
+    go init 0
   ;;
 end

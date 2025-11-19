@@ -4,7 +4,8 @@ open! Unboxed
 module type%template
   [@kind
     k
-    = ( bits64
+    = ( value
+      , bits64
       , bits64 & bits64
       , bits64 & bits64 & bits64
       , value & value & value & value & value & value
@@ -47,7 +48,8 @@ end
 module type%template
   [@kind
     k
-    = ( bits64
+    = ( value
+      , bits64
       , value & value
       , bits64 & bits64
       , bits64 & bits64 & bits64
@@ -173,7 +175,8 @@ module type Pool = sig
   module%template
     [@kind
       k
-      = ( bits64
+      = ( value
+        , bits64
         , value & value
         , bits64 & bits64
         , bits64 & bits64 & bits64

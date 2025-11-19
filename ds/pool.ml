@@ -5,7 +5,8 @@ open Pool_intf
 module type%template
   [@kind
     k
-    = ( bits64
+    = ( value
+      , bits64
       , value & value
       , bits64 & bits64
       , bits64 & bits64 & bits64
@@ -39,7 +40,8 @@ module type%template
 module%template
   [@kind
     k
-    = ( bits64
+    = ( value
+      , bits64
       , value & value
       , bits64 & bits64
       , bits64 & bits64 & bits64

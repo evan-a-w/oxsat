@@ -1,13 +1,13 @@
 open! Core
 open! Import
 
-(** QuickCheck generators for SAT problem instances of various shapes.
-    These generators are designed to test SAT solvers effectively. *)
+(** QuickCheck generators for SAT problem instances of various shapes. These
+    generators are designed to test SAT solvers effectively. *)
 
 (** Generate a random k-SAT instance with uniform random clause generation.
 
-    This is the simplest generator - randomly select k variables for each clause,
-    randomly negate each literal with probability 0.5.
+    This is the simplest generator - randomly select k variables for each
+    clause, randomly negate each literal with probability 0.5.
 
     @param num_vars Number of variables in the problem
     @param num_clauses Number of clauses to generate
@@ -20,8 +20,7 @@ let uniform_random_k_sat ~num_vars ~num_clauses ~k =
       let vars = ref [] in
       while List.length !vars < k do
         let var = 1 + Splittable_random.int random ~lo:0 ~hi:(num_vars - 1) in
-        if not (List.mem !vars var ~equal:Int.equal)
-        then vars := var :: !vars
+        if not (List.mem !vars var ~equal:Int.equal) then vars := var :: !vars
       done;
       (* Randomly negate literals *)
       Array.of_list_map !vars ~f:(fun var ->
@@ -30,8 +29,8 @@ let uniform_random_k_sat ~num_vars ~num_clauses ~k =
 
 (** Generate a k-SAT instance with a fixed clause-to-variable ratio.
 
-    The phase transition for 3-SAT occurs around ratio 4.26. Instances near
-    this ratio are typically the hardest to solve.
+    The phase transition for 3-SAT occurs around ratio 4.26. Instances near this
+    ratio are typically the hardest to solve.
 
     @param num_vars Number of variables in the problem
     @param ratio Clause-to-variable ratio (e.g., 4.3 for near-critical 3-SAT)
@@ -45,13 +44,15 @@ let fixed_ratio_k_sat ~num_vars ~ratio ~k =
 (** Generate a SAT instance with a planted solution.
 
     This starts with a satisfying assignment and generates clauses that are
-    satisfied by it. Guarantees the instance is satisfiable. The difficulty
-    can be controlled by the number of satisfied literals per clause.
+    satisfied by it. Guarantees the instance is satisfiable. The difficulty can
+    be controlled by the number of satisfied literals per clause.
 
     @param num_vars Number of variables
     @param num_clauses Number of clauses to generate
     @param k Clause length
-    @param min_satisfied Minimum number of literals in each clause satisfied by the planted solution
+    @param min_satisfied
+      Minimum number of literals in each clause satisfied by the planted
+      solution
     @return Tuple of (clauses, planted solution as bool array) *)
 let planted_solution ~num_vars ~num_clauses ~k ~min_satisfied =
   Quickcheck.Generator.create (fun ~size:_ ~random ->
@@ -65,12 +66,14 @@ let planted_solution ~num_vars ~num_clauses ~k ~min_satisfied =
         let vars = ref [] in
         while List.length !vars < k do
           let var = Splittable_random.int random ~lo:0 ~hi:(num_vars - 1) in
-          if not (List.mem !vars var ~equal:Int.equal)
-          then vars := var :: !vars
+          if not (List.mem !vars var ~equal:Int.equal) then vars := var :: !vars
         done;
         (* Ensure at least min_satisfied literals are satisfied *)
         let clause_vars = Array.of_list !vars in
-        let state = Random.State.make [| Splittable_random.int random ~lo:0 ~hi:Int.max_value |] in
+        let state =
+          Random.State.make
+            [| Splittable_random.int random ~lo:0 ~hi:Int.max_value |]
+        in
         Array.permute ~random_state:state clause_vars;
         Array.mapi clause_vars ~f:(fun i var ->
           let lit_value =
@@ -85,10 +88,12 @@ let planted_solution ~num_vars ~num_clauses ~k ~min_satisfied =
     clauses, solution)
 ;;
 
-(** Generate a scale-free SAT instance where variable frequencies follow a power law.
+(** Generate a scale-free SAT instance where variable frequencies follow a power
+    law.
 
-    This models real-world SAT instances where some variables appear very frequently
-    and most appear rarely. More realistic than uniform random generation.
+    This models real-world SAT instances where some variables appear very
+    frequently and most appear rarely. More realistic than uniform random
+    generation.
 
     @param num_vars Number of variables
     @param num_clauses Number of clauses
@@ -99,30 +104,24 @@ let scale_free_k_sat ~num_vars ~num_clauses ~k ~alpha =
   Quickcheck.Generator.create (fun ~size:_ ~random ->
     (* Build a power-law distribution for variable selection *)
     let weights =
-      Array.init num_vars ~f:(fun i ->
-        1.0 /. (Float.of_int (i + 1) ** alpha))
+      Array.init num_vars ~f:(fun i -> 1.0 /. (Float.of_int (i + 1) ** alpha))
     in
     let total_weight = Array.fold weights ~init:0.0 ~f:Float.( + ) in
     let normalized_weights =
       Array.map weights ~f:(fun w -> w /. total_weight)
     in
-
     (* Cumulative distribution for sampling *)
     let cumulative =
       Array.folding_map normalized_weights ~init:0.0 ~f:(fun acc w ->
         let new_acc = acc +. w in
         new_acc, new_acc)
     in
-
     let sample_var () =
       let r = Splittable_random.float random ~lo:0.0 ~hi:1.0 in
-      match
-        Array.findi cumulative ~f:(fun _ cumul -> Float.(cumul >= r))
-      with
+      match Array.findi cumulative ~f:(fun _ cumul -> Float.(cumul >= r)) with
       | Some (i, _) -> i + 1
       | None -> num_vars
     in
-
     Array.init num_clauses ~f:(fun _ ->
       (* Generate k distinct variables using power-law distribution *)
       let vars = Hash_set.create (module Int) in
@@ -137,8 +136,8 @@ let scale_free_k_sat ~num_vars ~num_clauses ~k ~alpha =
 
 (** Generate a random k-CNF instance (variable clause lengths between 1 and k).
 
-    Unlike k-SAT where all clauses have exactly k literals, this allows
-    clauses of varying lengths up to k.
+    Unlike k-SAT where all clauses have exactly k literals, this allows clauses
+    of varying lengths up to k.
 
     @param num_vars Number of variables
     @param num_clauses Number of clauses
@@ -151,8 +150,7 @@ let random_k_cnf ~num_vars ~num_clauses ~max_k =
       let vars = ref [] in
       while List.length !vars < clause_len do
         let var = 1 + Splittable_random.int random ~lo:0 ~hi:(num_vars - 1) in
-        if not (List.mem !vars var ~equal:Int.equal)
-        then vars := var :: !vars
+        if not (List.mem !vars var ~equal:Int.equal) then vars := var :: !vars
       done;
       Array.of_list_map !vars ~f:(fun var ->
         if Splittable_random.bool random then var else -var)))
@@ -160,8 +158,8 @@ let random_k_cnf ~num_vars ~num_clauses ~max_k =
 
 (** Generate a SAT instance with forced backbone variables.
 
-    Some variables are forced to have specific values in any solution.
-    This creates harder instances with a constrained solution space.
+    Some variables are forced to have specific values in any solution. This
+    creates harder instances with a constrained solution space.
 
     @param num_vars Number of variables
     @param num_clauses Number of clauses
@@ -172,23 +170,21 @@ let forced_backbone ~num_vars ~num_clauses ~k ~backbone_size =
   Quickcheck.Generator.create (fun ~size:_ ~random ->
     (* Select backbone variables and their forced values *)
     let backbone_vars =
-      List.init backbone_size ~f:(fun _ -> 1 + Splittable_random.int random ~lo:0 ~hi:(num_vars - 1))
+      List.init backbone_size ~f:(fun _ ->
+        1 + Splittable_random.int random ~lo:0 ~hi:(num_vars - 1))
       |> List.dedup_and_sort ~compare:Int.compare
     in
     let backbone =
       List.map backbone_vars ~f:(fun var -> var, Splittable_random.bool random)
     in
-
     (* Generate clauses, ensuring backbone constraints are satisfied *)
     let clauses =
       Array.init num_clauses ~f:(fun _ ->
         let vars = ref [] in
         while List.length !vars < k do
           let var = 1 + Splittable_random.int random ~lo:0 ~hi:(num_vars - 1) in
-          if not (List.mem !vars var ~equal:Int.equal)
-          then vars := var :: !vars
+          if not (List.mem !vars var ~equal:Int.equal) then vars := var :: !vars
         done;
-
         Array.of_list_map !vars ~f:(fun var ->
           match List.Assoc.find backbone ~equal:Int.equal var with
           | Some value ->
@@ -198,32 +194,28 @@ let forced_backbone ~num_vars ~num_clauses ~k ~backbone_size =
             (* Not a backbone variable - choose randomly *)
             if Splittable_random.bool random then var else -var))
     in
-
     (* Add unit clauses to force the backbone *)
     let backbone_clauses =
       Array.of_list_map backbone ~f:(fun (var, value) ->
-        [| if value then var else -var |])
+        [| (if value then var else -var) |])
     in
-
     Array.append backbone_clauses clauses, backbone)
 ;;
 
 (** Generate hard 3-SAT instances near the phase transition.
 
-    This is a convenience function that generates 3-SAT instances with
-    ratio 4.26, which is near the phase transition and typically produces
-    the hardest instances.
+    This is a convenience function that generates 3-SAT instances with ratio
+    4.26, which is near the phase transition and typically produces the hardest
+    instances.
 
     @param num_vars Number of variables
     @return Array of clauses *)
-let hard_3_sat ~num_vars =
-  fixed_ratio_k_sat ~num_vars ~ratio:4.26 ~k:3
-;;
+let hard_3_sat ~num_vars = fixed_ratio_k_sat ~num_vars ~ratio:4.26 ~k:3
 
 (** Generate an easy planted 3-SAT instance.
 
-    Guaranteed satisfiable with at least 2 out of 3 literals satisfied
-    in each clause. This makes it easier to find a solution.
+    Guaranteed satisfiable with at least 2 out of 3 literals satisfied in each
+    clause. This makes it easier to find a solution.
 
     @param num_vars Number of variables
     @param num_clauses Number of clauses

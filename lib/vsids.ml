@@ -73,21 +73,36 @@ let rescale t =
       | Some score ->
         let new_score = F64.O.(score / t.adjusting_score.#rescale) in
         F64.Option.Vec.set score_by_var i (F64.Option.some new_score);
-        match Literal_with_score.Rb.mem t.literals_with_score #{ literal; score } with
-        | false -> ()
-        | true ->
-          Literal_with_score.Rb.remove t.literals_with_score #{ literal; score };
-          Literal_with_score.Rb.insert t.literals_with_score ~key:#{ literal; score = new_score } ~data:()));
+        (match
+           Literal_with_score.Rb.mem t.literals_with_score #{ literal; score }
+         with
+         | false -> ()
+         | true ->
+           Literal_with_score.Rb.remove
+             t.literals_with_score
+             #{ literal; score };
+           Literal_with_score.Rb.insert
+             t.literals_with_score
+             ~key:#{ literal; score = new_score }
+             ~data:())));
   t.adjusting_score <- Adjusting_score.rescale t.adjusting_score
+;;
 
 let add_activity t ~literal =
   let vec = Tf_pair.get t.score_by_literal (Literal.value literal) in
-  match%optional_u (F64.Option.Vec.get vec (Literal.var literal) : F64.Option.t) with
-  | None -> F64.Option.Vec.set vec (Literal.var literal) (Adjusting_score.unit t.adjusting_score |> F64.Option.some)
+  match%optional_u
+    (F64.Option.Vec.get vec (Literal.var literal) : F64.Option.t)
+  with
+  | None ->
+    F64.Option.Vec.set
+      vec
+      (Literal.var literal)
+      (Adjusting_score.unit t.adjusting_score |> F64.Option.some)
   | Some score ->
-    let new_score = F64.O.(score + (Adjusting_score.unit t.adjusting_score)) in
+    let new_score = F64.O.(score + Adjusting_score.unit t.adjusting_score) in
     F64.Option.Vec.set vec (Literal.var literal) (F64.Option.some new_score);
     if F64.O.(new_score > t.adjusting_score.#rescale) then rescale t
+;;
 
 let decay t = t.adjusting_score <- Adjusting_score.decay t.adjusting_score
 

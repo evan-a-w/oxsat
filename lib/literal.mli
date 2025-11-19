@@ -4,7 +4,6 @@ open! Import
 type t : bits64 mod external_ [@@deriving sexp]
 
 val equal : t -> t -> bool
-
 val create : var:int -> value:bool -> t
 val var : t @ local -> int
 val value : t @ local -> bool
