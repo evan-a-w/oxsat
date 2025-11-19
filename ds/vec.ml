@@ -510,79 +510,47 @@ module Value = struct
   ;;
 
   let sort_partitioned t ~a_len ~(local_ compare) =
-    let rec go stored_start stored a_i b_i left_in_a left_in_b =
-      if left_in_a = 0 && left_in_b = 0
-      then ()
-      else if left_in_a = 0
-      then (
-        let b = t.arr.(b_i) in
-        t.arr.(b_i) <- t.arr.(a_i);
-        t.arr.(a_i) <- b;
-        go
-          stored_start
-          (stored + 1)
-          (a_i + 1)
-          (b_i + 1)
-          left_in_a
-          (left_in_b - 1))
-      else (
-        let a =
-          if stored > 0 then t.arr.(stored_start + stored - 1) else t.arr.(a_i)
+    let total_len = length t in
+    let b_len = total_len - a_len in
+    if a_len <= 0 || b_len <= 0
+    then ()
+    else (
+      let wrap idx =
+        let offset = (idx - a_len) mod b_len in
+        a_len + offset
+      in
+      let advance idx =
+        let idx = idx + 1 in
+        if idx = total_len then a_len else idx
+      in
+      let queue_head = ref a_len in
+      let queue_size = ref b_len in
+      let pos = ref 0 in
+      while !pos < total_len do
+        let a_opt = if !pos < a_len then Some t.arr.(!pos) else None in
+        let take_from_queue =
+          if !queue_size = 0
+          then false
+          else (
+            match a_opt with
+            | None -> true
+            | Some a_val -> compare a_val t.arr.(!queue_head) > 0)
         in
-        if left_in_b = 0
+        if take_from_queue
         then (
-          t.arr.(a_i) <- a;
-          if stored > 0
-          then
-            go
-              (stored_start + 1)
-              (stored - 1)
-              (a_i + 1)
-              (b_i + 1)
-              (left_in_a - 1)
-              left_in_b
-          else
-            go
-              (stored_start + 1)
-              0
-              (a_i + 1)
-              (b_i + 1)
-              (left_in_a - 1)
-              left_in_b)
-        else (
-          let b = t.arr.(b_i) in
-          match Ordering.of_int (compare a b) with
-          | Greater ->
-            t.arr.(b_i) <- t.arr.(a_i);
-            t.arr.(a_i) <- b;
-            go
-              stored_start
-              (stored + 1)
-              (a_i + 1)
-              (b_i + 1)
-              left_in_a
-              (left_in_b - 1)
-          | Less | Equal ->
-            t.arr.(a_i) <- a;
-            if stored > 0
-            then
-              go
-                (stored_start + 1)
-                (stored - 1)
-                (a_i + 1)
-                (b_i + 1)
-                (left_in_a - 1)
-                left_in_b
-            else
-              go
-                (stored_start + 1)
-                0
-                (a_i + 1)
-                (b_i + 1)
-                (left_in_a - 1)
-                left_in_b))
-    in
-    go a_len 0 0 a_len a_len (length t - a_len) [@nontail]
+          let value = t.arr.(!queue_head) in
+          queue_head := advance !queue_head;
+          decr queue_size;
+          (match a_opt with
+           | None -> ()
+           | Some pending ->
+             let tail = wrap (!queue_head + !queue_size) in
+             t.arr.(tail) <- pending;
+             incr queue_size);
+          t.arr.(!pos) <- value)
+        else ();
+        incr pos
+      done)
   ;;
 
   let%expect_test "sort_partitioned" =
