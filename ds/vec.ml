@@ -8,7 +8,7 @@ module type%template
     = ( value
       , float64
       , value & value
-      , value & (value & value) [@ocamlformat "disable"]
+      , value & value & value
       , bits64
       , bits64 & bits64
       , immediate & value & value
@@ -26,7 +26,7 @@ module%template
       , float64
       , immediate & value & value
       , bits64 & bits64
-      , value & (value & value) [@ocamlformat "disable"]
+      , value & value & value
       , bits64 & bits64 & bits64
       , bits64 & bits64 & immediate & immediate & bits64
       , bits64 & bits64 & value & value & bits64
@@ -259,12 +259,21 @@ module Value = struct
     done
   ;;
 
-  let fold t ~init ~f =
+  let%template fold t ~init ~f =
     let r = ref init in
     for i = 0 to t.length - 1 do
       r := f !r t.arr.(i)
     done;
     !r
+  [@@mode global]
+  ;;
+
+  let%template fold t ~(local_ init) ~f = exclave_
+    let rec go acc i = exclave_
+      if i >= length t then acc else go (f acc (get t i)) (i + 1)
+    in
+    go init 0
+  [@@mode local]
   ;;
 
   let foldr t ~init ~f =
@@ -273,6 +282,10 @@ module Value = struct
       r := f !r t.arr.(i)
     done;
     !r
+  ;;
+
+  let copy t =
+    { arr = Array.sub t.arr ~pos:0 ~len:(length t); length = length t }
   ;;
 
   let fill_to_length t ~length ~f =
@@ -494,5 +507,59 @@ module Value = struct
       [%sexp
         (concat_map a ~f:(fun i -> List.init i ~f:Fn.id |> of_list) : int t)];
     [%expect {| (0 0 1 0 1 2 0 1 2 3 0 1 2 3 4) |}]
+  ;;
+
+  let binary_search t ~f ~which = exclave_
+    if t.length = 0
+    then None
+    else (
+      let accept, search_left =
+        match which with
+        | `First_equal -> (fun c -> c = 0), true
+        | `First_ge -> (fun c -> c >= 0), true
+        | `First_gt -> (fun c -> c > 0), true
+        | `Last_le -> (fun c -> c <= 0), false
+        | `Last_lt -> (fun c -> c < 0), false
+      in
+      let rec loop left right best = exclave_
+        if left > right
+        then best
+        else (
+          let mid = left + ((right - left) / 2) in
+          let c = f t.arr.(mid) in
+          if accept c
+          then
+            if search_left
+            then loop left (mid - 1) (Some t.arr.(mid))
+            else loop (mid + 1) right (Some t.arr.(mid))
+          else if search_left
+          then loop (mid + 1) right best
+          else loop left (mid - 1) best)
+      in
+      loop 0 (t.length - 1) None)
+  ;;
+
+  let%expect_test "binary_search" =
+    let t = of_list [ 1; 3; 3; 3; 5; 7; 9 ] in
+    let search target which =
+      [%globalize: int option]
+        (binary_search t ~f:(fun x -> Int.compare x target) ~which) [@nontail]
+    in
+    print_s [%sexp (search 3 `First_equal : int option)];
+    [%expect {| (3) |}];
+    print_s [%sexp (search 3 `First_ge : int option)];
+    [%expect {| (3) |}];
+    print_s [%sexp (search 3 `First_gt : int option)];
+    [%expect {| (5) |}];
+    print_s [%sexp (search 3 `Last_le : int option)];
+    [%expect {| (3) |}];
+    print_s [%sexp (search 3 `Last_lt : int option)];
+    [%expect {| (1) |}];
+    print_s [%sexp (search 4 `First_ge : int option)];
+    [%expect {| (5) |}];
+    print_s [%sexp (search 10 `First_ge : int option)];
+    [%expect {| () |}];
+    print_s [%sexp (search 0 `Last_le : int option)];
+    [%expect {| () |}]
   ;;
 end

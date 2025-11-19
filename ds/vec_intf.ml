@@ -24,8 +24,7 @@ module type%template [@kind k = (value & value)] Elt = sig
   val create_for_vec : unit -> t
 end
 
-module type%template
-  [@kind k = (value & (value & value) [@ocamlformat "disable"])] Elt = sig
+module type%template [@kind k = (value & value & value)] Elt = sig
   type t : value & (value & value)
 
   val create_for_vec : unit -> t
@@ -38,7 +37,7 @@ module type%template
       , float64
       , immediate & value & value
       , value & value
-      , value & (value & value) [@ocamlformat "disable"]
+      , value & value & value
       , bits64
       , bits64 & bits64
       , bits64 & bits64 & bits64
@@ -87,13 +86,29 @@ module type S_value = sig
   val iteri : 'a t -> f:(int -> 'a -> unit) @ local -> unit
   val iteri_rev : 'a t -> f:(int -> 'a -> unit) @ local -> unit
   val iter_rev : 'a t -> f:('a -> unit) @ local -> unit
-  val fold : 'a t -> init:'b -> f:('b -> 'a -> 'b) @ local -> 'b
+  val copy : 'a t -> 'a t
+
+  val%template fold
+    :  'a t
+    -> init:'b @ m
+    -> f:('b @ m -> 'a -> 'b @ m) @ local
+    -> 'b @ m
+  [@@mode m = (global, local)]
+
   val foldr : 'a t -> init:'b -> f:('b -> 'a -> 'b) @ local -> 'b
   val push : 'a t -> 'a -> unit
   val pop_exn : 'a t -> 'a
   val fill_to_length : 'a t -> length:int -> f:(int -> 'a) @ local -> unit
   val map : 'a t -> f:('a -> 'b) -> 'b t
   val sort : 'a t -> compare:('a -> 'a -> int) @ local -> unit
+
+  (** if the vec is currently [ a ; b ] where both [a] and [b] are sorted, sort
+      the whole array. [O(n)] *)
+  val sort_partitioned
+    :  'a t
+    -> a_len:int
+    -> compare:('a -> 'a -> int) @ local
+    -> unit
 
   val fold_map
     :  'a t
@@ -127,6 +142,12 @@ module type S_value = sig
   val reverse : 'a t -> 'a t
   val reverse_inplace : 'a t -> unit
   val zip_exn : 'a t -> 'b t -> ('a * 'b) t
+
+  val binary_search
+    :  'a t
+    -> f:('a -> int) @ local
+    -> which:[ `First_equal | `First_gt | `Last_lt | `Last_le | `First_ge ]
+    -> 'a option @ local
 end
 
 module type Vec = sig
@@ -139,7 +160,7 @@ module type Vec = sig
         , bits64
         , bits64 & bits64
         , immediate & value & value
-        , value & (value & value) [@ocamlformat "disable"]
+        , value & value & value
         , bits64 & bits64 & bits64
         , bits64 & bits64 & immediate & immediate & bits64
         , bits64 & bits64 & value & value & bits64
@@ -153,7 +174,7 @@ module type Vec = sig
         , value & value
         , bits64
         , bits64 & bits64
-        , value & (value & value) [@ocamlformat "disable"]
+        , value & value & value
         , immediate & value & value
         , bits64 & bits64 & bits64
         , bits64 & bits64 & immediate & immediate & bits64

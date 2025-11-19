@@ -4,8 +4,7 @@ open! Unboxed
 module type%template
   [@kind
     k
-    = ( value
-      , bits64
+    = ( bits64
       , bits64 & bits64
       , bits64 & bits64 & bits64
       , value & value & value & value & value & value
@@ -39,7 +38,7 @@ module type%template
 end
 
 (* not external *)
-module type%template [@kind k = (value & value)] Elt = sig
+module type%template [@kind k = (value, value & value)] Elt = sig
   type t : k
 
   val create_for_pool : unit -> t

@@ -3,16 +3,17 @@ open! Import
 
 module T = struct
   type t = int Vec.Value.t
+
+  let create_for_pool () = Vec.Value.create ()
 end
 
 module Pool = Pool.Make [@kind value] (T)
 include T
 
-let copy t = Array.copy t
+let copy t = Vec.Value.copy t
 
 let is_tautology t =
   let open Local_ref.O in
-  Vec.Value.sort t ~compare:(fun a b -> Int.compare (Int.abs a) (Int.abs b));
   let seen_taut = Local_ref.create false in
   for i = 1 to Vec.Value.length t - 1 do
     if Vec.Value.get t i = -Vec.Value.get t (i - 1) then seen_taut := true
@@ -25,11 +26,8 @@ let is_satisfied t ~assignments =
     acc || Bitset.get (Tf_pair.get assignments (literal > 0)) (Int.abs literal))
 ;;
 
-let iter_literals t ~(f : _ @ local) =
-  Tf_pair.iteri t ~f:(fun ~key:value ~data:bitset ->
-    Bitset.iter_set_bits bitset ~f:(fun var -> Literal.create ~var ~value |> f)
-    [@nontail])
-  [@nontail]
+let iter_literals t ~(local_ f) =
+  Vec.Value.iter t ~f:(fun x -> f (Literal.of_int x)) [@nontail]
 ;;
 
 let%template literals_list (t : t) : int list @ m =
@@ -58,18 +56,21 @@ let unit_literal t ~assignments =
   then Literal.Option.none ()
   else (
     let res =
-      Array.fold_local t ~init:(Ok None) ~f:(fun acc literal -> exclave_
-        match acc with
-        | Error _ -> acc
-        | Ok acc ->
-          if Bitset.get
-               (Tf_pair.get assignments (literal < 0))
-               (Int.abs literal)
-          then Ok acc
-          else (
-            match acc with
-            | None -> Ok (Some literal)
-            | Some _ -> Error ()))
+      (Vec.Value.fold [@mode local])
+        t
+        ~init:(Ok None)
+        ~f:(fun acc literal -> exclave_
+          match acc with
+          | Error _ -> acc
+          | Ok acc ->
+            if Bitset.get
+                 (Tf_pair.get assignments (literal < 0))
+                 (Int.abs literal)
+            then Ok acc
+            else (
+              match acc with
+              | None -> Ok (Some literal)
+              | Some _ -> Error ()))
     in
     match res with
     | Ok (Some literal) -> Literal.Option.some (Literal.of_int literal)
@@ -84,25 +85,40 @@ let value_exn t ~var =
   else failwith "not in clause"
 ;;
 
-let clear t = Tf_pair.iter t ~f:Bitset.clear_all
+let clear = Vec.Value.clear
 
 let can_resolve t ~other ~on_var =
-  let t_pos = Bitset.get t.#Tf_pair.t on_var in
-  let t_neg = Bitset.get t.#f on_var in
-  let other_pos = Bitset.get other.#Tf_pair.t on_var in
-  let other_neg = Bitset.get other.#f on_var in
-  (t_pos && other_neg) || (t_neg && other_pos)
+  let open Local_ref.O in
+  let t_v = Tf_pair.create_local (fun _ -> exclave_ Local_ref.create false) in
+  let other_v =
+    Tf_pair.create_local (fun _ -> exclave_ Local_ref.create false)
+  in
+  let update clause v = exclave_
+      iter_literals clause ~f:(fun lit ->
+      if Literal.var lit = on_var
+      then (
+        let r = (Tf_pair.get [@mode local]) v (Literal.value lit) in
+        (r := true) [@nontail]))
+  in
+  update t t_v;
+  update other other_v;
+  let try_ v =
+    !((Tf_pair.get [@mode local]) t_v v) && !((Tf_pair.get [@mode local]) t_v (not v)) [@nontail]
+  in
+  try_ true || try_ false [@nontail]
 ;;
 
-let of_int_array t = t
-
-let to_int_array t =
-  let v = Vec.Value.create () in
-  iter_literals t ~f:(fun literal -> Vec.Value.push v (Literal.to_int literal));
-  Vec.Value.to_array v
+let of_int_array arr =
+  let t = Vec.Value.create () in
+  Array.iter arr ~f:(fun x -> Vec.Value.push t x);
+  Vec.Value.sort t ~compare:(fun a b -> Int.compare (Int.abs a) (Int.abs b));
+  t
 ;;
+
+let to_int_array t = Vec.Value.to_array t
 
 let resolve_exn t ~other ~on_var =
+  let open Local_ref.O in
   if not (can_resolve t ~other ~on_var)
   then
     Error.raise_s
@@ -112,8 +128,11 @@ let resolve_exn t ~other ~on_var =
           ~t:(to_int_array t : int array)
           ~other:(to_int_array other : int array)]
   else (
-    Bitset.lor_inplace ~dest:t.#Tf_pair.t t.#t other.#Tf_pair.t;
-    Bitset.lor_inplace ~dest:t.#f t.#f other.#f;
-    Bitset.clear t.#t on_var;
-    Bitset.clear t.#f on_var)
+    let old_len = Vec.Value.length t in
+    Vec.Value.iter other ~f:(fun x ->
+      match Vec.Value.binary_search t ~f:(fun y -> Int.compare x y) ~which:`First_equal with
+      | Some _ -> ()
+      | None -> Vec.Value.push t x);
+    Vec.Value.filter_inplace t ~f:(fun x -> Int.abs x <> on_var);
+    Vec.Value.sort_partitioned t ~a_len:old_len ~compare:Int.compare)
 ;;

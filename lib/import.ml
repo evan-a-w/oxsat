@@ -6,6 +6,7 @@ include struct
   module Vec = Vec
   module Pool = Pool
   module Pool_intf = Pool_intf
+  module Local_ref = Local_ref
   module Ptr = Ptr
   module Rb = Rb
 end

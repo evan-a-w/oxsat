@@ -17,8 +17,8 @@ val contains_literal : t -> literal:Literal.t -> bool
 val value_exn : t -> var:int -> bool
 val can_resolve : t -> other:t -> on_var:int -> bool
 val resolve_exn : t -> other:t -> on_var:int -> unit
-val of_int_array : int array @ unique -> t
+val of_int_array : int array -> t
 val to_int_array : t -> int array
 val unit_literal : t -> assignments:Bitset.t Tf_pair.t -> Literal.Option.t
 
-module Pool : Pool.S [@kind value] with type Elt.t := t
+module Pool : Pool_intf.S [@kind value] with type Elt.t := t

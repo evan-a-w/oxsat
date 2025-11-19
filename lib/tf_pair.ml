@@ -5,9 +5,16 @@ type 'a t =
    ; f : 'a
    }
 
-let get t b = if b then t.#t else t.#f
+let%template get (t : _ @ m) (b : _ @ m) = if b then t.#t else t.#f
+[@@mode m = (local, global)]
+;;
+
 let set t b x = if b then #{ t with t = x } else #{ t with f = x }
 let create (f : _ @ local) = #{ t = f true; f = f false }
+
+let create_local (local_ (f : _ -> _ @ local)) = exclave_
+  #{ t = f true; f = f false }
+;;
 
 let iter t ~(f : _ @ local) =
   f t.#t;
