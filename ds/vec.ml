@@ -489,6 +489,42 @@ module Value = struct
 
   let sort t ~compare = Array.sort t.arr ~len:t.length ~compare
 
+  type 'a nonempty_list =
+    | Sole of 'a
+    | Cons of 'a * 'a nonempty_list
+
+  type 'a slot =
+    | Slot of int
+    | Overflow of 'a nonempty_list * int
+
+  let sort_partitioned t ~a_len ~compare =
+    let get_slot (slot : _ slot @ local) =
+      match slot with
+      | Slot i -> get t i
+      | Overflow ((Sole x | Cons (x, _)), _) -> x
+    in
+    let incr_slot ~len (slot : _ slot @ local) = exclave_
+      match slot with
+      | Slot i -> if i + 1 = len then None else Some (Slot (i + 1))
+      | Overflow (Sole _, i) ->
+        if i + 1 = len then None else Some (Slot (i + 1))
+      | Overflow (Cons (_, rest), i) -> Some (Overflow (rest, i))
+    in
+    let add_overflow (slot : _ slot @ local) x = exclave_
+      match slot with
+      | Slot i -> Overflow (Sole x, i)
+      | Overflow (l, i) -> Overflow (Cons (x, l), i)
+    in
+    let rec go i a b =
+      match Ordering.of_int (compare (get_slot a) (get_slot b)) with
+      | Less | Equal ->
+        t.arr.(i) <- get_slot a;
+        go (i + 1) (incr_slot a) b
+      | Greater -> 
+    in
+    go 0 a_len `Neither
+  ;;
+
   let reverse_inplace t =
     let end_ = ref (length t - 1) in
     let start = ref 0 in
@@ -507,6 +543,17 @@ module Value = struct
       [%sexp
         (concat_map a ~f:(fun i -> List.init i ~f:Fn.id |> of_list) : int t)];
     [%expect {| (0 0 1 0 1 2 0 1 2 3 0 1 2 3 4) |}]
+  ;;
+
+  let%expect_test "sort_partitioned" =
+    let t = of_list [ 1; 3; 5; 7; 2; 4; 6; 8 ] in
+    sort_partitioned t ~a_len:4 ~compare:Int.compare;
+    print_s [%sexp (to_list t : int list)];
+    [%expect {| (1 2 3 4 5 6 7 8) |}];
+    let t2 = of_list [ 1; 2; 3; 4; 5 ] in
+    sort_partitioned t2 ~a_len:2 ~compare:Int.compare;
+    print_s [%sexp (to_list t2 : int list)];
+    [%expect {| (1 2 3 4 5) |}]
   ;;
 
   let binary_search t ~f ~which = exclave_
