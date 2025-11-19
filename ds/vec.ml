@@ -489,42 +489,6 @@ module Value = struct
 
   let sort t ~compare = Array.sort t.arr ~len:t.length ~compare
 
-  type 'a nonempty_list =
-    | Sole of 'a
-    | Cons of 'a * 'a nonempty_list
-
-  type 'a slot =
-    | Slot of int
-    | Overflow of 'a nonempty_list * int
-
-  let sort_partitioned t ~a_len ~compare =
-    let get_slot (slot : _ slot @ local) =
-      match slot with
-      | Slot i -> get t i
-      | Overflow ((Sole x | Cons (x, _)), _) -> x
-    in
-    let incr_slot ~len (slot : _ slot @ local) = exclave_
-      match slot with
-      | Slot i -> if i + 1 = len then None else Some (Slot (i + 1))
-      | Overflow (Sole _, i) ->
-        if i + 1 = len then None else Some (Slot (i + 1))
-      | Overflow (Cons (_, rest), i) -> Some (Overflow (rest, i))
-    in
-    let add_overflow (slot : _ slot @ local) x = exclave_
-      match slot with
-      | Slot i -> Overflow (Sole x, i)
-      | Overflow (l, i) -> Overflow (Cons (x, l), i)
-    in
-    let rec go i a b =
-      match Ordering.of_int (compare (get_slot a) (get_slot b)) with
-      | Less | Equal ->
-        t.arr.(i) <- get_slot a;
-        go (i + 1) (incr_slot a) b
-      | Greater -> 
-    in
-    go 0 a_len `Neither
-  ;;
-
   let reverse_inplace t =
     let end_ = ref (length t - 1) in
     let start = ref 0 in
@@ -543,6 +507,82 @@ module Value = struct
       [%sexp
         (concat_map a ~f:(fun i -> List.init i ~f:Fn.id |> of_list) : int t)];
     [%expect {| (0 0 1 0 1 2 0 1 2 3 0 1 2 3 4) |}]
+  ;;
+
+  let sort_partitioned t ~a_len ~(local_ compare) =
+    let rec go stored_start stored a_i b_i left_in_a left_in_b =
+      if left_in_a = 0 && left_in_b = 0
+      then ()
+      else if left_in_a = 0
+      then (
+        let b = t.arr.(b_i) in
+        t.arr.(b_i) <- t.arr.(a_i);
+        t.arr.(a_i) <- b;
+        go
+          stored_start
+          (stored + 1)
+          (a_i + 1)
+          (b_i + 1)
+          left_in_a
+          (left_in_b - 1))
+      else (
+        let a =
+          if stored > 0 then t.arr.(stored_start + stored - 1) else t.arr.(a_i)
+        in
+        if left_in_b = 0
+        then (
+          t.arr.(a_i) <- a;
+          if stored > 0
+          then
+            go
+              (stored_start + 1)
+              (stored - 1)
+              (a_i + 1)
+              (b_i + 1)
+              (left_in_a - 1)
+              left_in_b
+          else
+            go
+              (stored_start + 1)
+              0
+              (a_i + 1)
+              (b_i + 1)
+              (left_in_a - 1)
+              left_in_b)
+        else (
+          let b = t.arr.(b_i) in
+          match Ordering.of_int (compare a b) with
+          | Greater ->
+            t.arr.(b_i) <- t.arr.(a_i);
+            t.arr.(a_i) <- b;
+            go
+              stored_start
+              (stored + 1)
+              (a_i + 1)
+              (b_i + 1)
+              left_in_a
+              (left_in_b - 1)
+          | Less | Equal ->
+            t.arr.(a_i) <- a;
+            if stored > 0
+            then
+              go
+                (stored_start + 1)
+                (stored - 1)
+                (a_i + 1)
+                (b_i + 1)
+                (left_in_a - 1)
+                left_in_b
+            else
+              go
+                (stored_start + 1)
+                0
+                (a_i + 1)
+                (b_i + 1)
+                (left_in_a - 1)
+                left_in_b))
+    in
+    go a_len 0 0 a_len a_len (length t - a_len) [@nontail]
   ;;
 
   let%expect_test "sort_partitioned" =
