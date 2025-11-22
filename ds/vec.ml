@@ -510,10 +510,10 @@ module Value = struct
   ;;
 
   let sort_partitioned t ~a_len ~(local_ compare) =
-    if length t = 0
+    let b_len = length t - a_len in
+    if length t = 0 || b_len <= 0
     then ()
     else (
-      let b_len = length t - a_len in
       let b = Array.create__stack ~len:b_len (get t 0) in
       Array.blit ~src:t.arr ~src_pos:a_len ~len:b_len ~dst:b ~dst_pos:0;
       let rec go i a_i b_i =

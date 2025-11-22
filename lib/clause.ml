@@ -47,8 +47,13 @@ let contains t ~var =
   !seen [@nontail]
 ;;
 
+let sort_compare a b = if Int.abs a = Int.abs b then Int.compare a b else Int.compare (Int.abs a) (Int.abs b)
+
 let contains_literal t ~literal =
-  Array.exists t ~f:(fun literal' -> literal = literal') [@nontail]
+  let literal = Literal.to_int literal in
+  match Vec.Value.binary_search t ~f:(fun literal' -> sort_compare literal' literal) ~which:`First_equal with
+  | None -> false
+  | Some _ -> true
 ;;
 
 let unit_literal t ~assignments =
@@ -77,14 +82,6 @@ let unit_literal t ~assignments =
     | Ok None | Error _ -> Literal.Option.none ())
 ;;
 
-let value_exn t ~var =
-  if Bitset.get t.#Tf_pair.t var
-  then true
-  else if Bitset.get t.#f var
-  then false
-  else failwith "not in clause"
-;;
-
 let clear = Vec.Value.clear
 
 let can_resolve t ~other ~on_var =
@@ -103,7 +100,7 @@ let can_resolve t ~other ~on_var =
   update t t_v;
   update other other_v;
   let try_ v =
-    !((Tf_pair.get [@mode local]) t_v v) && !((Tf_pair.get [@mode local]) t_v (not v)) [@nontail]
+    !((Tf_pair.get [@mode local]) t_v v) && !((Tf_pair.get [@mode local]) other_v (not v)) [@nontail]
   in
   try_ true || try_ false [@nontail]
 ;;
@@ -111,14 +108,14 @@ let can_resolve t ~other ~on_var =
 let of_int_array arr =
   let t = Vec.Value.create () in
   Array.iter arr ~f:(fun x -> Vec.Value.push t x);
-  Vec.Value.sort t ~compare:(fun a b -> Int.compare (Int.abs a) (Int.abs b));
+  Vec.Value.sort t ~compare:(fun a b ->
+      sort_compare (Int.abs a) (Int.abs b));
   t
 ;;
 
 let to_int_array t = Vec.Value.to_array t
 
 let resolve_exn t ~other ~on_var =
-  let open Local_ref.O in
   if not (can_resolve t ~other ~on_var)
   then
     Error.raise_s
@@ -130,9 +127,9 @@ let resolve_exn t ~other ~on_var =
   else (
     let old_len = Vec.Value.length t in
     Vec.Value.iter other ~f:(fun x ->
-      match Vec.Value.binary_search t ~f:(fun y -> Int.compare x y) ~which:`First_equal with
+      match Vec.Value.binary_search t ~f:(fun y -> sort_compare y x) ~which:`First_equal with
       | Some _ -> ()
       | None -> Vec.Value.push t x);
-    Vec.Value.filter_inplace t ~f:(fun x -> Int.abs x <> on_var);
-    Vec.Value.sort_partitioned t ~a_len:old_len ~compare:Int.compare)
+    Vec.Value.sort_partitioned t ~a_len:old_len ~compare:Int.compare;
+    Vec.Value.filter_inplace t ~f:(fun x -> Int.abs x <> on_var))
 ;;

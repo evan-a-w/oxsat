@@ -14,7 +14,6 @@ val%template literals_list : t -> int list @ m
 
 val contains : t -> var:int -> bool
 val contains_literal : t -> literal:Literal.t -> bool
-val value_exn : t -> var:int -> bool
 val can_resolve : t -> other:t -> on_var:int -> bool
 val resolve_exn : t -> other:t -> on_var:int -> unit
 val of_int_array : int array -> t
