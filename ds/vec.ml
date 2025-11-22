@@ -510,47 +510,32 @@ module Value = struct
   ;;
 
   let sort_partitioned t ~a_len ~(local_ compare) =
-    let total_len = length t in
-    let b_len = total_len - a_len in
-    if a_len <= 0 || b_len <= 0
+    if length t = 0
     then ()
     else (
-      let wrap idx =
-        let offset = (idx - a_len) mod b_len in
-        a_len + offset
-      in
-      let advance idx =
-        let idx = idx + 1 in
-        if idx = total_len then a_len else idx
-      in
-      let queue_head = ref a_len in
-      let queue_size = ref b_len in
-      let pos = ref 0 in
-      while !pos < total_len do
-        let a_opt = if !pos < a_len then Some t.arr.(!pos) else None in
-        let take_from_queue =
-          if !queue_size = 0
-          then false
-          else (
-            match a_opt with
-            | None -> true
-            | Some a_val -> compare a_val t.arr.(!queue_head) > 0)
-        in
-        if take_from_queue
+      let b_len = length t - a_len in
+      let b = Array.create__stack ~len:b_len (get t 0) in
+      Array.blit ~src:t.arr ~src_pos:a_len ~len:b_len ~dst:b ~dst_pos:0;
+      let rec go i a_i b_i =
+        if i < 0
+        then ()
+        else if b_i < 0
         then (
-          let value = t.arr.(!queue_head) in
-          queue_head := advance !queue_head;
-          decr queue_size;
-          (match a_opt with
-           | None -> ()
-           | Some pending ->
-             let tail = wrap (!queue_head + !queue_size) in
-             t.arr.(tail) <- pending;
-             incr queue_size);
-          t.arr.(!pos) <- value)
-        else ();
-        incr pos
-      done)
+          t.arr.(i) <- t.arr.(a_i);
+          go (i - 1) (a_i - 1) b_i)
+        else if a_i < 0
+        then (
+          t.arr.(i) <- b.(b_i);
+          go (i - 1) a_i (b_i - 1))
+        else if compare t.arr.(a_i) b.(b_i) < 0
+        then (
+          t.arr.(i) <- b.(b_i);
+          go (i - 1) a_i (b_i - 1))
+        else (
+          t.arr.(i) <- t.arr.(a_i);
+          go (i - 1) (a_i - 1) b_i)
+      in
+      go (length t - 1) (a_len - 1) (b_len - 1) [@nontail])
   ;;
 
   let%expect_test "sort_partitioned" =
