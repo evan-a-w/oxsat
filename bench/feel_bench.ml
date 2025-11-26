@@ -1,6 +1,6 @@
 open! Core
 
-let run_examples () =
+let run_examples ?min_iterations ?max_iterations ?sample_runs () =
   print_endline "=== Simple Benchmark Examples ===\n";
   (* Example 1: Single function benchmark *)
   print_endline "Benchmark: List.range allocation";
@@ -13,8 +13,10 @@ let run_examples () =
   print_endline "Multiple benchmarks with custom config:";
   let config =
     Benchmark.Config.create
+      ?min_iterations
+      ?max_iterations
+      ~sample_runs:(Option.value sample_runs ~default:50)
       ~warmup_runs:2
-      ~sample_runs:50
       ~target_time_ns:50_000_000
       ()
   in
@@ -37,11 +39,16 @@ let run_examples () =
   ()
 ;;
 
-let run_rb () =
+let run_rb ?min_iterations ?max_iterations ?sample_runs () =
   print_endline "RB tree scaling benchmarks:";
   let (_ : Benchmark.Result.t list) =
     Rb_bench.run_scaling_benchmark
-      ~benchmark_config:(Benchmark.Config.create ~sample_runs:10 ())
+      ~benchmark_config:
+        (Benchmark.Config.create
+           ?min_iterations
+           ?max_iterations
+           ~sample_runs:(Option.value sample_runs ~default:10)
+           ())
       ~tree_sizes:[ 10; 100; 1000; 10_000; 100_000; 1_000_000; 10_000_000 ]
       ~num_operations:1000
       ()
@@ -52,11 +59,16 @@ let run_rb () =
   ()
 ;;
 
-let run_map () =
+let run_map ?min_iterations ?max_iterations ?sample_runs () =
   print_endline "Core Map scaling benchmarks:";
   let (_ : Benchmark.Result.t list) =
     Map_bench.run_scaling_benchmark
-      ~benchmark_config:(Benchmark.Config.create ~sample_runs:10 ())
+      ~benchmark_config:
+        (Benchmark.Config.create
+           ?min_iterations
+           ?max_iterations
+           ~sample_runs:(Option.value sample_runs ~default:10)
+           ())
       ~tree_sizes:[ 10; 100; 1000; 10_000; 100_000; 1_000_000; 10_000_000 ]
       ~num_operations:1000
       ()
@@ -67,17 +79,37 @@ let run_map () =
   ()
 ;;
 
-let run_sat ~max_num_vars =
+let run_sat ?min_iterations ?max_iterations ?sample_runs ~max_num_vars () =
   printf "SAT solver benchmarks up to n=%d variables\n" max_num_vars;
+  let benchmark_config =
+    Benchmark.Config.create
+      ?min_iterations
+      ?max_iterations
+      ~warmup_runs:1
+      ~sample_runs:(Option.value sample_runs ~default:5)
+      ~target_time_ns:1_000_000_000
+      ()
+  in
   let (_ : Benchmark.Result.t list) =
-    Sat_bench.run_scaling_benchmark ~max_num_vars ()
+    Sat_bench.run_scaling_benchmark ~benchmark_config ~max_num_vars ()
   in
   ()
 ;;
 
-let run_dimacs () =
+let run_dimacs ?min_iterations ?max_iterations ?sample_runs () =
   print_endline "DIMACS example benchmarks:";
-  let (_ : Benchmark.Result.t list) = Dimacs_bench.run_dimacs_examples () in
+  let benchmark_config =
+    Benchmark.Config.create
+      ?min_iterations
+      ?max_iterations
+      ~warmup_runs:1
+      ~sample_runs:(Option.value sample_runs ~default:5)
+      ~target_time_ns:1_000_000_000
+      ()
+  in
+  let (_ : Benchmark.Result.t list) =
+    Dimacs_bench.run_dimacs_examples ~benchmark_config ()
+  in
   ()
 ;;
 
@@ -109,25 +141,43 @@ let command =
          "max-iterations"
          (optional int)
          ~doc:"INT max iterations for each test"
+     and sample_runs =
+       flag
+         "sample-runs"
+         (optional int)
+         ~doc:"INT number of samples to collect for each test"
      in
      fun () ->
        let sat_max_n = Option.value sat_max_n ~default:400 in
        match bench with
        | None | Some "all" ->
-         run_examples ();
+         run_examples ?min_iterations ?max_iterations ?sample_runs ();
          print_endline "\n";
-         run_rb ();
+         run_rb ?min_iterations ?max_iterations ?sample_runs ();
          print_endline "\n";
-         run_map ();
+         run_map ?min_iterations ?max_iterations ?sample_runs ();
          print_endline "\n";
-         run_sat ~max_num_vars:sat_max_n;
+         run_sat
+           ?min_iterations
+           ?max_iterations
+           ?sample_runs
+           ~max_num_vars:sat_max_n
+           ();
          print_endline "\n";
-         run_dimacs ()
-       | Some "examples" -> run_examples ()
-       | Some "rb" -> run_rb ()
-       | Some "map" -> run_map ()
-       | Some "sat" -> run_sat ~max_num_vars:sat_max_n
-       | Some "dimacs" -> run_dimacs ()
+         run_dimacs ?min_iterations ?max_iterations ?sample_runs ()
+       | Some "examples" ->
+         run_examples ?min_iterations ?max_iterations ?sample_runs ()
+       | Some "rb" -> run_rb ?min_iterations ?max_iterations ?sample_runs ()
+       | Some "map" -> run_map ?min_iterations ?max_iterations ?sample_runs ()
+       | Some "sat" ->
+         run_sat
+           ?min_iterations
+           ?max_iterations
+           ?sample_runs
+           ~max_num_vars:sat_max_n
+           ()
+       | Some "dimacs" ->
+         run_dimacs ?min_iterations ?max_iterations ?sample_runs ()
        | Some other ->
          eprintf "Unknown benchmark: %s\n" other;
          eprintf "Valid options: examples, rb, map, sat, dimacs, all\n";

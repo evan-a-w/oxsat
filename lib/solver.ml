@@ -68,13 +68,13 @@ type t =
   ; trail : Trail_entry.Vec.t
   ; clauses : Clause.Pool.t
   ; clause_scores : F64.Option.Vec.t
-  ; clauses_with_active_unit : Bitset.t
-  ; unprocessed_unit_clauses : Bitset.t
-  ; clauses_by_literal : Bitset.t Vec.Value.t Tf_pair.t
+  ; clauses_with_active_unit : Int.Hash_set.t
+  ; unprocessed_unit_clauses : Int.Hash_set.t
+  ; clauses_by_literal : Int.Hash_set.t Vec.Value.t Tf_pair.t
   ; trail_entry_idx_by_var : I64.Option.Vec.t
-  ; watched_clauses_by_literal : Bitset.t Vec.Value.t Tf_pair.t
+  ; watched_clauses_by_literal : Int.Hash_set.t Vec.Value.t Tf_pair.t
   ; vsids : Vsids.t
-  ; learned_clauses : Bitset.t
+  ; learned_clauses : Int.Hash_set.t
   ; simplify_clauses_every : int
   ; clause_sorting_buckets : int Vec.Value.t
   ; luby : Luby.t
@@ -255,9 +255,7 @@ let%template update_watched_clauses t ~set_literal =
     ~init:Null
     ~f:(fun ~done_ acc clause_idx ->
       match acc with
-      | This _ ->
-        Local_ref.set done_ true;
-        acc
+      | This _ -> acc
       | Null ->
         let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
         if Clause.is_satisfied clause ~assignments:t.assignments
@@ -299,7 +297,9 @@ let%template update_watched_clauses t ~set_literal =
                (Clause.unit_literal clause ~assignments:t.assignments
                 : Literal.Option.t)
              with
-             | None -> This clause_idx
+             | None ->
+               Local_ref.set done_ true;
+               This clause_idx
              | Some (_ : Literal.t) ->
                Bitset.set t.unprocessed_unit_clauses clause_idx;
                Null)))

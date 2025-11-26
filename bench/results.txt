@@ -1,3 +1,13 @@
+$ time dune exec --profile=release bench/feel_bench.exe -- -bench dimacs -min-iterations 1 -max-iterations 1 -sample-runs 1
+DIMACS example benchmarks:
+SUDOKU: Mean: 298.08 ms  StdDev: 0.00 ns  p50: 298.08 ms  p75: 298.08 ms  p90: 298.08 ms  p95: 298.08 ms  p99: 298.08 ms  (n=1)
+SUCC_EG: Mean: 1.15 ms  StdDev: 0.00 ns  p50: 1.15 ms  p75: 1.15 ms  p90: 1.15 ms  p95: 1.15 ms  p99: 1.15 ms  (n=1)
+FACTOR_1234321: Mean: 583.69 ms  StdDev: 0.00 ns  p50: 583.69 ms  p75: 583.69 ms  p90: 583.69 ms  p95: 583.69 ms  p99: 583.69 ms  (n=1)
+FACTOR_1235321: Mean: 604.22 ms  StdDev: 0.00 ns  p50: 604.22 ms  p75: 604.22 ms  p90: 604.22 ms  p95: 604.22 ms  p99: 604.22 ms  (n=1)
+FAIL_EG: Mean: 58.75 ms  StdDev: 0.00 ns  p50: 58.75 ms  p75: 58.75 ms  p90: 58.75 ms  p95: 58.75 ms  p99: 58.75 ms  (n=1)
+SUBSETS_100: Mean: 42.64 s  StdDev: 0.00 ns  p50: 42.64 s  p75: 42.64 s  p90: 42.64 s  p95: 42.64 s  p99: 42.64 s  (n=1)
+dune exec --profile=release bench/feel_bench.exe -- -bench dimacs  1  1  1  210.29s user 7.39s system 108% cpu 3:19.92 total
+
 int array clauses
 ------------------
 
