@@ -577,6 +577,10 @@ module Value = struct
             if search_left
             then loop left (mid - 1) (Some t.arr.(mid))
             else loop (mid + 1) right (Some t.arr.(mid))
+          else if c < 0
+          then loop (mid + 1) right best
+          else if c > 0
+          then loop left (mid - 1) best
           else if search_left
           then loop (mid + 1) right best
           else loop left (mid - 1) best)
