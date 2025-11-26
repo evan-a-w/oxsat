@@ -43,5 +43,10 @@ val fold_set_bits
 val fold_set_bits_or_null
   :  t @ local
   -> init:'a or_null @ local
-  -> f:('a or_null @ local -> int -> 'a or_null @ local) @ local
+  -> f:
+       (done_:bool Local_ref.t @ local
+        -> 'a or_null @ local
+        -> int
+        -> 'a or_null @ local)
+     @ local
   -> 'a or_null @ local]

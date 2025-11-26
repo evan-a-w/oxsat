@@ -253,9 +253,11 @@ let%template update_watched_clauses t ~set_literal =
   Bitset.fold_set_bits_or_null
     watched_clauses
     ~init:Null
-    ~f:(fun acc clause_idx ->
+    ~f:(fun ~done_ acc clause_idx ->
       match acc with
-      | This _ -> acc
+      | This _ ->
+        Local_ref.set done_ true;
+        acc
       | Null ->
         let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
         if Clause.is_satisfied clause ~assignments:t.assignments

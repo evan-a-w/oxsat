@@ -303,16 +303,18 @@ let[@kind k = (value_or_null, bits64)]
 ;;
 
 let fold_set_bits_or_null t ~init ~f = exclave_
+  let open Local_ref.O in
+  let done_ = Local_ref.create false in
   let rec fold_words word_idx acc = exclave_
-    if word_idx >= t.num_words
+    if !done_ || word_idx >= t.num_words
     then acc
     else (
       let rec fold_in_word word acc = exclave_
-        if I64.(equal word #0L)
+        if !done_ || I64.(equal word #0L)
         then acc
         else (
           let bit_offset = I64.(ctz word |> to_int_trunc) in
-          let acc = f acc ((word_idx * bits_per_word) + bit_offset) in
+          let acc = f ~done_ acc ((word_idx * bits_per_word) + bit_offset) in
           let word = I64.(word land (word - #1L)) in
           fold_in_word word acc)
       in

@@ -2,14 +2,13 @@ open! Core
 
 let run_examples () =
   print_endline "=== Simple Benchmark Examples ===\n";
-
   (* Example 1: Single function benchmark *)
   print_endline "Benchmark: List.range allocation";
   let (_ : Benchmark.Result.t) =
-    Benchmark.run_and_print ~name:"List.range 0 100" (fun () -> List.range 0 100)
+    Benchmark.run_and_print ~name:"List.range 0 100" (fun () ->
+      List.range 0 100)
   in
   print_endline "";
-
   (* Example 2: Multiple benchmarks with custom config *)
   print_endline "Multiple benchmarks with custom config:";
   let config =
@@ -22,14 +21,13 @@ let run_examples () =
   let (_ : Benchmark.Result.t list) =
     Benchmark.run_all_and_print
       ~config
-      [ "List.range 0 100", (fun () -> List.range 0 100)
-      ; "List.init 100", (fun () -> List.init 100 ~f:Fn.id)
-      ; "List.range 0 1000", (fun () -> List.range 0 1000)
-      ; "List.range 0 10000", (fun () -> List.range 0 10000)
+      [ ("List.range 0 100", fun () -> List.range 0 100)
+      ; ("List.init 100", fun () -> List.init 100 ~f:Fn.id)
+      ; ("List.range 0 1000", fun () -> List.range 0 1000)
+      ; ("List.range 0 10000", fun () -> List.range 0 10000)
       ]
   in
   print_endline "";
-
   (* Example 3: More intensive computation *)
   print_endline "Benchmark: Fibonacci computation";
   let rec fib n = if n <= 1 then 1 else fib (n - 1) + fib (n - 2) in
@@ -79,9 +77,7 @@ let run_sat ~max_num_vars =
 
 let run_dimacs () =
   print_endline "DIMACS example benchmarks:";
-  let (_ : Benchmark.Result.t list) =
-    Dimacs_bench.run_dimacs_examples ()
-  in
+  let (_ : Benchmark.Result.t list) = Dimacs_bench.run_dimacs_examples () in
   ()
 ;;
 
@@ -93,13 +89,26 @@ let command =
        flag
          "bench"
          (optional string)
-         ~doc:"BENCH Which benchmark to run (examples, rb, map, sat, dimacs, or all). Default: all"
+         ~doc:
+           "BENCH Which benchmark to run (examples, rb, map, sat, dimacs, or \
+            all). Default: all"
      and sat_max_n =
        flag
          "sat-max-n"
          (optional int)
          ~doc:
-           "INT Maximum number of variables to use for SAT benchmarks (default: 400)"
+           "INT Maximum number of variables to use for SAT benchmarks \
+            (default: 400)"
+     and min_iterations =
+       flag
+         "min-iterations"
+         (optional int)
+         ~doc:"INT min iterations for each test"
+     and max_iterations =
+       flag
+         "max-iterations"
+         (optional int)
+         ~doc:"INT max iterations for each test"
      in
      fun () ->
        let sat_max_n = Option.value sat_max_n ~default:400 in

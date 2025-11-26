@@ -28,9 +28,12 @@ module Config = struct
     =
     { warmup_runs = Option.value warmup_runs ~default:default.warmup_runs
     ; sample_runs = Option.value sample_runs ~default:default.sample_runs
-    ; min_iterations = Option.value min_iterations ~default:default.min_iterations
-    ; max_iterations = Option.value max_iterations ~default:default.max_iterations
-    ; target_time_ns = Option.value target_time_ns ~default:default.target_time_ns
+    ; min_iterations =
+        Option.value min_iterations ~default:default.min_iterations
+    ; max_iterations =
+        Option.value max_iterations ~default:default.max_iterations
+    ; target_time_ns =
+        Option.value target_time_ns ~default:default.target_time_ns
     }
   ;;
 end
@@ -50,9 +53,7 @@ module Stats = struct
 
   let calculate (samples : float array) =
     let n = Array.length samples in
-    if n = 0
-    then
-      failwith "Cannot calculate stats on empty sample set";
+    if n = 0 then failwith "Cannot calculate stats on empty sample set";
     Array.sort samples ~compare:Float.compare;
     let mean = Array.fold samples ~init:0. ~f:( +. ) /. Float.of_int n in
     let variance =
@@ -80,8 +81,8 @@ module Stats = struct
 
   let to_string_ns t =
     sprintf
-      "Mean: %.2f ns  StdDev: %.2f ns  p50: %.2f ns  p75: %.2f ns  p90: %.2f ns  \
-       p95: %.2f ns  p99: %.2f ns  (n=%d)"
+      "Mean: %.2f ns  StdDev: %.2f ns  p50: %.2f ns  p75: %.2f ns  p90: %.2f \
+       ns  p95: %.2f ns  p99: %.2f ns  (n=%d)"
       t.mean
       t.stddev
       t.p50
@@ -103,7 +104,8 @@ module Stats = struct
       else sprintf "%.2f s" (ns /. 1_000_000_000.)
     in
     sprintf
-      "Mean: %s  StdDev: %s  p50: %s  p75: %s  p90: %s  p95: %s  p99: %s  (n=%d)"
+      "Mean: %s  StdDev: %s  p50: %s  p75: %s  p90: %s  p95: %s  p99: %s  \
+       (n=%d)"
       (format_time t.mean)
       (format_time t.stddev)
       (format_time t.p50)
@@ -137,8 +139,13 @@ let estimate_iterations config f =
   if Float.(elapsed_ns <= 0.)
   then config.Config.max_iterations
   else (
-    let estimated = Float.to_int (Float.of_int config.Config.target_time_ns /. elapsed_ns) in
-    Int.clamp_exn estimated ~min:config.Config.min_iterations ~max:config.Config.max_iterations)
+    let estimated =
+      Float.to_int (Float.of_int config.Config.target_time_ns /. elapsed_ns)
+    in
+    Int.clamp_exn
+      estimated
+      ~min:config.Config.min_iterations
+      ~max:config.Config.max_iterations)
 ;;
 
 let time_iterations n f =
@@ -160,8 +167,9 @@ let benchmark_function ?(config = Config.default) f =
   (* Estimate iterations *)
   let iterations = estimate_iterations config f in
   (* Collect samples *)
-  let samples = Array.init config.sample_runs ~f:(fun _ ->
-    time_iterations iterations f /. Float.of_int iterations)
+  let samples =
+    Array.init config.sample_runs ~f:(fun _ ->
+      time_iterations iterations f /. Float.of_int iterations)
   in
   Stats.calculate samples
 ;;
