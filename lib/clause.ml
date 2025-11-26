@@ -126,9 +126,10 @@ let resolve_exn t ~other ~on_var =
   else (
     let old_len = Vec.Value.length t in
     Vec.Value.iter other ~f:(fun x ->
-      match Vec.Value.binary_search t ~f:(fun y -> sort_compare y x) ~which:`First_equal with
-      | Some _ -> ()
-      | None -> Vec.Value.push t x);
+      if Int.abs x <> on_var then
+        match Vec.Value.binary_search ~end_:old_len t ~f:(fun y -> sort_compare y x) ~which:`First_equal with
+        | Some _ -> ()
+        | None -> Vec.Value.push t x);
     Vec.Value.sort_partitioned t ~a_len:old_len ~compare:sort_compare;
     Vec.Value.filter_inplace t ~f:(fun x -> Int.abs x <> on_var))
 ;;

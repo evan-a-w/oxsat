@@ -549,8 +549,13 @@ module Value = struct
     [%expect {| (1 2 3 4 5) |}]
   ;;
 
-  let binary_search t ~f ~which = exclave_
-    if t.length = 0
+  let binary_search ?(local_ end_) t ~f ~which = exclave_
+    let len =
+      match end_ with
+      | None -> t.length
+      | Some len -> len
+    in
+    if len = 0
     then None
     else (
       let accept, search_left =
@@ -576,7 +581,7 @@ module Value = struct
           then loop (mid + 1) right best
           else loop left (mid - 1) best)
       in
-      loop 0 (t.length - 1) None)
+      loop 0 (len - 1) None)
   ;;
 
   let%expect_test "binary_search" =

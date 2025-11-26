@@ -144,7 +144,8 @@ module type S_value = sig
   val zip_exn : 'a t -> 'b t -> ('a * 'b) t
 
   val binary_search
-    :  'a t
+    :  ?end_:local_ int
+    -> 'a t
     -> f:('a -> int) @ local
     -> which:[ `First_equal | `First_gt | `Last_lt | `Last_le | `First_ge ]
     -> 'a option @ local
