@@ -145,3 +145,20 @@ end = struct
     go init 0
   ;;
 end
+
+module Int = struct
+  include Int
+
+  module Rb_set =
+    Rb.Make [@kind value value]
+      (struct
+        include Int
+
+        let create_for_rb () = 0
+      end)
+      (struct
+        type t = unit
+
+        let create_for_rb () = ()
+      end)
+end

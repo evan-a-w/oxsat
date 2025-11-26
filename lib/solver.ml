@@ -72,7 +72,7 @@ type t =
   ; unprocessed_unit_clauses : Int.Hash_set.t
   ; clauses_by_literal : Int.Hash_set.t Vec.Value.t Tf_pair.t
   ; trail_entry_idx_by_var : I64.Option.Vec.t
-  ; watched_clauses_by_literal : Int.Hash_set.t Vec.Value.t Tf_pair.t
+  ; watched_clauses_by_literal : Int.Rb_set.t Vec.Value.t Tf_pair.t
   ; vsids : Vsids.t
   ; learned_clauses : Int.Hash_set.t
   ; simplify_clauses_every : int
@@ -80,21 +80,6 @@ type t =
   ; luby : Luby.t
   ; mutable conflicts : int64#
   }
-
-let hash_set_choose_option t = exclave_
-  let open Local_ref.O in
-  if Hash_set.is_empty t
-  then None
-  else (
-    let res = Local_ref.create 0 in
-    Hash_set.iter_until
-      t
-      ~finish:(fun () -> ())
-      ~f:(fun elt ->
-        res := elt;
-        Container.Continue_or_stop.Stop ());
-    Some !res)
-;;
 
 let assignment t ~var = exclave_
   if Bitset.get (Tf_pair.get t.assignments true) var
@@ -214,7 +199,7 @@ let learn_clause_from_failure ~failed_clause t =
 let on_new_var
   { clauses_by_literal
   ; trail_entry_idx_by_var
-  ; watched_clauses_by_literal
+  ; watched_clauses_by_literal = _
   ; vsids
   ; assignments = _
   ; iterations = _
@@ -247,7 +232,6 @@ let on_new_var
         (Vec.Value.fill_to_length ~length:(var + 1) ~f:(fun (_ : int) ->
            Int.Hash_set.create ()))
   in
-  fill watched_clauses_by_literal;
   fill clauses_by_literal [@nontail]
 ;;
 
@@ -265,10 +249,10 @@ let%template update_watched_clauses t ~set_literal =
       (Tf_pair.get t.watched_clauses_by_literal (Literal.value literal))
       (Literal.var literal)
   in
-  List.fold
-    (Hash_set.to_list watched_clauses)
+  Int.Rb_set.fold_or_null
+    watched_clauses
     ~init:Null
-    ~f:(fun acc clause_idx ->
+    ~f:(fun ~done_ ~acc ~key:clause_idx ~data:() ->
       match acc with
       | This _ -> acc
       | Null ->
@@ -287,7 +271,7 @@ let%template update_watched_clauses t ~set_literal =
             |> List.find_local ~f:(fun literal -> exclave_
               let literal' = Literal.of_int literal in
               match
-                ( Hash_set.mem
+                ( Int.Rb_set.mem
                     (get_by_literal t.watched_clauses_by_literal literal')
                     clause_idx
                 , assignment t ~var:(Literal.var literal') )
@@ -297,22 +281,25 @@ let%template update_watched_clauses t ~set_literal =
           in
           match replace_with with
           | Some to_replace ->
-            Hash_set.remove watched_clauses clause_idx;
-            Hash_set.remove
+            Int.Rb_set.remove watched_clauses clause_idx;
+            Int.Rb_set.remove
               (get_by_literal t.watched_clauses_by_literal literal)
               clause_idx;
-            Hash_set.add
+            Int.Rb_set.insert
               (get_by_literal
                  t.watched_clauses_by_literal
                  (Literal.of_int to_replace))
-              clause_idx;
+              ~key:clause_idx
+              ~data:();
             Null
           | None ->
             (match%optional_u
                (Clause.unit_literal clause ~assignments:t.assignments
                 : Literal.Option.t)
              with
-             | None -> This clause_idx
+             | None ->
+               Local_ref.set done_ true;
+               This clause_idx
              | Some (_ : Literal.t) ->
                Hash_set.add t.unprocessed_unit_clauses clause_idx;
                Null)))
@@ -366,7 +353,7 @@ let populate_watched_literals_for_new_clause
         (Tf_pair.get watched_clauses_by_literal (literal > 0))
         (Int.abs literal)
     in
-    Hash_set.add bs (Ptr.to_int ptr)
+    Int.Rb_set.insert bs ~key:(Ptr.to_int ptr) ~data:()
   in
   match #(unset_literals, set_literals) with
   | #([], a :: b :: _) ->
@@ -457,14 +444,11 @@ let free_clause
   Clause.iter_literals clause ~f:(fun literal ->
     let var = Literal.var literal in
     on_new_var t ~var;
-    let clear_bs bs_pair =
-      let clauses_for_lit =
-        Vec.Value.get (Tf_pair.get bs_pair (Literal.value literal)) var
-      in
-      Hash_set.remove clauses_for_lit (Ptr.to_int ptr)
+    let get_tang by_literal =
+      Vec.Value.get (Tf_pair.get by_literal (Literal.value literal)) var
     in
-    clear_bs clauses_by_literal;
-    clear_bs watched_clauses_by_literal);
+    Hash_set.remove (get_tang clauses_by_literal) (Ptr.to_int ptr);
+    Int.Rb_set.remove (get_tang watched_clauses_by_literal) (Ptr.to_int ptr));
   Hash_set.remove unprocessed_unit_clauses clause_idx;
   Hash_set.remove clauses_with_active_unit clause_idx;
   F64.Option.Vec.set clause_scores clause_idx (F64.Option.none ());
@@ -729,7 +713,9 @@ let%template rec solve' t : Sat_result.t @ m =
      simplify_clauses t;
      decay_clause_activities t);
    let rec try_unit_propagate () = exclave_
-     match hash_set_choose_option t.unprocessed_unit_clauses with
+     match%optional
+       (Int.Rb_set.min t.unprocessed_unit_clauses : Int.Rb_set.Kv_option.t)
+     with
      | None -> None
      | Some clause_idx ->
        Hash_set.remove t.unprocessed_unit_clauses clause_idx;

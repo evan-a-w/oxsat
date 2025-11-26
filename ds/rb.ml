@@ -270,6 +270,21 @@ struct
     !acc
   ;;
 
+  let rec fold_helper t node_ptr ~f ~done_ ~(acc : _ or_null) =
+    if Ptr.is_null node_ptr || Local_ref.get done_
+    then acc
+    else (
+      let node = get_node t node_ptr in
+      let acc = fold_helper t node.#left ~f ~done_ ~acc in
+      let acc = f ~done_ ~acc ~key:node.#key ~data:node.#data in
+      fold_helper t node.#right ~f ~done_ ~acc)
+  ;;
+
+  let fold_or_null t ~init ~(local_ f) =
+    let done_ = Local_ref.create false in
+    fold_helper t t.root ~done_ ~acc:init ~f [@nontail]
+  ;;
+
   let to_array t =
     let len = length t in
     if len = 0
@@ -666,12 +681,11 @@ struct
     let result = find t key in
     if Kv_option.is_none result
     then raise (Not_found_s [%message "Key not found"]);
-      let #(_, data) = Kv_option.value_exn result in
-      data
+    let #(_, data) = Kv_option.value_exn result in
+    data
   ;;
 
   let mem t key = Kv_option.is_some (find t key)
-  ;;
 
   let min t =
     if Ptr.is_null t.root

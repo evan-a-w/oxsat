@@ -40,7 +40,6 @@ module type%template
   val max : t -> Kv_option.t
   val pop_min : t -> Kv_option.t
   val pop_max : t -> Kv_option.t
-
   val find_exn : t -> Key.t -> Value.t
   val min_exn : t -> #(Key.t * Value.t)
   val max_exn : t -> #(Key.t * Value.t)
@@ -53,13 +52,24 @@ module type%template
     -> f:(acc:'acc -> key:Key.t -> data:Value.t -> 'acc) @ local
     -> 'acc
 
+  val fold_or_null
+    :  t
+    -> init:'acc or_null
+    -> f:
+         (done_:bool Local_ref.t @ local
+          -> acc:'acc or_null
+          -> key:Key.t
+          -> data:Value.t
+          -> 'acc or_null)
+       @ local
+    -> 'acc or_null
+
   val length : t -> int
   val is_empty : t -> bool
   val clear : t -> unit
   val to_array : t -> #(Key.t * Value.t) array
   val of_array_exn : #(Key.t * Value.t) array -> t
   val validate : t -> unit
-
 
   module Iter : sig
     type tree := t
