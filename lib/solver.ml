@@ -69,7 +69,7 @@ type t =
   ; clauses : Clause.Pool.t
   ; clause_scores : F64.Option.Vec.t
   ; clauses_with_active_unit : Int.Hash_set.t
-  ; unprocessed_unit_clauses : Int.Hash_set.t
+  ; unprocessed_unit_clauses : Int.Rb_set.t
   ; clauses_by_literal : Int.Hash_set.t Vec.Value.t Tf_pair.t
   ; trail_entry_idx_by_var : I64.Option.Vec.t
   ; watched_clauses_by_literal : Int.Rb_set.t Vec.Value.t Tf_pair.t
@@ -301,7 +301,10 @@ let%template update_watched_clauses t ~set_literal =
                Local_ref.set done_ true;
                This clause_idx
              | Some (_ : Literal.t) ->
-               Hash_set.add t.unprocessed_unit_clauses clause_idx;
+               Int.Rb_set.insert
+                 t.unprocessed_unit_clauses
+                 ~key:clause_idx
+                 ~data:();
                Null)))
 ;;
 
@@ -345,7 +348,8 @@ let populate_watched_literals_for_new_clause
   let maybe_unit () =
     if !satisfied
     then ()
-    else Hash_set.add unprocessed_unit_clauses (Ptr.to_int ptr)
+    else
+      Int.Rb_set.insert unprocessed_unit_clauses ~key:(Ptr.to_int ptr) ~data:()
   in
   let watch_literal (literal : int) =
     let bs =
@@ -449,7 +453,7 @@ let free_clause
     in
     Hash_set.remove (get_tang clauses_by_literal) (Ptr.to_int ptr);
     Int.Rb_set.remove (get_tang watched_clauses_by_literal) (Ptr.to_int ptr));
-  Hash_set.remove unprocessed_unit_clauses clause_idx;
+  Int.Rb_set.remove unprocessed_unit_clauses clause_idx;
   Hash_set.remove clauses_with_active_unit clause_idx;
   F64.Option.Vec.set clause_scores clause_idx (F64.Option.none ());
   Clause.clear clause;
@@ -567,7 +571,7 @@ let backtrack t ~failed_clause =
     Vsids.add_activity t.vsids ~literal);
   Vsids.decay t.vsids;
   (* This is correct because we backtrack to the previous decision level, where all unit clauses had been applied. Learned clause is set to unit after adding here. *)
-  Hash_set.clear t.unprocessed_unit_clauses;
+  Int.Rb_set.clear t.unprocessed_unit_clauses;
   remove_greater_than_decision_level
     t
     ~decision_level:(second_highest_decision_level t ~clause:learned_clause);
@@ -602,7 +606,7 @@ let%template make_decision t : _ @ m =
 let restart t =
   t.conflicts <- #0L;
   t.decision_level <- #0L;
-  Hash_set.clear t.unprocessed_unit_clauses;
+  Int.Rb_set.clear t.unprocessed_unit_clauses;
   while Trail_entry.Vec.length t.trail <> 0 do
     undo_entry t ~trail_entry:(Trail_entry.Vec.pop_exn t.trail)
   done;
@@ -612,7 +616,11 @@ let restart t =
       (Clause.unit_literal clause ~assignments:t.assignments : Literal.Option.t)
     with
     | None -> ()
-    | Some _ -> Hash_set.add t.unprocessed_unit_clauses (Ptr.to_int ptr))
+    | Some _ ->
+      Int.Rb_set.insert
+        t.unprocessed_unit_clauses
+        ~key:(Ptr.to_int ptr)
+        ~data:())
 ;;
 
 let%template check_sat_result t ~(sat_result : _ @ m) : _ @ m =
@@ -713,12 +721,13 @@ let%template rec solve' t : Sat_result.t @ m =
      simplify_clauses t;
      decay_clause_activities t);
    let rec try_unit_propagate () = exclave_
-     match%optional
+     match%optional_u
        (Int.Rb_set.min t.unprocessed_unit_clauses : Int.Rb_set.Kv_option.t)
      with
      | None -> None
-     | Some clause_idx ->
-       Hash_set.remove t.unprocessed_unit_clauses clause_idx;
+     | Some pair ->
+       let #(clause_idx, _) = pair in
+       Int.Rb_set.remove t.unprocessed_unit_clauses clause_idx;
        let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
        let literal = Clause.unit_literal clause ~assignments:t.assignments in
        (match%optional_u (literal : Literal.Option.t) with
@@ -791,7 +800,7 @@ let create ?(debug = false) () =
   ; assignments = Tf_pair.create (fun (_ : bool) -> Bitset.create ())
   ; trail = Trail_entry.Vec.create ()
   ; clauses = Clause.Pool.create ~chunk_size:4096 ()
-  ; unprocessed_unit_clauses = Int.Hash_set.create ()
+  ; unprocessed_unit_clauses = Int.Rb_set.create ()
   ; clauses_with_active_unit = Int.Hash_set.create ()
   ; clause_scores = F64.Option.Vec.create ()
   ; clause_adjusting_score = Adjusting_score.default ()
