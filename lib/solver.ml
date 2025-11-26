@@ -199,7 +199,7 @@ let learn_clause_from_failure ~failed_clause t =
 let on_new_var
   { clauses_by_literal
   ; trail_entry_idx_by_var
-  ; watched_clauses_by_literal = _
+  ; watched_clauses_by_literal
   ; vsids
   ; assignments = _
   ; iterations = _
@@ -225,14 +225,15 @@ let on_new_var
     trail_entry_idx_by_var
     ~f:(fun (_ : int) -> I64.Option.none ())
     ~length:(var + 1);
-  let fill tf = exclave_
+  let fill tf with_ = exclave_
     Tf_pair.iter
       tf
       ~f:
         (Vec.Value.fill_to_length ~length:(var + 1) ~f:(fun (_ : int) ->
-           Int.Hash_set.create ()))
+           with_ ()))
   in
-  fill clauses_by_literal [@nontail]
+  fill clauses_by_literal Int.Hash_set.create;
+  fill watched_clauses_by_literal Int.Rb_set.create [@nontail]
 ;;
 
 let get_by_literal by_literal literal =
