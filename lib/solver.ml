@@ -81,6 +81,21 @@ type t =
   ; mutable conflicts : int64#
   }
 
+let hash_set_choose_option t = exclave_
+  let open Local_ref.O in
+  if Hash_set.is_empty t
+  then None
+  else (
+    let res = Local_ref.create 0 in
+    Hash_set.iter_until
+      t
+      ~finish:(fun () -> ())
+      ~f:(fun elt ->
+        res := elt;
+        Container.Continue_or_stop.Stop ());
+    Some !res)
+;;
+
 let assignment t ~var = exclave_
   if Bitset.get (Tf_pair.get t.assignments true) var
   then Some true
@@ -230,7 +245,7 @@ let on_new_var
       tf
       ~f:
         (Vec.Value.fill_to_length ~length:(var + 1) ~f:(fun (_ : int) ->
-           Bitset.create ()))
+           Int.Hash_set.create ()))
   in
   fill watched_clauses_by_literal;
   fill clauses_by_literal [@nontail]
@@ -250,10 +265,10 @@ let%template update_watched_clauses t ~set_literal =
       (Tf_pair.get t.watched_clauses_by_literal (Literal.value literal))
       (Literal.var literal)
   in
-  Bitset.fold_set_bits_or_null
-    watched_clauses
+  List.fold
+    (Hash_set.to_list watched_clauses)
     ~init:Null
-    ~f:(fun ~done_ acc clause_idx ->
+    ~f:(fun acc clause_idx ->
       match acc with
       | This _ -> acc
       | Null ->
@@ -272,7 +287,7 @@ let%template update_watched_clauses t ~set_literal =
             |> List.find_local ~f:(fun literal -> exclave_
               let literal' = Literal.of_int literal in
               match
-                ( Bitset.get
+                ( Hash_set.mem
                     (get_by_literal t.watched_clauses_by_literal literal')
                     clause_idx
                 , assignment t ~var:(Literal.var literal') )
@@ -282,11 +297,11 @@ let%template update_watched_clauses t ~set_literal =
           in
           match replace_with with
           | Some to_replace ->
-            Bitset.clear watched_clauses clause_idx;
-            Bitset.clear
+            Hash_set.remove watched_clauses clause_idx;
+            Hash_set.remove
               (get_by_literal t.watched_clauses_by_literal literal)
               clause_idx;
-            Bitset.set
+            Hash_set.add
               (get_by_literal
                  t.watched_clauses_by_literal
                  (Literal.of_int to_replace))
@@ -297,11 +312,9 @@ let%template update_watched_clauses t ~set_literal =
                (Clause.unit_literal clause ~assignments:t.assignments
                 : Literal.Option.t)
              with
-             | None ->
-               Local_ref.set done_ true;
-               This clause_idx
+             | None -> This clause_idx
              | Some (_ : Literal.t) ->
-               Bitset.set t.unprocessed_unit_clauses clause_idx;
+               Hash_set.add t.unprocessed_unit_clauses clause_idx;
                Null)))
 ;;
 
@@ -345,7 +358,7 @@ let populate_watched_literals_for_new_clause
   let maybe_unit () =
     if !satisfied
     then ()
-    else Bitset.set unprocessed_unit_clauses (Ptr.to_int ptr)
+    else Hash_set.add unprocessed_unit_clauses (Ptr.to_int ptr)
   in
   let watch_literal (literal : int) =
     let bs =
@@ -353,7 +366,7 @@ let populate_watched_literals_for_new_clause
         (Tf_pair.get watched_clauses_by_literal (literal > 0))
         (Int.abs literal)
     in
-    Bitset.set bs (Ptr.to_int ptr)
+    Hash_set.add bs (Ptr.to_int ptr)
   in
   match #(unset_literals, set_literals) with
   | #([], a :: b :: _) ->
@@ -407,7 +420,7 @@ let push_clause
     let clauses_for_lit =
       Vec.Value.get (Tf_pair.get clauses_by_literal (Literal.value literal)) var
     in
-    Bitset.set clauses_for_lit (Ptr.to_int ptr));
+    Hash_set.add clauses_for_lit (Ptr.to_int ptr));
   F64.Option.Vec.push
     clause_scores
     (F64.Option.some (Adjusting_score.unit clause_adjusting_score));
@@ -448,12 +461,12 @@ let free_clause
       let clauses_for_lit =
         Vec.Value.get (Tf_pair.get bs_pair (Literal.value literal)) var
       in
-      Bitset.clear clauses_for_lit (Ptr.to_int ptr)
+      Hash_set.remove clauses_for_lit (Ptr.to_int ptr)
     in
     clear_bs clauses_by_literal;
     clear_bs watched_clauses_by_literal);
-  Bitset.clear unprocessed_unit_clauses clause_idx;
-  Bitset.clear clauses_with_active_unit clause_idx;
+  Hash_set.remove unprocessed_unit_clauses clause_idx;
+  Hash_set.remove clauses_with_active_unit clause_idx;
   F64.Option.Vec.set clause_scores clause_idx (F64.Option.none ());
   Clause.clear clause;
   Clause.Pool.free t.clauses ptr
@@ -478,7 +491,7 @@ let add_to_trail t ~(trail_entry : Trail_entry.t) =
   (match trail_entry.#reason with
    | T #(Decision, _, _) -> ()
    | T #(Clause_idx, clause_ptr, _) ->
-     Bitset.set t.clauses_with_active_unit clause_ptr);
+     Hash_set.add t.clauses_with_active_unit clause_ptr);
   Bitset.set
     (Tf_pair.get t.assignments (Literal.value trail_entry.#literal))
     (Literal.var trail_entry.#literal);
@@ -506,7 +519,7 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
   (match trail_entry.#reason with
    | T #(Decision, _, _) -> ()
    | T #(Clause_idx, clause_ptr, _) ->
-     Bitset.clear t.clauses_with_active_unit clause_ptr);
+     Hash_set.remove t.clauses_with_active_unit clause_ptr);
   Vsids.add_to_pool t.vsids ~var:(Literal.var trail_entry.#literal);
   Bitset.clear
     (Tf_pair.get t.assignments (Literal.value trail_entry.#literal))
@@ -570,12 +583,12 @@ let backtrack t ~failed_clause =
     Vsids.add_activity t.vsids ~literal);
   Vsids.decay t.vsids;
   (* This is correct because we backtrack to the previous decision level, where all unit clauses had been applied. Learned clause is set to unit after adding here. *)
-  Bitset.clear_all t.unprocessed_unit_clauses;
+  Hash_set.clear t.unprocessed_unit_clauses;
   remove_greater_than_decision_level
     t
     ~decision_level:(second_highest_decision_level t ~clause:learned_clause);
   let ptr = push_clause t ~clause:learned_clause in
-  Bitset.set t.learned_clauses (Ptr.to_int ptr)
+  Hash_set.add t.learned_clauses (Ptr.to_int ptr)
 ;;
 
 let%template make_decision t : _ @ m =
@@ -605,7 +618,7 @@ let%template make_decision t : _ @ m =
 let restart t =
   t.conflicts <- #0L;
   t.decision_level <- #0L;
-  Bitset.clear_all t.unprocessed_unit_clauses;
+  Hash_set.clear t.unprocessed_unit_clauses;
   while Trail_entry.Vec.length t.trail <> 0 do
     undo_entry t ~trail_entry:(Trail_entry.Vec.pop_exn t.trail)
   done;
@@ -615,7 +628,7 @@ let restart t =
       (Clause.unit_literal clause ~assignments:t.assignments : Literal.Option.t)
     with
     | None -> ()
-    | Some _ -> Bitset.set t.unprocessed_unit_clauses (Ptr.to_int ptr))
+    | Some _ -> Hash_set.add t.unprocessed_unit_clauses (Ptr.to_int ptr))
 ;;
 
 let%template check_sat_result t ~(sat_result : _ @ m) : _ @ m =
@@ -666,7 +679,7 @@ let%template can_trim_clause t ~clause_idx =
             else enough_lbd distinct_decision_levels remaining_literals))
   in
   let enough_lbd = enough_lbd [] literals in
-  (not (Bitset.get t.clauses_with_active_unit clause_idx))
+  (not (Hash_set.mem t.clauses_with_active_unit clause_idx))
   && enough_literals
   && enough_lbd
 ;;
@@ -675,8 +688,8 @@ let simplify_clauses t =
   Vec.Value.clear t.clause_sorting_buckets;
   Clause.Pool.iter t.clauses ~f:(fun ptr ->
     let clause_idx = Ptr.to_int ptr in
-    if Bitset.get t.learned_clauses clause_idx
-       && (not (Bitset.get t.clauses_with_active_unit clause_idx))
+    if Hash_set.mem t.learned_clauses clause_idx
+       && (not (Hash_set.mem t.clauses_with_active_unit clause_idx))
        && can_trim_clause t ~clause_idx
     then Vec.Value.push t.clause_sorting_buckets clause_idx);
   let compare_by_score a b =
@@ -697,7 +710,7 @@ let simplify_clauses t =
             (clause_idx : int)
             ~clause:(Clause.to_int_array clause : int array)]);
     free_clause t (Ptr.of_int clause_idx);
-    Bitset.clear t.learned_clauses clause_idx
+    Hash_set.remove t.learned_clauses clause_idx
   done
 ;;
 
@@ -716,10 +729,10 @@ let%template rec solve' t : Sat_result.t @ m =
      simplify_clauses t;
      decay_clause_activities t);
    let rec try_unit_propagate () = exclave_
-     match Bitset.find_first_set t.unprocessed_unit_clauses ~start_pos:0 with
-     | Null -> None
-     | This clause_idx ->
-       Bitset.clear t.unprocessed_unit_clauses clause_idx;
+     match hash_set_choose_option t.unprocessed_unit_clauses with
+     | None -> None
+     | Some clause_idx ->
+       Hash_set.remove t.unprocessed_unit_clauses clause_idx;
        let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
        let literal = Clause.unit_literal clause ~assignments:t.assignments in
        (match%optional_u (literal : Literal.Option.t) with
@@ -792,8 +805,8 @@ let create ?(debug = false) () =
   ; assignments = Tf_pair.create (fun (_ : bool) -> Bitset.create ())
   ; trail = Trail_entry.Vec.create ()
   ; clauses = Clause.Pool.create ~chunk_size:4096 ()
-  ; unprocessed_unit_clauses = Bitset.create ()
-  ; clauses_with_active_unit = Bitset.create ()
+  ; unprocessed_unit_clauses = Int.Hash_set.create ()
+  ; clauses_with_active_unit = Int.Hash_set.create ()
   ; clause_scores = F64.Option.Vec.create ()
   ; clause_adjusting_score = Adjusting_score.default ()
   ; clauses_by_literal = Tf_pair.create (fun (_ : bool) -> Vec.Value.create ())
@@ -801,7 +814,7 @@ let create ?(debug = false) () =
   ; watched_clauses_by_literal =
       Tf_pair.create (fun (_ : bool) -> Vec.Value.create ())
   ; vsids = Vsids.create ()
-  ; learned_clauses = Bitset.create ()
+  ; learned_clauses = Int.Hash_set.create ()
   ; simplify_clauses_every = 2500
   ; clause_sorting_buckets = Vec.Value.create ()
   ; luby = Luby.create ~unit_run:#32L
