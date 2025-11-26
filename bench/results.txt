@@ -1,4 +1,6 @@
-at 19f022b (int array clauses)
+int array clauses
+------------------
+
 $ time dune exec --profile=release bench/feel_bench.exe -- -bench sat -sat-max-n 80
 SAT solver benchmarks up to n=80 variables
 Hard 3-SAT (n=50, m=213): Mean: 3.12 ms  StdDev: 102.82 μs  p50: 3.11 ms  p75: 3.15 ms  p90: 3.28 ms  p95: 3.28 ms  p99: 3.28 ms  (n=5)
@@ -25,3 +27,36 @@ FACTOR_1234321: Mean: 423.00 ms  StdDev: 6.85 ms  p50: 422.22 ms  p75: 428.83 ms
 FACTOR_1235321: Mean: 420.59 ms  StdDev: 7.81 ms  p50: 425.38 ms  p75: 426.01 ms  p90: 426.47 ms  p95: 426.47 ms  p99: 426.47 ms  (n=5)
 FAIL_EG: Mean: 49.94 ms  StdDev: 486.63 μs  p50: 49.71 ms  p75: 50.03 ms  p90: 50.85 ms  p95: 50.85 ms  p99: 50.85 ms  (n=5)
 SUBSETS_100: Mean: 46.85 s  StdDev: 1.22 s  p50: 47.58 s  p75: 47.64 s  p90: 47.81 s  p95: 47.81 s  p99: 47.81 s  (n=5)
+
+
+
+Bitset clauses
+------------------
+
+$ time dune exec --profile=release bench/feel_bench.exe -- -bench sat -sat-max-n 80
+SAT solver benchmarks up to n=80 variables
+Hard 3-SAT (n=50, m=213): Mean: 2.68 ms  StdDev: 104.18 μs  p50: 2.64 ms  p75: 2.68 ms  p90: 2.87 ms  p95: 2.87 ms  p99: 2.87 ms  (n=5)
+Hard 3-SAT (n=80, m=340): Mean: 522.15 μs  StdDev: 29.84 μs  p50: 511.07 μs  p75: 534.38 μs  p90: 574.27 μs  p95: 574.27 μs  p99: 574.27 μs  (n=5)
+Uniform 3-SAT (n=50, m=210): Mean: 2.55 ms  StdDev: 35.07 μs  p50: 2.56 ms  p75: 2.57 ms  p90: 2.59 ms  p95: 2.59 ms  p99: 2.59 ms  (n=5)
+Uniform 3-SAT (n=80, m=336): Mean: 491.68 μs  StdDev: 3.61 μs  p50: 493.35 μs  p75: 494.60 μs  p90: 494.88 μs  p95: 494.88 μs  p99: 494.88 μs  (n=5)
+Planted 3-SAT (n=50, m=175): Mean: 316.38 μs  StdDev: 3.65 μs  p50: 316.92 μs  p75: 317.97 μs  p90: 322.13 μs  p95: 322.13 μs  p99: 322.13 μs  (n=5)
+Planted 3-SAT (n=80, m=280): Mean: 429.21 μs  StdDev: 12.25 μs  p50: 421.80 μs  p75: 441.75 μs  p90: 446.26 μs  p95: 446.26 μs  p99: 446.26 μs  (n=5)
+Scale-free 3-SAT (n=50, m=185, alpha=2.30): Mean: 379.14 μs  StdDev: 2.62 μs  p50: 380.37 μs  p75: 380.49 μs  p90: 382.35 μs  p95: 382.35 μs  p99: 382.35 μs  (n=5)
+Scale-free 3-SAT (n=80, m=296, alpha=2.30): Mean: 518.52 μs  StdDev: 24.91 μs  p50: 508.20 μs  p75: 539.12 μs  p90: 556.16 μs  p95: 556.16 μs  p99: 556.16 μs  (n=5)
+Planted 4-SAT (n=50, m=225, min_sat=1): Mean: 442.99 μs  StdDev: 20.30 μs  p50: 443.65 μs  p75: 448.29 μs  p90: 475.40 μs  p95: 475.40 μs  p99: 475.40 μs  (n=5)
+Planted 4-SAT (n=80, m=360, min_sat=1): Mean: 541.57 μs  StdDev: 29.94 μs  p50: 523.42 μs  p75: 545.72 μs  p90: 598.31 μs  p95: 598.31 μs  p99: 598.31 μs  (n=5)
+Forced-backbone 3-SAT (n=50, m=190, backbone=6): Mean: 366.62 μs  StdDev: 2.15 μs  p50: 366.51 μs  p75: 367.24 μs  p90: 370.17 μs  p95: 370.17 μs  p99: 370.17 μs  (n=5)
+Forced-backbone 3-SAT (n=80, m=304, backbone=10): Mean: 767.81 μs  StdDev: 13.19 μs  p50: 775.32 μs  p75: 779.11 μs  p90: 779.79 μs  p95: 779.79 μs  p99: 779.79 μs  (n=5)
+Random k-CNF (n=50, m=200, max_k=5): Mean: 294.93 μs  StdDev: 4.33 μs  p50: 296.77 μs  p75: 298.27 μs  p90: 299.74 μs  p95: 299.74 μs  p99: 299.74 μs  (n=5)
+Random k-CNF (n=80, m=320, max_k=5): Mean: 374.16 μs  StdDev: 6.01 μs  p50: 377.23 μs  p75: 377.63 μs  p90: 381.62 μs  p95: 381.62 μs  p99: 381.62 μs  (n=5)
+dune exec --profile=release bench/feel_bench.exe -- -bench sat -sat-max-n 80  98.66s user 4.68s system 106% cpu 1:36.92 total
+
+$ time dune exec --profile=release bench/feel_bench.exe -- -bench dimacs
+DIMACS example benchmarks:
+SUDOKU: Mean: 529.68 ms  StdDev: 22.62 ms  p50: 530.25 ms  p75: 540.00 ms  p90: 560.16 ms  p95: 560.16 ms  p99: 560.16 ms  (n=5)
+SUCC_EG: Mean: 1.11 ms  StdDev: 57.73 μs  p50: 1.13 ms  p75: 1.16 ms  p90: 1.18 ms  p95: 1.18 ms  p99: 1.18 ms  (n=5)
+FACTOR_1234321: Mean: 1.12 s  StdDev: 75.68 ms  p50: 1.08 s  p75: 1.12 s  p90: 1.26 s  p95: 1.26 s  p99: 1.26 s  (n=5)
+FACTOR_1235321: Mean: 1.06 s  StdDev: 30.58 ms  p50: 1.08 s  p75: 1.09 s  p90: 1.09 s  p95: 1.09 s  p99: 1.09 s  (n=5)
+FAIL_EG: Mean: 44.01 ms  StdDev: 947.74 μs  p50: 43.89 ms  p75: 44.65 ms  p90: 45.42 ms  p95: 45.42 ms  p99: 45.42 ms  (n=5)
+SUBSETS_100: Mean: 57.12 s  StdDev: 716.01 ms  p50: 57.45 s  p75: 57.63 s  p90: 57.85 s  p95: 57.85 s  p99: 57.85 s  (n=5)
+dune exec --profile=release bench/feel_bench.exe -- -bench dimacs  433.31s user 0.43s system 99% cpu 7:13.75 total
