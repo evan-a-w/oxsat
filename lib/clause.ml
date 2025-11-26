@@ -108,8 +108,7 @@ let can_resolve t ~other ~on_var =
 let of_int_array arr =
   let t = Vec.Value.create () in
   Array.iter arr ~f:(fun x -> Vec.Value.push t x);
-  Vec.Value.sort t ~compare:(fun a b ->
-      sort_compare (Int.abs a) (Int.abs b));
+  Vec.Value.sort t ~compare:sort_compare;
   t
 ;;
 
@@ -130,6 +129,6 @@ let resolve_exn t ~other ~on_var =
       match Vec.Value.binary_search t ~f:(fun y -> sort_compare y x) ~which:`First_equal with
       | Some _ -> ()
       | None -> Vec.Value.push t x);
-    Vec.Value.sort_partitioned t ~a_len:old_len ~compare:Int.compare;
+    Vec.Value.sort_partitioned t ~a_len:old_len ~compare:sort_compare;
     Vec.Value.filter_inplace t ~f:(fun x -> Int.abs x <> on_var))
 ;;
