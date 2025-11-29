@@ -1,3 +1,19 @@
+use more hashsets and stuff, fix maybe real bug that makes it much slower???
+---------------------------
+
+$ time dune exec --profile=release bench/feel_bench.exe -- -bench dimacs -min-iterations 1 -max-iterations 1 -sample-runs 1
+DIMACS example benchmarks:
+SUDOKU: Mean: 536.89 ms  StdDev: 0.00 ns  p50: 536.89 ms  p75: 536.89 ms  p90: 536.89 ms  p95: 536.89 ms  p99: 536.89 ms  (n=1)
+SUCC_EG: Mean: 29.86 ms  StdDev: 0.00 ns  p50: 29.86 ms  p75: 29.86 ms  p90: 29.86 ms  p95: 29.86 ms  p99: 29.86 ms  (n=1)
+FACTOR_1234321: Mean: 902.40 ms  StdDev: 0.00 ns  p50: 902.40 ms  p75: 902.40 ms  p90: 902.40 ms  p95: 902.40 ms  p99: 902.40 ms  (n=1)
+FACTOR_1235321: Mean: 793.59 ms  StdDev: 0.00 ns  p50: 793.59 ms  p75: 793.59 ms  p90: 793.59 ms  p95: 793.59 ms  p99: 793.59 ms  (n=1)
+FAIL_EG: Mean: 95.36 ms  StdDev: 0.00 ns  p50: 95.36 ms  p75: 95.36 ms  p90: 95.36 ms  p95: 95.36 ms  p99: 95.36 ms  (n=1)
+SUBSETS_100: Mean: 33.65 s  StdDev: 0.00 ns  p50: 33.65 s  p75: 33.65 s  p90: 33.65 s  p95: 33.65 s  p99: 33.65 s  (n=1)
+dune exec --profile=release bench/feel_bench.exe -- -bench dimacs  1  1  1  124.87s user 8.74s system 108% cpu 2:02.64 total
+
+int array clauses
+------------------
+
 $ time dune exec --profile=release bench/feel_bench.exe -- -bench dimacs -min-iterations 1 -max-iterations 1 -sample-runs 1
 DIMACS example benchmarks:
 SUDOKU: Mean: 298.08 ms  StdDev: 0.00 ns  p50: 298.08 ms  p75: 298.08 ms  p90: 298.08 ms  p95: 298.08 ms  p99: 298.08 ms  (n=1)

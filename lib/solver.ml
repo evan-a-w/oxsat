@@ -286,11 +286,8 @@ let%template update_watched_clauses t ~set_literal =
                   | None -> false
                   | Some _ -> true
                 in
-                let is_our_var =
-                  (* strictly speaking this is implied [false] by [not already_assigned] *)
-                  Literal.var literal' = Literal.var literal
-                in
-                if is_our_var || already_assigned || already_watching
+                (* [literal] is already assigned, so we don't need to explicitly check if [literal'] is the same as [literal] *)
+                if already_assigned || already_watching
                 then None
                 else Some searched_literal)
             in
