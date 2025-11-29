@@ -1893,11 +1893,9 @@ let%test_unit "pop_max drains tree correctly" =
 let%test_unit "large random operation sequence" =
   let open Quickcheck_modules in
   Quickcheck.test
-    ~trials:20
+    ~trials:10000
     ~sexp_of:[%sexp_of: operation list]
-    (Quickcheck.Generator.list_with_length
-       1000
-       [%quickcheck.generator: operation])
+    (Quickcheck.Generator.list [%quickcheck.generator: operation])
     ~f:(fun operations ->
       let rb = RB.create () in
       let map = ref (Map.empty (module Int)) in
