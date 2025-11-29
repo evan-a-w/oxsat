@@ -198,6 +198,8 @@ module Value = struct
     { arr = Array.create ~len:capacity (Obj.magic ()); length = 0 }
   ;;
 
+  let of_array_taking_ownership arr = { arr; length = Array.length arr }
+
   let clear t =
     t.arr <- [||];
     t.length <- 0

@@ -106,10 +106,8 @@ let can_resolve t ~other ~on_var =
 ;;
 
 let of_int_array arr =
-  let t = Vec.Value.create () in
-  Array.iter arr ~f:(fun x -> Vec.Value.push t x);
-  Vec.Value.sort t ~compare:sort_compare;
-  t
+  Array.sort arr ~compare:sort_compare;
+  Vec.Value.of_array_taking_ownership arr
 ;;
 
 let to_int_array t = Vec.Value.to_array t

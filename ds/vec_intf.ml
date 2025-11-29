@@ -87,6 +87,7 @@ module type S_value = sig
   val iteri_rev : 'a t -> f:(int -> 'a -> unit) @ local -> unit
   val iter_rev : 'a t -> f:('a -> unit) @ local -> unit
   val copy : 'a t -> 'a t
+  val of_array_taking_ownership : 'a array -> 'a t
 
   val%template fold
     :  'a t
