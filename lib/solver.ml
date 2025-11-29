@@ -345,7 +345,8 @@ let populate_watched_literals_for_new_clause
    } as t)
   ~ptr
   =
-  let satisfied = ref false in
+  let open Local_ref.O in
+  let satisfied = Local_ref.create false in
   let clause = Clause.Pool.get clauses ptr in
   let unset_literals, set_literals =
     List.partition_tf_local (Clause.literals_list clause) ~f:(fun l ->

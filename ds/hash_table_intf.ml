@@ -38,7 +38,6 @@ module type%template
   module Kv_option :
     Optional_pair.S [@kind k v] with type Fst.t = Key.t and type Snd.t = Value.t
 
-  val choose_arbitrarily : t -> Kv_option.t
   val find : t -> Key.t -> Kv_option.t
   val find_exn : t -> Key.t -> Value.t
   val iter : t -> f:(key:Key.t -> data:Value.t -> unit) @ local -> unit
@@ -55,6 +54,8 @@ module type%template
 
   val%template to_keys_array : t -> Key.t array @ m
   [@@alloc a @ m = (stack_local, heap_global)]
+
+  val choose_arbitrarily : t -> Kv_option.t
 end
 
 module type Hash_table = sig
