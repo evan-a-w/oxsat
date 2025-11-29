@@ -46,6 +46,7 @@ struct
     ; mutable mask : int
     ; mutable length : int
     ; mutable tombstones : int
+    ; mutable first_occupied : int
     ; max_load_percent : int
     }
 
@@ -89,6 +90,7 @@ struct
     ; mask = capacity - 1
     ; length = 0
     ; tombstones = 0
+    ; first_occupied = capacity
     ; max_load_percent
     }
   ;;
@@ -107,7 +109,8 @@ struct
     t.slots <- create_slot_array cap;
     t.mask <- cap - 1;
     t.length <- 0;
-    t.tombstones <- 0
+    t.tombstones <- 0;
+    t.first_occupied <- cap
   ;;
 
   module Kv_option =
@@ -171,11 +174,12 @@ struct
   let mem t key = Kv_option.is_some (find t key)
 
   type insert_result =
-    | Inserted
-    | Updated
+    | Inserted of int
+    | Updated of int
     | Full
 
-  let rec insert_probe t key ~data ~steps ~index ~first_tombstone ~capacity =
+  let rec insert_probe t key ~data ~steps ~index ~first_tombstone ~capacity
+    = exclave_
     if steps >= capacity
     then Full
     else (
@@ -188,7 +192,7 @@ struct
         t.slots.(insert_index) <- Slot.occupied ~key ~data;
         t.length <- t.length + 1;
         if first_tombstone >= 0 then t.tombstones <- t.tombstones - 1;
-        Inserted
+        Inserted insert_index
       | Tombstone ->
         let first_tombstone =
           if first_tombstone >= 0 then first_tombstone else index
@@ -206,7 +210,7 @@ struct
         if Key.equal key slot.#key
         then (
           t.slots.(index) <- #{ slot with data };
-          Updated)
+          Updated index)
         else (
           let next = (index + 1) land t.mask in
           insert_probe
@@ -219,7 +223,7 @@ struct
             ~capacity))
   ;;
 
-  let insert_into_slots t ~key ~data =
+  let insert_into_slots t ~key ~data = exclave_
     let hash = Key.hash key in
     insert_probe
       t
@@ -246,12 +250,14 @@ struct
     t.mask <- new_capacity - 1;
     t.length <- 0;
     t.tombstones <- 0;
+    t.first_occupied <- new_capacity;
     for i = 0 to Array.length old_slots - 1 do
       let slot = old_slots.(i) in
       match slot.#state with
       | Occupied ->
         (match insert_into_slots t ~key:slot.#key ~data:slot.#data with
-         | Inserted | Updated -> ()
+         | Inserted idx | Updated idx ->
+           if idx < t.first_occupied then t.first_occupied <- idx
          | Full -> failwith "rehash failed: table is full")
       | Empty | Tombstone -> ()
     done
@@ -264,13 +270,45 @@ struct
     then rehash t (capacity t)
   ;;
 
+  let[@inline] update_first_occupied_on_insert t idx =
+    if idx < t.first_occupied then t.first_occupied <- idx
+  ;;
+
+  let advance_first_occupied_from t start =
+    let cap = capacity t in
+    let rec loop i =
+      if i >= cap
+      then t.first_occupied <- cap
+      else (
+        match t.slots.(i).#state with
+        | Occupied -> t.first_occupied <- i
+        | Empty | Tombstone -> loop (i + 1))
+    in
+    loop start
+  ;;
+
+  let[@inline] ensure_first_occupied t =
+    let cap = capacity t in
+    if t.first_occupied < cap
+    then (
+      match t.slots.(t.first_occupied).#state with
+      | Occupied -> ()
+      | Empty | Tombstone -> advance_first_occupied_from t t.first_occupied)
+    else if t.length = 0
+    then ()
+    else advance_first_occupied_from t 0
+  ;;
+
   let insert t ~key ~data =
     ensure_capacity t;
     match insert_into_slots t ~key ~data with
-    | Inserted | Updated -> ()
+    | Inserted idx -> update_first_occupied_on_insert t idx
+    | Updated _ -> ()
     | Full ->
       rehash t (capacity t lsl 1);
-      ignore (insert_into_slots t ~key ~data : insert_result)
+      (match insert_into_slots t ~key ~data with
+       | Inserted idx | Updated idx -> update_first_occupied_on_insert t idx
+       | Full -> failwith "insert failed after rehash")
   ;;
 
   let remove t key =
@@ -280,7 +318,8 @@ struct
       let slot = t.slots.(idx) in
       t.slots.(idx) <- #{ slot with state = Tombstone };
       t.length <- t.length - 1;
-      t.tombstones <- t.tombstones + 1)
+      t.tombstones <- t.tombstones + 1;
+      if idx = t.first_occupied then advance_first_occupied_from t (idx + 1))
   ;;
 
   let iter t ~f =
@@ -337,15 +376,20 @@ struct
   ;;
 
   let choose_arbitrarily t =
-    if length t = 0
+    ensure_first_occupied t;
+    let cap = capacity t in
+    if t.first_occupied >= cap
     then Kv_option.none ()
     else (
-      let rec go i =
-        let slot = t.slots.(i) in
-        match slot.#state with
-        | Empty | Tombstone -> go (i + 1)
-        | Occupied -> Kv_option.some #(slot.#key, slot.#data)
-      in
-      go 0)
+      let slot = t.slots.(t.first_occupied) in
+      match slot.#state with
+      | Occupied -> Kv_option.some #(slot.#key, slot.#data)
+      | Empty | Tombstone ->
+        advance_first_occupied_from t (t.first_occupied + 1);
+        if t.first_occupied >= cap
+        then Kv_option.none ()
+        else (
+          let slot = t.slots.(t.first_occupied) in
+          Kv_option.some #(slot.#key, slot.#data)))
   ;;
 end
