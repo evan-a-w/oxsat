@@ -831,8 +831,7 @@ let%template solve ?(local_ assumptions = [||]) t : Sat_result.t @ m =
   if t.has_empty_clause
   then Unsat { unsat_core = Clause.of_int_array [||] }
   else (
-    ((* TODO: I think currently assumptions are buggy because we can have clauses we inferred from previous assumptions that are now false *)
-     let rec go i = exclave_
+    (let rec go i = exclave_
        if i = Array.length assumptions
        then `Continue
        else (
