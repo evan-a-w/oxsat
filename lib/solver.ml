@@ -89,6 +89,14 @@ let assignment t ~var = exclave_
   else None
 ;;
 
+let assignments_array t =
+  (* TODO: should prob be stack *)
+  Array.append
+    (Bitset.to_set_bits_array (Tf_pair.get t.assignments true))
+    (Bitset.to_set_bits_array (Tf_pair.get t.assignments false)
+     |> Array.map ~f:Int.neg)
+;;
+
 let add_clause_activity t ~clause_idx =
   let inc = t.clause_adjusting_score.#inc in
   let to_set =
@@ -178,6 +186,10 @@ let learn_clause_from_failure ~failed_clause t =
             in
             if I64.O.(trail_entry'.#decision_level = t.decision_level)
             then incr num_at_level));
+      Clause.resolve_exn
+        learned
+        ~other:clause
+        ~on_var:(Literal.var trail_entry.#literal);
       if t.debug
       then
         print_s
@@ -186,11 +198,7 @@ let learn_clause_from_failure ~failed_clause t =
               ~learned_clause:(Clause.to_int_array learned : int array)
               ~after_see:(Clause.to_int_array clause : int array)
               (trail_entry.#literal : Literal.t)
-              (!num_at_level : int)];
-      Clause.resolve_exn
-        learned
-        ~other:clause
-        ~on_var:(Literal.var trail_entry.#literal));
+              (!num_at_level : int)]);
   if Local_ref.get rescale then rescale_clause_activities t;
   learned
 ;;
@@ -268,48 +276,54 @@ let%template update_watched_clauses t ~set_literal =
         then (
           Int.Rb_set.insert watched_clauses ~key:clause_idx ~data:();
           process_snapshot (idx + 1) acc)
-        else
-          (let replace_with =
-             Clause.literals_list clause
-             |> List.find_local ~f:(fun literal -> exclave_
-               let literal' = Literal.of_int literal in
-               match
-                 ( Int.Rb_set.mem
-                     (get_by_literal t.watched_clauses_by_literal literal')
-                     clause_idx
-                 , assignment t ~var:(Literal.var literal') )
+        else (
+          let acc =
+            let replace_with =
+              Clause.literals_list clause
+              |> List.find_local ~f:(fun searched_literal -> exclave_
+                let literal' = Literal.of_int searched_literal in
+                let already_watching =
+                  Int.Rb_set.mem
+                    (get_by_literal t.watched_clauses_by_literal literal')
+                    clause_idx
+                in
+                let already_assigned =
+                  match assignment t ~var:(Literal.var literal') with
+                  | None -> false
+                  | Some _ -> true
+                in
+                let is_our_var =
+                  (* strictly speaking this is implied [false] by [not already_assigned] *)
+                  Literal.var literal' = Literal.var literal
+                in
+                if is_our_var || already_assigned || already_watching
+                then None
+                else Some searched_literal)
+            in
+            match replace_with with
+            | Some to_replace ->
+              Int.Rb_set.insert
+                (get_by_literal
+                   t.watched_clauses_by_literal
+                   (Literal.of_int to_replace))
+                ~key:clause_idx
+                ~data:();
+              Null
+            | None ->
+              Int.Rb_set.insert watched_clauses ~key:clause_idx ~data:();
+              (match%optional_u
+                 (Clause.unit_literal clause ~assignments:t.assignments
+                  : Literal.Option.t)
                with
-               | true, _ | false, Some _ -> None
-               | false, None -> Some literal)
-           in
-           match replace_with with
-           | Some to_replace ->
-             Int.Rb_set.remove
-               (get_by_literal t.watched_clauses_by_literal literal)
-               clause_idx;
-             Int.Rb_set.insert
-               (get_by_literal
-                  t.watched_clauses_by_literal
-                  (Literal.of_int to_replace))
-               ~key:clause_idx
-               ~data:();
-             Null
-           | None ->
-             (match%optional_u
-                (Clause.unit_literal clause ~assignments:t.assignments
-                 : Literal.Option.t)
-              with
-              | None ->
-                Int.Rb_set.insert watched_clauses ~key:clause_idx ~data:();
-                This clause_idx
-              | Some (_ : Literal.t) ->
-                Int.Rb_set.insert watched_clauses ~key:clause_idx ~data:();
-                Int.Rb_set.insert
-                  t.unprocessed_unit_clauses
-                  ~key:clause_idx
-                  ~data:();
-                Null))
-          |> process_snapshot (idx + 1))
+               | None -> This clause_idx
+               | Some (_ : Literal.t) ->
+                 Int.Rb_set.insert
+                   t.unprocessed_unit_clauses
+                   ~key:clause_idx
+                   ~data:();
+                 Null)
+          in
+          process_snapshot (idx + 1) acc))
   in
   process_snapshot 0 Null [@nontail]
 ;;
@@ -588,13 +602,9 @@ let backtrack t ~failed_clause =
 let%template make_decision t : _ @ m =
   match%optional_u (Vsids.choose_literal t.vsids : Literal.Option.t) with
   | None ->
-    let literals =
-      Array.append
-        (Bitset.to_set_bits_array (Tf_pair.get t.assignments true))
-        (Bitset.to_set_bits_array (Tf_pair.get t.assignments false)
-         |> Array.map ~f:Int.neg)
-    in
-    `Done (Sat_result.Sat { assignments = Clause.of_int_array literals })
+    `Done
+      (Sat_result.Sat
+         { assignments = Clause.of_int_array (assignments_array t) })
   | Some literal ->
     if t.debug then print_s [%message "make_decision" (literal : Literal.t)];
     t.decision_level <- I64.O.(t.decision_level + #1L);
@@ -751,6 +761,7 @@ let%template rec solve' t : Sat_result.t @ m =
               [%message
                 "try_unit_propagate: found unit"
                   ~clause:(Clause.to_int_array clause : int array)
+                  ~assignments:(assignments_array t : int array)
                   (literal : Literal.t)];
           (match
              add_to_trail
@@ -793,9 +804,7 @@ let%template rec solve' t : Sat_result.t @ m =
    | None ->
      (match (make_decision [@alloc a]) t with
       | `Continue -> solve' t
-      | `Failed_clause failed_clause_idx ->
-        (* I think this is actually not possible / would result in borkage *)
-        learn_from_failure failed_clause_idx
+      | `Failed_clause failed_clause_idx -> learn_from_failure failed_clause_idx
       | `Done sat_result -> (check_sat_result [@alloc a]) t ~sat_result))
   [@exclave_if_stack a]
 [@@alloc a @ m = (stack_local, heap_global)]
