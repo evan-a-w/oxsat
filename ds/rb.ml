@@ -304,6 +304,21 @@ struct
   [@@alloc a @ m = (stack_local, heap_global)]
   ;;
 
+  let%template to_keys_array t : Key.t array @ m =
+    let len = length t in
+    if len = 0
+    then [||]
+    else (
+      (let arr = (Array.create [@alloc a]) ~len (Key.create_for_rb ()) in
+       let idx = ref 0 in
+       iter t ~f:(fun ~key ~data:_ ->
+         arr.(!idx) <- key;
+         incr idx);
+       arr)
+      [@exclave_if_stack a])
+  [@@alloc a @ m = (stack_local, heap_global)]
+  ;;
+
   let of_array_exn arr =
     let t = create () in
     for i = 0 to Array.length arr - 1 do

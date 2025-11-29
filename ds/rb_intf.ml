@@ -71,6 +71,9 @@ module type%template
   val%template to_array : t -> #(Key.t * Value.t) array @ m
   [@@alloc a @ m = (stack_local, heap_global)]
 
+  val%template to_keys_array : t -> Key.t array @ m
+  [@@alloc a @ m = (stack_local, heap_global)]
+
   val of_array_exn : #(Key.t * Value.t) array -> t
   val validate : t -> unit
 

@@ -250,16 +250,19 @@ let%template update_watched_clauses t ~set_literal =
       (Tf_pair.get t.watched_clauses_by_literal (Literal.value literal))
       (Literal.var literal)
   in
-  let snapshot = (Int.Rb_set.to_array [@alloc stack]) watched_clauses in
+  let snapshot = (Int.Rb_set.to_keys_array [@alloc stack]) watched_clauses in
   Int.Rb_set.clear watched_clauses;
   let rec process_snapshot idx acc =
     if idx = Array.length snapshot
     then acc
     else (
+      let clause_idx = snapshot.(idx) in
       match acc with
-      | This _ -> acc
+      | This _ ->
+        (* we cleared this clause from watched literals but haven't added it anywhere else *)
+        Int.Rb_set.insert watched_clauses ~key:clause_idx ~data:();
+        acc
       | Null ->
-        let #(clause_idx, ()) = snapshot.(idx) in
         let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
         if Clause.is_satisfied clause ~assignments:t.assignments
         then (
