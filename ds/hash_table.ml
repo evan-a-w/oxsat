@@ -240,7 +240,7 @@ struct
     t.mask <- new_capacity - 1;
     t.length <- 0;
     t.tombstones <- 0;
-    for i = 0 to Array.length old_slots do
+    for i = 0 to Array.length old_slots - 1 do
       let slot = old_slots.(i) in
       match slot.#state with
       | Occupied ->
@@ -278,7 +278,7 @@ struct
   ;;
 
   let iter t ~f =
-    for i = 0 to Array.length t.slots do
+    for i = 0 to Array.length t.slots - 1 do
       let slot = t.slots.(i) in
       match slot.#state with
       | Occupied -> f ~key:slot.#key ~data:slot.#data
