@@ -56,11 +56,17 @@ struct
   ;;
 
   let next_power_of_two n =
-    if n = 0
+    if n <= 1
     then 1
     else (
-      let prev = Int.floor_log2 n in
-      if prev = n then prev else prev lsl 1)
+      let rec loop pow =
+        if pow >= n
+        then pow
+        else (
+          let next = pow lsl 1 in
+          if next <= 0 then pow else loop next)
+      in
+      loop 1)
   ;;
 
   let[@inline] normalized_capacity cap =
@@ -292,5 +298,54 @@ struct
     let acc = ref init in
     iter t ~f:(fun ~key ~data -> acc := f ~acc:!acc ~key ~data);
     !acc
+  ;;
+
+  let%template to_array t : #(Key.t * Value.t) array @ m =
+    let len = length t in
+    if len = 0
+    then [||]
+    else (
+      (let arr =
+         (Array.create [@alloc a])
+           ~len
+           #(Key.create_for_hash_table (), Value.create_for_hash_table ())
+       in
+       let idx = ref 0 in
+       iter t ~f:(fun ~key ~data ->
+         arr.(!idx) <- #(key, data);
+         incr idx);
+       arr)
+      [@exclave_if_stack a])
+  [@@alloc a @ m = (stack_local, heap_global)]
+  ;;
+
+  let%template to_keys_array t : Key.t array @ m =
+    let len = length t in
+    if len = 0
+    then [||]
+    else (
+      (let arr =
+         (Array.create [@alloc a]) ~len (Key.create_for_hash_table ())
+       in
+       let idx = ref 0 in
+       iter t ~f:(fun ~key ~data:_ ->
+         arr.(!idx) <- key;
+         incr idx);
+       arr)
+      [@exclave_if_stack a])
+  [@@alloc a @ m = (stack_local, heap_global)]
+  ;;
+
+  let choose_arbitrarily t =
+    if length t = 0
+    then Kv_option.none ()
+    else (
+      let rec go i =
+        let slot = t.slots.(i) in
+        match slot.#state with
+        | Empty | Tombstone -> go (i + 1)
+        | Occupied -> Kv_option.some #(slot.#key, slot.#data)
+      in
+      go 0)
   ;;
 end

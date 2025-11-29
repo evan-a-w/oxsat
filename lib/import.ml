@@ -9,6 +9,7 @@ include struct
   module Local_ref = Local_ref
   module Ptr = Ptr
   module Rb = Rb
+  module Hash_table = Hash_table
 end
 
 include struct
@@ -160,5 +161,18 @@ module Int = struct
         type t = unit
 
         let create_for_rb () = ()
+      end)
+
+  module H_set =
+    Hash_table.Make [@kind value value]
+      (struct
+        include Int
+
+        let create_for_hash_table () = 0
+      end)
+      (struct
+        type t = unit
+
+        let create_for_hash_table () = ()
       end)
 end
