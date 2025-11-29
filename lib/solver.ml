@@ -68,13 +68,13 @@ type t =
   ; trail : Trail_entry.Vec.t
   ; clauses : Clause.Pool.t
   ; clause_scores : F64.Option.Vec.t
-  ; clauses_with_active_unit : Int.Hash_set.t
+  ; clauses_with_active_unit : Int.Rb_set.t
   ; unprocessed_unit_clauses : Int.Rb_set.t
-  ; clauses_by_literal : Int.Hash_set.t Vec.Value.t Tf_pair.t
+  ; clauses_by_literal : Int.Rb_set.t Vec.Value.t Tf_pair.t
   ; trail_entry_idx_by_var : I64.Option.Vec.t
   ; watched_clauses_by_literal : Int.Rb_set.t Vec.Value.t Tf_pair.t
   ; vsids : Vsids.t
-  ; learned_clauses : Int.Hash_set.t
+  ; learned_clauses : Int.Rb_set.t
   ; simplify_clauses_every : int
   ; clause_sorting_buckets : int Vec.Value.t
   ; luby : Luby.t
@@ -240,7 +240,7 @@ let on_new_var
         (Vec.Value.fill_to_length ~length:(var + 1) ~f:(fun (_ : int) ->
            with_ ()))
   in
-  fill clauses_by_literal Int.Hash_set.create;
+  fill clauses_by_literal Int.Rb_set.create;
   fill watched_clauses_by_literal Int.Rb_set.create [@nontail]
 ;;
 
@@ -424,7 +424,7 @@ let push_clause
     let clauses_for_lit =
       Vec.Value.get (Tf_pair.get clauses_by_literal (Literal.value literal)) var
     in
-    Hash_set.add clauses_for_lit (Ptr.to_int ptr));
+    Int.Rb_set.insert clauses_for_lit ~key:(Ptr.to_int ptr) ~data:());
   F64.Option.Vec.push
     clause_scores
     (F64.Option.some (Adjusting_score.unit clause_adjusting_score));
@@ -464,10 +464,10 @@ let free_clause
     let get_tang by_literal =
       Vec.Value.get (Tf_pair.get by_literal (Literal.value literal)) var
     in
-    Hash_set.remove (get_tang clauses_by_literal) (Ptr.to_int ptr);
+    Int.Rb_set.remove (get_tang clauses_by_literal) (Ptr.to_int ptr);
     Int.Rb_set.remove (get_tang watched_clauses_by_literal) (Ptr.to_int ptr));
   Int.Rb_set.remove unprocessed_unit_clauses clause_idx;
-  Hash_set.remove clauses_with_active_unit clause_idx;
+  Int.Rb_set.remove clauses_with_active_unit clause_idx;
   F64.Option.Vec.set clause_scores clause_idx (F64.Option.none ());
   Clause.clear clause;
   Clause.Pool.free t.clauses ptr
@@ -492,7 +492,7 @@ let add_to_trail t ~(trail_entry : Trail_entry.t) =
   (match trail_entry.#reason with
    | T #(Decision, _, _) -> ()
    | T #(Clause_idx, clause_ptr, _) ->
-     Hash_set.add t.clauses_with_active_unit clause_ptr);
+     Int.Rb_set.insert t.clauses_with_active_unit ~key:clause_ptr ~data:());
   Bitset.set
     (Tf_pair.get t.assignments (Literal.value trail_entry.#literal))
     (Literal.var trail_entry.#literal);
@@ -520,7 +520,7 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
   (match trail_entry.#reason with
    | T #(Decision, _, _) -> ()
    | T #(Clause_idx, clause_ptr, _) ->
-     Hash_set.remove t.clauses_with_active_unit clause_ptr);
+     Int.Rb_set.remove t.clauses_with_active_unit clause_ptr);
   Vsids.add_to_pool t.vsids ~var:(Literal.var trail_entry.#literal);
   Bitset.clear
     (Tf_pair.get t.assignments (Literal.value trail_entry.#literal))
@@ -589,7 +589,7 @@ let backtrack t ~failed_clause =
     t
     ~decision_level:(second_highest_decision_level t ~clause:learned_clause);
   let ptr = push_clause t ~clause:learned_clause in
-  Hash_set.add t.learned_clauses (Ptr.to_int ptr)
+  Int.Rb_set.insert t.learned_clauses ~key:(Ptr.to_int ptr) ~data:()
 ;;
 
 let%template make_decision t : _ @ m =
@@ -686,7 +686,7 @@ let%template can_trim_clause t ~clause_idx =
             else enough_lbd distinct_decision_levels remaining_literals))
   in
   let enough_lbd = enough_lbd [] literals in
-  (not (Hash_set.mem t.clauses_with_active_unit clause_idx))
+  (not (Int.Rb_set.mem t.clauses_with_active_unit clause_idx))
   && enough_literals
   && enough_lbd
 ;;
@@ -695,8 +695,8 @@ let simplify_clauses t =
   Vec.Value.clear t.clause_sorting_buckets;
   Clause.Pool.iter t.clauses ~f:(fun ptr ->
     let clause_idx = Ptr.to_int ptr in
-    if Hash_set.mem t.learned_clauses clause_idx
-       && (not (Hash_set.mem t.clauses_with_active_unit clause_idx))
+    if Int.Rb_set.mem t.learned_clauses clause_idx
+       && (not (Int.Rb_set.mem t.clauses_with_active_unit clause_idx))
        && can_trim_clause t ~clause_idx
     then Vec.Value.push t.clause_sorting_buckets clause_idx);
   let compare_by_score a b =
@@ -717,7 +717,7 @@ let simplify_clauses t =
             (clause_idx : int)
             ~clause:(Clause.to_int_array clause : int array)]);
     free_clause t (Ptr.of_int clause_idx);
-    Hash_set.remove t.learned_clauses clause_idx
+    Int.Rb_set.remove t.learned_clauses clause_idx
   done
 ;;
 
@@ -822,7 +822,7 @@ let create ?(debug = false) () =
   ; trail = Trail_entry.Vec.create ()
   ; clauses = Clause.Pool.create ~chunk_size:4096 ()
   ; unprocessed_unit_clauses = Int.Rb_set.create ()
-  ; clauses_with_active_unit = Int.Hash_set.create ()
+  ; clauses_with_active_unit = Int.Rb_set.create ()
   ; clause_scores = F64.Option.Vec.create ()
   ; clause_adjusting_score = Adjusting_score.default ()
   ; clauses_by_literal = Tf_pair.create (fun (_ : bool) -> Vec.Value.create ())
@@ -830,7 +830,7 @@ let create ?(debug = false) () =
   ; watched_clauses_by_literal =
       Tf_pair.create (fun (_ : bool) -> Vec.Value.create ())
   ; vsids = Vsids.create ()
-  ; learned_clauses = Int.Hash_set.create ()
+  ; learned_clauses = Int.Rb_set.create ()
   ; simplify_clauses_every = 2500
   ; clause_sorting_buckets = Vec.Value.create ()
   ; luby = Luby.create ~unit_run:#32L
