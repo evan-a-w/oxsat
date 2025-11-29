@@ -285,19 +285,23 @@ struct
     fold_helper t t.root ~done_ ~acc:init ~f [@nontail]
   ;;
 
-  let to_array t =
+  let%template to_array t : #(Key.t * Value.t) array @ m =
     let len = length t in
     if len = 0
     then [||]
     else (
-      let arr =
-        Array.create ~len #(Key.create_for_rb (), Value.create_for_rb ())
-      in
-      let idx = ref 0 in
-      iter t ~f:(fun ~key ~data ->
-        arr.(!idx) <- #(key, data);
-        incr idx);
-      arr)
+      (let arr =
+         (Array.create [@alloc a])
+           ~len
+           #(Key.create_for_rb (), Value.create_for_rb ())
+       in
+       let idx = ref 0 in
+       iter t ~f:(fun ~key ~data ->
+         arr.(!idx) <- #(key, data);
+         incr idx);
+       arr)
+      [@exclave_if_stack a])
+  [@@alloc a @ m = (stack_local, heap_global)]
   ;;
 
   let of_array_exn arr =

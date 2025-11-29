@@ -133,3 +133,14 @@ let resolve_exn t ~other ~on_var =
     Vec.Value.sort_partitioned t ~a_len:old_len ~compare:sort_compare;
     Vec.Value.filter_inplace t ~f:(fun x -> Int.abs x <> on_var))
 ;;
+
+let%expect_test "unit literal detects single remaining negative" =
+  let clause = of_int_array [| -1; -4; -6 |] in
+  let assignments = Tf_pair.create (fun (_ : bool) -> Bitset.create ()) in
+  Bitset.set (Tf_pair.get assignments true) 4;
+  Bitset.set (Tf_pair.get assignments true) 6;
+  (match%optional_u (unit_literal clause ~assignments : Literal.Option.t) with
+   | None -> print_endline "None"
+   | Some literal -> Literal.to_int literal |> Int.to_string |> print_endline);
+  [%expect {| -1 |}]
+;;

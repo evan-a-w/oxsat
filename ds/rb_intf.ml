@@ -67,7 +67,10 @@ module type%template
   val length : t -> int
   val is_empty : t -> bool
   val clear : t -> unit
-  val to_array : t -> #(Key.t * Value.t) array
+
+  val%template to_array : t -> #(Key.t * Value.t) array @ m
+  [@@alloc a @ m = (stack_local, heap_global)]
+
   val of_array_exn : #(Key.t * Value.t) array -> t
   val validate : t -> unit
 
