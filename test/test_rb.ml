@@ -1605,15 +1605,12 @@ module Quickcheck_modules = struct
     | Length
   [@@deriving sexp_of, quickcheck]
 
-  (* Compare RB tree to Map after executing operations *)
   let compare_to_map rb map =
-    (* Check length *)
     let rb_length = RB.length rb in
     let map_length = Map.length map in
     if rb_length <> map_length
     then
       failwith (sprintf "Length mismatch: RB=%d, Map=%d" rb_length map_length);
-    (* Check all keys in map exist in rb with same values *)
     Map.iteri map ~f:(fun ~key ~data ->
       match RB.find rb key |> RB.Kv_option.is_some with
       | false -> failwith (sprintf "Key %d in Map but not in RB" key)
@@ -1627,7 +1624,6 @@ module Quickcheck_modules = struct
                key
                rb_value
                data));
-    (* Check all keys in rb exist in map *)
     RB.iter rb ~f:(fun ~key ~data ->
       match Map.find map key with
       | None -> failwith (sprintf "Key %d in RB but not in Map" key)
@@ -1640,11 +1636,9 @@ module Quickcheck_modules = struct
                key
                data
                map_value));
-    (* Validate RB tree invariants *)
     RB.validate rb
   ;;
 
-  (* Execute operation on both RB and Map *)
   let execute_operation rb map op =
     match op with
     | Insert (key, value) ->
@@ -1836,11 +1830,9 @@ let%test_unit "pop_min drains tree correctly" =
     ~f:(fun inserts ->
       let rb = RB.create () in
       let map = ref (Map.empty (module Int)) in
-      (* Insert all *)
       List.iter inserts ~f:(fun (key, value) ->
         RB.insert rb ~key ~data:value;
         map := Map.set !map ~key ~data:value);
-      (* Pop all mins *)
       while not (RB.is_empty rb) do
         let rb_result = RB.pop_min rb in
         let map_min = Map.min_elt !map in
