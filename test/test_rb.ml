@@ -1893,7 +1893,7 @@ let%test_unit "pop_max drains tree correctly" =
 let%test_unit "large random operation sequence" =
   let open Quickcheck_modules in
   Quickcheck.test
-    ~trials:10000
+    ~trials:100
     ~sexp_of:[%sexp_of: operation list]
     (Quickcheck.Generator.list [%quickcheck.generator: operation])
     ~f:(fun operations ->

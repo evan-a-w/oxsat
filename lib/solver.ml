@@ -259,23 +259,17 @@ let%template update_watched_clauses t ~set_literal =
       (Literal.var literal)
   in
   let snapshot = (Int.Rb_set.to_keys_array [@alloc stack]) watched_clauses in
-  Int.Rb_set.clear watched_clauses;
   let rec process_snapshot idx acc =
     if idx = Array.length snapshot
     then acc
     else (
       let clause_idx = snapshot.(idx) in
       match acc with
-      | This _ ->
-        (* we cleared this clause from watched literals but haven't added it anywhere else *)
-        Int.Rb_set.insert watched_clauses ~key:clause_idx ~data:();
-        acc
+      | This _ -> acc
       | Null ->
         let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
         if Clause.is_satisfied clause ~assignments:t.assignments
-        then (
-          Int.Rb_set.insert watched_clauses ~key:clause_idx ~data:();
-          process_snapshot (idx + 1) acc)
+        then process_snapshot (idx + 1) acc
         else (
           let acc =
             let replace_with =
@@ -302,6 +296,9 @@ let%template update_watched_clauses t ~set_literal =
             in
             match replace_with with
             | Some to_replace ->
+              Int.Rb_set.remove
+                (get_by_literal t.watched_clauses_by_literal literal)
+                clause_idx;
               Int.Rb_set.insert
                 (get_by_literal
                    t.watched_clauses_by_literal
@@ -310,7 +307,6 @@ let%template update_watched_clauses t ~set_literal =
                 ~data:();
               Null
             | None ->
-              Int.Rb_set.insert watched_clauses ~key:clause_idx ~data:();
               (match%optional_u
                  (Clause.unit_literal clause ~assignments:t.assignments
                   : Literal.Option.t)
