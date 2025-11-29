@@ -604,8 +604,9 @@ let%template make_decision t : _ @ m =
        ; decision_level = t.decision_level
        }
     in
-    let (_ : int or_null) = add_to_trail t ~trail_entry in
-    `Continue
+    (match add_to_trail t ~trail_entry with
+     | Null -> `Continue
+     | This i -> `Failed_clause i)
 [@@exclave_if_stack] [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
@@ -763,32 +764,39 @@ let%template rec solve' t : Sat_result.t @ m =
            | Null -> try_unit_propagate ()
            | This failed_clause_idx -> Some failed_clause_idx))
    in
+   let learn_from_failure failed_clause_idx : Sat_result.t @ m =
+     match[@exclave_if_stack a] I64.O.(t.decision_level = #0L) with
+     | true ->
+       let failed_clause =
+         Clause.Pool.get t.clauses (Ptr.of_int failed_clause_idx)
+       in
+       let learned_clause =
+         (* raise when it's conflicts from a unit clause we deduced. *)
+         try learn_clause_from_failure t ~failed_clause with
+         | _ -> Clause.copy failed_clause
+       in
+       Unsat { unsat_core = learned_clause }
+     | false ->
+       let failed_clause =
+         Clause.Pool.get t.clauses (Ptr.of_int failed_clause_idx)
+       in
+       backtrack t ~failed_clause;
+       t.conflicts <- I64.O.(t.conflicts + #1L);
+       if I64.O.(t.conflicts >= Luby.value t.luby && t.decision_level > #0L)
+       then (
+         ignore (Luby.next t.luby);
+         restart t);
+       solve' t
+   in
    match try_unit_propagate () with
+   | Some failed_clause_idx -> learn_from_failure failed_clause_idx
    | None ->
      (match (make_decision [@alloc a]) t with
       | `Continue -> solve' t
-      | `Done sat_result -> (check_sat_result [@alloc a]) t ~sat_result)
-   | Some failed_clause_idx when I64.O.(t.decision_level = #0L) ->
-     let failed_clause =
-       Clause.Pool.get t.clauses (Ptr.of_int failed_clause_idx)
-     in
-     let learned_clause =
-       (* raise when it's conflicts from a unit clause we deduced. *)
-       try learn_clause_from_failure t ~failed_clause with
-       | _ -> Clause.copy failed_clause
-     in
-     Unsat { unsat_core = learned_clause }
-   | Some failed_clause_idx ->
-     let failed_clause =
-       Clause.Pool.get t.clauses (Ptr.of_int failed_clause_idx)
-     in
-     backtrack t ~failed_clause;
-     t.conflicts <- I64.O.(t.conflicts + #1L);
-     if I64.O.(t.conflicts >= Luby.value t.luby && t.decision_level > #0L)
-     then (
-       ignore (Luby.next t.luby);
-       restart t);
-     solve' t)
+      | `Failed_clause failed_clause_idx ->
+        (* I think this is actually not possible / would result in borkage *)
+        learn_from_failure failed_clause_idx
+      | `Done sat_result -> (check_sat_result [@alloc a]) t ~sat_result))
   [@exclave_if_stack a]
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
