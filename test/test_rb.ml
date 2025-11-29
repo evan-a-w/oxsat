@@ -1179,7 +1179,8 @@ let%expect_test "iterator - basic traversal" =
   in
   let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
   let t = RB.create () in
-  List.iter [ 5; 3; 7; 1; 9; 2; 8 ] ~f:(fun k -> RB.insert t ~key:k ~data:(k * 10));
+  List.iter [ 5; 3; 7; 1; 9; 2; 8 ] ~f:(fun k ->
+    RB.insert t ~key:k ~data:(k * 10));
   let iter = RB.Iter.create t in
   let rec loop () =
     if not (RB.Iter.is_done iter)
@@ -1221,7 +1222,8 @@ let%expect_test "iterator - empty tree" =
   print_s [%message (RB.Iter.is_done iter : bool)];
   let result = RB.Iter.next iter in
   print_s [%message (RB.Kv_option.is_none result : bool)];
-  [%expect {|
+  [%expect
+    {|
     ("RB.Iter.is_done iter" true)
     ("RB.Kv_option.is_none result" true) |}]
 ;;
@@ -1411,7 +1413,8 @@ let%expect_test "iterator - create_from between elements" =
   in
   let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
   let t = RB.create () in
-  List.iter [ 1; 3; 5; 7; 9; 11 ] ~f:(fun k -> RB.insert t ~key:k ~data:(k * 10));
+  List.iter [ 1; 3; 5; 7; 9; 11 ] ~f:(fun k ->
+    RB.insert t ~key:k ~data:(k * 10));
   let iter = RB.Iter.create_from t 6 in
   print_s [%message "Starting from 6 (between 5 and 7)"];
   let rec loop () =
@@ -1563,10 +1566,349 @@ let%expect_test "iterator - stress test with create_from" =
       let #(first_key, _) = RB.Kv_option.value_exn first_result in
       (* Verify first key is >= start *)
       if first_key < start
-      then print_s [%message "ERROR: first_key < start" (first_key : int) (start : int)])
+      then
+        print_s
+          [%message "ERROR: first_key < start" (first_key : int) (start : int)])
   in
   (* Test various starting points *)
   List.iter [ 0; 100; 250; 500; 750; 999; 1000 ] ~f:test_starting_point;
   print_endline "All create_from tests passed";
   [%expect {| All create_from tests passed |}]
+;;
+
+(* Quickcheck tests comparing RB tree to Int.Map *)
+module Quickcheck_modules = struct
+  module Int_key = struct
+    type t = int
+
+    let compare = Int.compare
+    let create_for_rb () = 0
+  end
+
+  module Int_value = struct
+    type t = int
+
+    let create_for_rb () = 0
+  end
+
+  module RB = Rb.Make [@kind value value] (Int_key) (Int_value)
+
+  type operation =
+    | Insert of int * int
+    | Remove of int
+    | Find of int
+    | Mem of int
+    | Min
+    | Max
+    | PopMin
+    | PopMax
+    | Length
+  [@@deriving sexp_of, quickcheck]
+
+  (* Compare RB tree to Map after executing operations *)
+  let compare_to_map rb map =
+    (* Check length *)
+    let rb_length = RB.length rb in
+    let map_length = Map.length map in
+    if rb_length <> map_length
+    then
+      failwith (sprintf "Length mismatch: RB=%d, Map=%d" rb_length map_length);
+    (* Check all keys in map exist in rb with same values *)
+    Map.iteri map ~f:(fun ~key ~data ->
+      match RB.find rb key |> RB.Kv_option.is_some with
+      | false -> failwith (sprintf "Key %d in Map but not in RB" key)
+      | true ->
+        let rb_value = RB.find_exn rb key in
+        if rb_value <> data
+        then
+          failwith
+            (sprintf
+               "Value mismatch for key %d: RB=%d, Map=%d"
+               key
+               rb_value
+               data));
+    (* Check all keys in rb exist in map *)
+    RB.iter rb ~f:(fun ~key ~data ->
+      match Map.find map key with
+      | None -> failwith (sprintf "Key %d in RB but not in Map" key)
+      | Some map_value ->
+        if data <> map_value
+        then
+          failwith
+            (sprintf
+               "Value mismatch for key %d: RB=%d, Map=%d"
+               key
+               data
+               map_value));
+    (* Validate RB tree invariants *)
+    RB.validate rb
+  ;;
+
+  (* Execute operation on both RB and Map *)
+  let execute_operation rb map op =
+    match op with
+    | Insert (key, value) ->
+      RB.insert rb ~key ~data:value;
+      Map.set map ~key ~data:value
+    | Remove key ->
+      RB.remove rb key;
+      Map.remove map key
+    | Find key ->
+      let rb_result = RB.find rb key in
+      let map_result = Map.find map key in
+      (match RB.Kv_option.is_some rb_result, map_result with
+       | true, Some map_value ->
+         let #(_, rb_value) = RB.Kv_option.value_exn rb_result in
+         if rb_value <> map_value
+         then
+           failwith
+             (sprintf
+                "Find mismatch for key %d: RB=%d, Map=%d"
+                key
+                rb_value
+                map_value)
+       | false, None -> ()
+       | true, None ->
+         failwith (sprintf "Find: key %d in RB but not in Map" key)
+       | false, Some _ ->
+         failwith (sprintf "Find: key %d in Map but not in RB" key));
+      map
+    | Mem key ->
+      let rb_result : bool = RB.mem rb key in
+      let map_result : bool = Map.mem map key in
+      if Bool.( <> ) rb_result map_result
+      then
+        failwith
+          (sprintf
+             "Mem mismatch for key %d: RB=%b, Map=%b"
+             key
+             rb_result
+             map_result);
+      map
+    | Min ->
+      let rb_result = RB.min rb in
+      let map_result = Map.min_elt map in
+      (match RB.Kv_option.is_some rb_result, map_result with
+       | true, Some (map_key, map_value) ->
+         let #(rb_key, rb_value) = RB.Kv_option.value_exn rb_result in
+         if rb_key <> map_key || rb_value <> map_value
+         then
+           failwith
+             (sprintf
+                "Min mismatch: RB=(%d,%d), Map=(%d,%d)"
+                rb_key
+                rb_value
+                map_key
+                map_value)
+       | false, None -> ()
+       | true, None -> failwith "Min: RB has min but Map doesn't"
+       | false, Some _ -> failwith "Min: Map has min but RB doesn't");
+      map
+    | Max ->
+      let rb_result = RB.max rb in
+      let map_result = Map.max_elt map in
+      (match RB.Kv_option.is_some rb_result, map_result with
+       | true, Some (map_key, map_value) ->
+         let #(rb_key, rb_value) = RB.Kv_option.value_exn rb_result in
+         if rb_key <> map_key || rb_value <> map_value
+         then
+           failwith
+             (sprintf
+                "Max mismatch: RB=(%d,%d), Map=(%d,%d)"
+                rb_key
+                rb_value
+                map_key
+                map_value)
+       | false, None -> ()
+       | true, None -> failwith "Max: RB has max but Map doesn't"
+       | false, Some _ -> failwith "Max: Map has max but RB doesn't");
+      map
+    | PopMin ->
+      let rb_result = RB.pop_min rb in
+      let map_result = Map.min_elt map in
+      (match RB.Kv_option.is_some rb_result, map_result with
+       | true, Some (map_key, map_value) ->
+         let #(rb_key, rb_value) = RB.Kv_option.value_exn rb_result in
+         if rb_key <> map_key || rb_value <> map_value
+         then
+           failwith
+             (sprintf
+                "PopMin mismatch: RB=(%d,%d), Map=(%d,%d)"
+                rb_key
+                rb_value
+                map_key
+                map_value);
+         Map.remove map map_key
+       | false, None -> map
+       | true, None -> failwith "PopMin: RB has min but Map doesn't"
+       | false, Some _ -> failwith "PopMin: Map has min but RB doesn't")
+    | PopMax ->
+      let rb_result = RB.pop_max rb in
+      let map_result = Map.max_elt map in
+      (match RB.Kv_option.is_some rb_result, map_result with
+       | true, Some (map_key, map_value) ->
+         let #(rb_key, rb_value) = RB.Kv_option.value_exn rb_result in
+         if rb_key <> map_key || rb_value <> map_value
+         then
+           failwith
+             (sprintf
+                "PopMax mismatch: RB=(%d,%d), Map=(%d,%d)"
+                rb_key
+                rb_value
+                map_key
+                map_value);
+         Map.remove map map_key
+       | false, None -> map
+       | true, None -> failwith "PopMax: RB has max but Map doesn't"
+       | false, Some _ -> failwith "PopMax: Map has max but RB doesn't")
+    | Length ->
+      let rb_len = RB.length rb in
+      let map_len = Map.length map in
+      if rb_len <> map_len
+      then failwith (sprintf "Length mismatch: RB=%d, Map=%d" rb_len map_len);
+      map
+  ;;
+end
+
+let%test_unit "random operations match Map" =
+  let open Quickcheck_modules in
+  Quickcheck.test
+    ~sexp_of:[%sexp_of: operation list]
+    (Quickcheck.Generator.list_with_length
+       100
+       [%quickcheck.generator: operation])
+    ~f:(fun operations ->
+      let rb = RB.create () in
+      let map = ref (Map.empty (module Int)) in
+      List.iter operations ~f:(fun op ->
+        map := execute_operation rb !map op;
+        compare_to_map rb !map))
+;;
+
+let%test_unit "insert then remove sequence" =
+  let open Quickcheck_modules in
+  Quickcheck.test
+    ~sexp_of:[%sexp_of: (int * int) list * int list]
+    (Quickcheck.Generator.tuple2
+       (Quickcheck.Generator.list [%quickcheck.generator: int * int])
+       (Quickcheck.Generator.list [%quickcheck.generator: int]))
+    ~f:(fun (inserts, removes) ->
+      let rb = RB.create () in
+      let map = ref (Map.empty (module Int)) in
+      (* Insert phase *)
+      List.iter inserts ~f:(fun (key, value) ->
+        RB.insert rb ~key ~data:value;
+        map := Map.set !map ~key ~data:value;
+        compare_to_map rb !map);
+      (* Remove phase *)
+      List.iter removes ~f:(fun key ->
+        RB.remove rb key;
+        map := Map.remove !map key;
+        compare_to_map rb !map))
+;;
+
+let%test_unit "alternating insert/remove" =
+  let open Quickcheck_modules in
+  Quickcheck.test
+    ~sexp_of:[%sexp_of: (int * int) list]
+    (Quickcheck.Generator.list [%quickcheck.generator: int * int])
+    ~f:(fun pairs ->
+      let rb = RB.create () in
+      let map = ref (Map.empty (module Int)) in
+      List.iter pairs ~f:(fun (key, value) ->
+        (* Insert *)
+        RB.insert rb ~key ~data:value;
+        map := Map.set !map ~key ~data:value;
+        compare_to_map rb !map;
+        (* Remove if exists *)
+        if Map.mem !map key
+        then (
+          RB.remove rb key;
+          map := Map.remove !map key;
+          compare_to_map rb !map)))
+;;
+
+let%test_unit "pop_min drains tree correctly" =
+  let open Quickcheck_modules in
+  Quickcheck.test
+    ~sexp_of:[%sexp_of: (int * int) list]
+    (Quickcheck.Generator.list [%quickcheck.generator: int * int])
+    ~f:(fun inserts ->
+      let rb = RB.create () in
+      let map = ref (Map.empty (module Int)) in
+      (* Insert all *)
+      List.iter inserts ~f:(fun (key, value) ->
+        RB.insert rb ~key ~data:value;
+        map := Map.set !map ~key ~data:value);
+      (* Pop all mins *)
+      while not (RB.is_empty rb) do
+        let rb_result = RB.pop_min rb in
+        let map_min = Map.min_elt !map in
+        match map_min with
+        | None -> failwith "Map is empty but RB is not"
+        | Some (min_key, min_value) ->
+          let #(rb_key, rb_value) = RB.Kv_option.value_exn rb_result in
+          if rb_key <> min_key || rb_value <> min_value
+          then
+            failwith
+              (sprintf
+                 "PopMin mismatch: RB=(%d,%d), Map=(%d,%d)"
+                 rb_key
+                 rb_value
+                 min_key
+                 min_value);
+          map := Map.remove !map min_key;
+          compare_to_map rb !map
+      done;
+      if not (Map.is_empty !map) then failwith "RB is empty but Map is not")
+;;
+
+let%test_unit "pop_max drains tree correctly" =
+  let open Quickcheck_modules in
+  Quickcheck.test
+    ~sexp_of:[%sexp_of: (int * int) list]
+    (Quickcheck.Generator.list [%quickcheck.generator: int * int])
+    ~f:(fun inserts ->
+      let rb = RB.create () in
+      let map = ref (Map.empty (module Int)) in
+      (* Insert all *)
+      List.iter inserts ~f:(fun (key, value) ->
+        RB.insert rb ~key ~data:value;
+        map := Map.set !map ~key ~data:value);
+      (* Pop all maxes *)
+      while not (RB.is_empty rb) do
+        let rb_result = RB.pop_max rb in
+        let map_max = Map.max_elt !map in
+        match map_max with
+        | None -> failwith "Map is empty but RB is not"
+        | Some (max_key, max_value) ->
+          let #(rb_key, rb_value) = RB.Kv_option.value_exn rb_result in
+          if rb_key <> max_key || rb_value <> max_value
+          then
+            failwith
+              (sprintf
+                 "PopMax mismatch: RB=(%d,%d), Map=(%d,%d)"
+                 rb_key
+                 rb_value
+                 max_key
+                 max_value);
+          map := Map.remove !map max_key;
+          compare_to_map rb !map
+      done;
+      if not (Map.is_empty !map) then failwith "RB is empty but Map is not")
+;;
+
+let%test_unit "large random operation sequence" =
+  let open Quickcheck_modules in
+  Quickcheck.test
+    ~trials:20
+    ~sexp_of:[%sexp_of: operation list]
+    (Quickcheck.Generator.list_with_length
+       1000
+       [%quickcheck.generator: operation])
+    ~f:(fun operations ->
+      let rb = RB.create () in
+      let map = ref (Map.empty (module Int)) in
+      List.iter operations ~f:(fun op -> map := execute_operation rb !map op);
+      compare_to_map rb !map)
 ;;
