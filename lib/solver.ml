@@ -250,63 +250,65 @@ let%template update_watched_clauses t ~set_literal =
       (Tf_pair.get t.watched_clauses_by_literal (Literal.value literal))
       (Literal.var literal)
   in
-  Int.Rb_set.fold_or_null
-    watched_clauses
-    ~init:Null
-    ~f:(fun ~done_ ~acc ~key:clause_idx ~data:() ->
+  let snapshot = Int.Rb_set.to_array watched_clauses in
+  Int.Rb_set.clear watched_clauses;
+  let rec process_snapshot idx acc =
+    if idx = Array.length snapshot
+    then acc
+    else (
       match acc with
       | This _ -> acc
       | Null ->
+        let #(clause_idx, ()) = snapshot.(idx) in
         let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
         if Clause.is_satisfied clause ~assignments:t.assignments
-        then Null
-        else (
-          if t.debug
-          then
-            print_s
-              [%message
-                "update_watched_clauses"
-                  ~clause:(Clause.to_int_array clause : int array)];
-          let replace_with =
-            Clause.literals_list clause
-            |> List.find_local ~f:(fun literal -> exclave_
-              let literal' = Literal.of_int literal in
-              match
-                ( Int.Rb_set.mem
-                    (get_by_literal t.watched_clauses_by_literal literal')
-                    clause_idx
-                , assignment t ~var:(Literal.var literal') )
+        then (
+          Int.Rb_set.insert watched_clauses ~key:clause_idx ~data:();
+          Null)
+        else
+          (let replace_with =
+             Clause.literals_list clause
+             |> List.find_local ~f:(fun literal -> exclave_
+               let literal' = Literal.of_int literal in
+               match
+                 ( Int.Rb_set.mem
+                     (get_by_literal t.watched_clauses_by_literal literal')
+                     clause_idx
+                 , assignment t ~var:(Literal.var literal') )
+               with
+               | true, _ | false, Some _ -> None
+               | false, None -> Some literal)
+           in
+           match replace_with with
+           | Some to_replace ->
+             Int.Rb_set.remove
+               (get_by_literal t.watched_clauses_by_literal literal)
+               clause_idx;
+             Int.Rb_set.insert
+               (get_by_literal
+                  t.watched_clauses_by_literal
+                  (Literal.of_int to_replace))
+               ~key:clause_idx
+               ~data:();
+             Null
+           | None ->
+             (match%optional_u
+                (Clause.unit_literal clause ~assignments:t.assignments
+                 : Literal.Option.t)
               with
-              | true, _ | false, Some _ -> None
-              | false, None -> Some literal)
-          in
-          match replace_with with
-          | Some to_replace ->
-            Int.Rb_set.remove watched_clauses clause_idx;
-            Int.Rb_set.remove
-              (get_by_literal t.watched_clauses_by_literal literal)
-              clause_idx;
-            Int.Rb_set.insert
-              (get_by_literal
-                 t.watched_clauses_by_literal
-                 (Literal.of_int to_replace))
-              ~key:clause_idx
-              ~data:();
-            Null
-          | None ->
-            (match%optional_u
-               (Clause.unit_literal clause ~assignments:t.assignments
-                : Literal.Option.t)
-             with
-             | None ->
-               Local_ref.set done_ true;
-               This clause_idx
-             | Some (_ : Literal.t) ->
-               Int.Rb_set.insert
-                 t.unprocessed_unit_clauses
-                 ~key:clause_idx
-                 ~data:();
-               Null)))
+              | None ->
+                Int.Rb_set.insert watched_clauses ~key:clause_idx ~data:();
+                This clause_idx
+              | Some (_ : Literal.t) ->
+                Int.Rb_set.insert watched_clauses ~key:clause_idx ~data:();
+                Int.Rb_set.insert
+                  t.unprocessed_unit_clauses
+                  ~key:clause_idx
+                  ~data:();
+                Null))
+          |> process_snapshot (idx + 1))
+  in
+  process_snapshot 0 Null
 ;;
 
 let populate_watched_literals_for_new_clause
@@ -632,7 +634,12 @@ let%template check_sat_result t ~(sat_result : _ @ m) : _ @ m =
     then
       Clause.Pool.iter t.clauses ~f:(fun ptr ->
         let clause = Clause.Pool.get t.clauses ptr in
-        assert (Clause.is_satisfied clause ~assignments:t.assignments));
+        if not (Clause.is_satisfied clause ~assignments:t.assignments)
+        then
+          Error.raise_s
+            [%message
+              "BUG: clause isn't satisfied in result"
+                ~clause:(Clause.to_int_array clause : int array)]);
     sat_result
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;

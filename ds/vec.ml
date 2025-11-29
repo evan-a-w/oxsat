@@ -611,4 +611,10 @@ module Value = struct
     print_s [%sexp (search 0 `Last_le : int option)];
     [%expect {| () |}]
   ;;
+
+  let%expect_test "fold" =
+    let t = of_list [ -5; 10; 14; 18 ] in
+    (fold [@mode local]) t ~init:0 ~f:( + ) |> Int.to_string |> print_endline;
+    [%expect {| 37 |}]
+  ;;
 end
