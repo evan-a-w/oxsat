@@ -83,11 +83,12 @@ let set_all t ~up_to =
 ;;
 
 let popcount t =
-  let count = ref 0 in
+  let open Local_ref.O in
+  let count = Local_ref.create 0 in
   for i = 0 to t.num_words - 1 do
     count := !count + (I64.popcount t.arr.(i) |> I64.to_int_trunc)
   done;
-  !count
+  !count [@nontail]
 ;;
 
 let find_first_set t ~start_pos =

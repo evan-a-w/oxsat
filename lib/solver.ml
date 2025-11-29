@@ -89,13 +89,24 @@ let assignment t ~var = exclave_
   else None
 ;;
 
-let assignments_array t =
-  (* TODO: should prob be stack *)
-  Array.append
-    (Bitset.to_set_bits_array (Tf_pair.get t.assignments true))
-    (Bitset.to_set_bits_array (Tf_pair.get t.assignments false)
-     |> Array.map ~f:Int.neg)
+let%template assignments_array t : _ @ m =
+  (let open Local_ref.O in
+   let f = Tf_pair.get t.assignments false in
+   let t = Tf_pair.get t.assignments true in
+   let len = Bitset.popcount f + Bitset.popcount t in
+   let res = (Array.create [@alloc a]) ~len 0 in
+   let loc = Local_ref.create 0 in
+   let add i =
+     res.(!loc) <- i;
+     loc := !loc + 1
+   in
+   Bitset.iter_set_bits t ~f:add;
+   Bitset.iter_set_bits f ~f:(fun i -> add (-i));
+   res) [@exclave_if_stack a]
+[@@alloc a @ m = (stack_local, heap_global)]
 ;;
+
+let _ = assignments_array [@alloc stack]
 
 let add_clause_activity t ~clause_idx =
   let inc = t.clause_adjusting_score.#inc in
@@ -593,25 +604,29 @@ let backtrack t ~failed_clause =
   Int.H_set.insert t.learned_clauses ~key:(Ptr.to_int ptr) ~data:()
 ;;
 
+let%template make_decision' t ~literal : _ @ m =
+  if t.debug then print_s [%message "make_decision" (literal : Literal.t)];
+  t.decision_level <- I64.O.(t.decision_level + #1L);
+  let trail_entry : Trail_entry.t =
+    #{ reason = Reason.decision literal
+     ; literal
+     ; decision_level = t.decision_level
+     }
+  in
+  match add_to_trail t ~trail_entry with
+  | Null -> `Continue
+  | This i -> `Failed_clause i
+[@@exclave_if_stack] [@@alloc a @ m = (stack_local, heap_global)]
+;;
+
 let%template make_decision t : _ @ m =
   match%optional_u (Vsids.choose_literal t.vsids : Literal.Option.t) with
   | None ->
     `Done
       (Sat_result.Sat
          { assignments = Clause.of_int_array (assignments_array t) })
-  | Some literal ->
-    if t.debug then print_s [%message "make_decision" (literal : Literal.t)];
-    t.decision_level <- I64.O.(t.decision_level + #1L);
-    let trail_entry : Trail_entry.t =
-      #{ reason = Reason.decision literal
-       ; literal
-       ; decision_level = t.decision_level
-       }
-    in
-    (match add_to_trail t ~trail_entry with
-     | Null -> `Continue
-     | This i -> `Failed_clause i)
-[@@exclave_if_stack] [@@alloc a @ m = (stack_local, heap_global)]
+  | Some literal -> (make_decision' [@alloc a]) t ~literal [@exclave_if_stack a]
+[@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
 let restart t =
@@ -719,6 +734,41 @@ let simplify_clauses t =
   done
 ;;
 
+let rec try_unit_propagate t = exclave_
+  match%optional_u
+    (Int.H_set.choose_arbitrarily t.unprocessed_unit_clauses
+     : Int.H_set.Kv_option.t)
+  with
+  | None -> None
+  | Some pair ->
+    let #(clause_idx, _) = pair in
+    Int.H_set.remove t.unprocessed_unit_clauses clause_idx;
+    let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
+    let literal = Clause.unit_literal clause ~assignments:t.assignments in
+    (match%optional_u (literal : Literal.Option.t) with
+     | None -> try_unit_propagate t
+     | Some literal ->
+       if t.debug
+       then
+         print_s
+           [%message
+             "try_unit_propagate: found unit"
+               ~clause:(Clause.to_int_array clause : int array)
+               ~assignments:(assignments_array t : int array)
+               (literal : Literal.t)];
+       (match
+          add_to_trail
+            t
+            ~trail_entry:
+              #{ decision_level = t.decision_level
+               ; literal
+               ; reason = Reason.clause_idx clause_idx
+               }
+        with
+        | Null -> try_unit_propagate t
+        | This failed_clause_idx -> Some failed_clause_idx))
+;;
+
 let%template rec solve' t : Sat_result.t @ m =
   (t.iterations <- t.iterations + 1;
    if t.iterations mod t.simplify_clauses_every = 0
@@ -733,40 +783,6 @@ let%template rec solve' t : Sat_result.t @ m =
              (t.decision_level : I64.t)];
      simplify_clauses t;
      decay_clause_activities t);
-   let rec try_unit_propagate () = exclave_
-     match%optional_u
-       (Int.H_set.choose_arbitrarily t.unprocessed_unit_clauses
-        : Int.H_set.Kv_option.t)
-     with
-     | None -> None
-     | Some pair ->
-       let #(clause_idx, _) = pair in
-       Int.H_set.remove t.unprocessed_unit_clauses clause_idx;
-       let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
-       let literal = Clause.unit_literal clause ~assignments:t.assignments in
-       (match%optional_u (literal : Literal.Option.t) with
-        | None -> try_unit_propagate ()
-        | Some literal ->
-          if t.debug
-          then
-            print_s
-              [%message
-                "try_unit_propagate: found unit"
-                  ~clause:(Clause.to_int_array clause : int array)
-                  ~assignments:(assignments_array t : int array)
-                  (literal : Literal.t)];
-          (match
-             add_to_trail
-               t
-               ~trail_entry:
-                 #{ decision_level = t.decision_level
-                  ; literal
-                  ; reason = Reason.clause_idx clause_idx
-                  }
-           with
-           | Null -> try_unit_propagate ()
-           | This failed_clause_idx -> Some failed_clause_idx))
-   in
    let learn_from_failure failed_clause_idx : Sat_result.t @ m =
      match[@exclave_if_stack a] I64.O.(t.decision_level = #0L) with
      | true ->
@@ -791,7 +807,7 @@ let%template rec solve' t : Sat_result.t @ m =
          restart t);
        solve' t
    in
-   match try_unit_propagate () with
+   match try_unit_propagate t with
    | Some failed_clause_idx -> learn_from_failure failed_clause_idx
    | None ->
      (match (make_decision [@alloc a]) t with
@@ -802,14 +818,65 @@ let%template rec solve' t : Sat_result.t @ m =
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
-let%template solve t : Sat_result.t @ m =
+let%template solve ?(local_ assumptions = [||]) t : Sat_result.t @ m =
+  if t.debug
+  then
+    print_s
+      [%message
+        "solve" ~assumptions:([%globalize: int array] assumptions : int array)];
   if t.iterations > 0
   then (
     t.iterations <- 0;
     restart t);
   if t.has_empty_clause
   then Unsat { unsat_core = Clause.of_int_array [||] }
-  else (solve' [@alloc a]) t [@exclave_if_stack a]
+  else (
+    ((* TODO: I think currently assumptions are buggy because we can have clauses we inferred from previous assumptions that are now false *)
+     let rec go i = exclave_
+       if i = Array.length assumptions
+       then `Continue
+       else (
+         t.iterations <- t.iterations + 1;
+         let literal = Literal.of_int assumptions.(i) in
+         match try_unit_propagate t with
+         | Some failed_clause_idx -> `Failed_clause failed_clause_idx
+         | None ->
+           (match assignment t ~var:(Literal.var literal) with
+            | None ->
+              (match (make_decision' [@alloc stack]) t ~literal with
+               | `Failed_clause _ as res -> res
+               | `Continue -> go (i + 1))
+            | Some b ->
+              if Bool.equal b (Literal.value literal)
+              then go (i + 1)
+              else (
+                let trail_entry_idx =
+                  I64.Option.Vec.get
+                    t.trail_entry_idx_by_var
+                    (Literal.var literal)
+                  |> I64.Option.value ~default:#0L (* always [some] *)
+                in
+                let trail_entry =
+                  Trail_entry.Vec.get t.trail (I64.to_int_trunc trail_entry_idx)
+                in
+                match trail_entry.#reason with
+                | T #(Decision, _, _) -> failwith "bug"
+                | T #(Clause_idx, failed_clause_idx, _) ->
+                  `Failed_clause failed_clause_idx)))
+     in
+     match go 0 with
+     | `Continue -> (solve' [@alloc a]) t
+     | `Failed_clause failed_clause_idx ->
+       let failed_clause =
+         Clause.Pool.get t.clauses (Ptr.of_int failed_clause_idx)
+       in
+       let learned_clause =
+         (* raise when it's conflicts from a unit clause we deduced. *)
+         try learn_clause_from_failure t ~failed_clause with
+         | _ -> Clause.copy failed_clause
+       in
+       Unsat { unsat_core = learned_clause })
+    [@exclave_if_stack a])
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 

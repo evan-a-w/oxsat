@@ -206,17 +206,19 @@ let%expect_test "larger unsatisfiable formula requiring backtracking" =
   [%expect {| UNSAT |}]
 ;;
 
-
 let run_dimacs s =
   let solver = Solver.create () in
   List.iter (Examples.Dimacs.read_string s) ~f:(fun clause ->
-      let clause = Array.of_list clause in
-      ignore (Solver.add_clause' solver ~clause : Solver.t));
+    let clause = Array.of_list clause in
+    ignore (Solver.add_clause' solver ~clause : Solver.t));
   let result = Solver.solve solver in
-  (match result with
-   | Sat _ ->
-     print_endline "SAT"
-   | Unsat { unsat_core } -> print_s [%message "UNSAT" ~unsat_core:(Clause.to_int_array unsat_core : int array)])
+  match result with
+  | Sat _ -> print_endline "SAT"
+  | Unsat { unsat_core } ->
+    print_s
+      [%message
+        "UNSAT" ~unsat_core:(Clause.to_int_array unsat_core : int array)]
+;;
 
 let%expect_test "sudoku" =
   run_dimacs Examples.Dimacs.sudoku;
@@ -232,4 +234,53 @@ let%expect_test "succ dimacs" =
 let%expect_test "fail dimacs" =
   run_dimacs Examples.Dimacs.fail_eg;
   [%expect {| (UNSAT (unsat_core (-93))) |}]
+;;
+
+let%expect_test "assumptions" =
+  let solver = Solver.create () in
+  let _ = Solver.add_clause' solver ~clause:[| 3; -5; 6 |] in
+  let _ = Solver.add_clause' solver ~clause:[| -2; -5; -3; 6; -4 |] in
+  let _ = Solver.add_clause' solver ~clause:[| -5; 1; 4; -6 |] in
+  let _ = Solver.add_clause' solver ~clause:[| 3; -4; 6; 1; 2; 4 |] in
+  let _ = Solver.add_clause' solver ~clause:[| -3; 4; -2; 6; -1; -5 |] in
+  let _ = Solver.add_clause' solver ~clause:[| 3; -2; -6; 4 |] in
+  let _ = Solver.add_clause' solver ~clause:[| 3; 2; -1 |] in
+  let _ = Solver.add_clause' solver ~clause:[| -6; -4; 5; -3 |] in
+  let _ = Solver.add_clause' solver ~clause:[| -3; 2; 5; 6; -1; -4 |] in
+  let _ = Solver.add_clause' solver ~clause:[| 4; -2; -3; 5 |] in
+  let _ = Solver.add_clause' solver ~clause:[| 3; -2; -1; -5; -6; -4 |] in
+  let _ = Solver.add_clause' solver ~clause:[| -2; -6 |] in
+  let _ = Solver.add_clause' solver ~clause:[| -1; -2; 4; 5 |] in
+  let _ = Solver.add_clause' solver ~clause:[| 2; -4; 1; 3; -5; -6 |] in
+  let solve ?assumptions () =
+    let result = Solver.solve ?assumptions solver in
+    match result with
+    | Sat { assignments } ->
+      print_s
+        [%message
+          "SAT" ~assignments:(Clause.to_int_array assignments : int array)]
+    | Unsat { unsat_core } ->
+      print_s
+        [%message
+          "UNSAT" ~unsat_core:(Clause.to_int_array unsat_core : int array)]
+  in
+  solve ();
+  solve ~assumptions:[| 1 |] ();
+  solve ~assumptions:[| 1; 2 |] ();
+  solve ~assumptions:[| 1; 2; 5 |] ();
+  solve ~assumptions:[| 6 |] ();
+  solve ~assumptions:[| 1; 2; 6 |] ();
+  solve ~assumptions:[| -1; -2; -3; -4; -5 |] ();
+  solve ~assumptions:[| -1; -2; -3; -4; -5; 6 |] ();
+  [%expect
+    {|
+    (SAT (assignments (1 -2 3 4 5 6)))
+    (SAT (assignments (1 -2 3 4 5 6)))
+    (SAT (assignments (1 2 3 4 -5 -6)))
+    (UNSAT (unsat_core (-1 -2 -5 6)))
+    (SAT (assignments (-1 -2 -3 4 -5 6)))
+    (UNSAT (unsat_core (-2 -6)))
+    (SAT (assignments (-1 -2 -3 -4 -5 -6)))
+    (SAT (assignments (-1 -2 -3 -4 -5 6)))
+    |}]
 ;;

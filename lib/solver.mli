@@ -9,7 +9,7 @@ end
 
 type t
 
-val%template solve : t -> Sat_result.t @ m
+val%template solve : ?assumptions:int array @ local -> t -> Sat_result.t @ m
 [@@alloc a @ m = (heap_global, stack_local)]
 
 val create : ?debug:bool @ local -> unit -> t
