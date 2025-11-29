@@ -559,6 +559,7 @@ let rec remove_greater_than_decision_level t ~decision_level =
 
 let second_highest_decision_level t ~clause =
   let #(_, max2) =
+    (* TODO: surely just fold over clauses, it's an array now... *)
     Clause.literals_list clause
     |> (List.fold_local [@kind bits64 & bits64])
          ~init:#(#0L, #0L)
