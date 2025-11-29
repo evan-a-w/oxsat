@@ -1,3 +1,23 @@
+more rb set, which is clearly much worse than hash set/bitset
+-------------------------------------------------------------
+$ time dune exec --profile=release bench/feel_bench.exe -- -bench sat -sat-max-n 80
+SAT solver benchmarks up to n=80 variables
+Hard 3-SAT (n=50, m=213): Mean: 18.21 ms  StdDev: 1.72 ms  p50: 18.75 ms  p75: 18.90 ms  p90: 20.66 ms  p95: 20.66 ms  p99: 20.66 ms  (n=5)
+Hard 3-SAT (n=80, m=340): Mean: 19.91 ms  StdDev: 691.87 μs  p50: 19.71 ms  p75: 20.10 ms  p90: 21.14 ms  p95: 21.14 ms  p99: 21.14 ms  (n=5)
+Uniform 3-SAT (n=50, m=210): Mean: 19.22 ms  StdDev: 966.61 μs  p50: 19.06 ms  p75: 19.69 ms  p90: 20.78 ms  p95: 20.78 ms  p99: 20.78 ms  (n=5)
+Uniform 3-SAT (n=80, m=336): Mean: 23.40 ms  StdDev: 1.62 ms  p50: 23.61 ms  p75: 24.89 ms  p90: 25.36 ms  p95: 25.36 ms  p99: 25.36 ms  (n=5)
+Planted 3-SAT (n=50, m=175): Mean: 12.85 ms  StdDev: 537.26 μs  p50: 13.10 ms  p75: 13.24 ms  p90: 13.49 ms  p95: 13.49 ms  p99: 13.49 ms  (n=5)
+Planted 3-SAT (n=80, m=280): Mean: 17.54 ms  StdDev: 1.41 ms  p50: 17.12 ms  p75: 17.65 ms  p90: 20.18 ms  p95: 20.18 ms  p99: 20.18 ms  (n=5)
+Scale-free 3-SAT (n=50, m=185, alpha=2.30): Mean: 7.13 ms  StdDev: 217.71 μs  p50: 7.12 ms  p75: 7.29 ms  p90: 7.43 ms  p95: 7.43 ms  p99: 7.43 ms  (n=5)
+Scale-free 3-SAT (n=80, m=296, alpha=2.30): Mean: 9.76 ms  StdDev: 103.39 μs  p50: 9.78 ms  p75: 9.81 ms  p90: 9.90 ms  p95: 9.90 ms  p99: 9.90 ms  (n=5)
+Planted 4-SAT (n=50, m=225, min_sat=1): Mean: 13.78 ms  StdDev: 280.33 μs  p50: 13.69 ms  p75: 13.84 ms  p90: 14.29 ms  p95: 14.29 ms  p99: 14.29 ms  (n=5)
+Planted 4-SAT (n=80, m=360, min_sat=1): Mean: 21.36 ms  StdDev: 997.73 μs  p50: 20.98 ms  p75: 22.33 ms  p90: 22.75 ms  p95: 22.75 ms  p99: 22.75 ms  (n=5)
+Forced-backbone 3-SAT (n=50, m=190, backbone=6): Mean: 13.38 ms  StdDev: 577.96 μs  p50: 13.53 ms  p75: 13.72 ms  p90: 14.09 ms  p95: 14.09 ms  p99: 14.09 ms  (n=5)
+Forced-backbone 3-SAT (n=80, m=304, backbone=10): Mean: 19.26 ms  StdDev: 1.50 ms  p50: 19.90 ms  p75: 20.21 ms  p90: 20.82 ms  p95: 20.82 ms  p99: 20.82 ms  (n=5)
+Random k-CNF (n=50, m=200, max_k=5): Mean: 13.31 ms  StdDev: 898.64 μs  p50: 13.20 ms  p75: 13.46 ms  p90: 14.90 ms  p95: 14.90 ms  p99: 14.90 ms  (n=5)
+Random k-CNF (n=80, m=320, max_k=5): Mean: 20.24 ms  StdDev: 1.09 ms  p50: 20.46 ms  p75: 20.69 ms  p90: 21.66 ms  p95: 21.66 ms  p99: 21.66 ms  (n=5)
+dune exec --profile=release bench/feel_bench.exe -- -bench sat -sat-max-n 80  70.62s user 21.62s system 115% cpu 1:19.85 total
+
 use more hashsets and stuff, fix maybe real bug that makes it much slower???
 ---------------------------
 $ time dune exec --profile=release bench/feel_bench.exe -- -bench sat -sat-max-n 80
