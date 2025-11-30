@@ -911,3 +911,8 @@ let add_clause t ~clause =
 ;;
 
 let add_clause' t ~clause = add_clause t ~clause:(Clause.of_int_array clause)
+
+let create_with_formula ?debug formula =
+  let t = create ?debug () in
+  Array.fold formula ~init:t ~f:(fun t clause -> add_clause' t ~clause)
+;;
