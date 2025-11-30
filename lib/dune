@@ -1,5 +1,6 @@
 (library
  (name feel)
+ (public_name feel)
  (preprocess
   (pps ppx_jane ppx_optional))
  (inline_tests)

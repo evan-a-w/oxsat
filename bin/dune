@@ -3,6 +3,7 @@
  (name main)
  (preprocess
   (pps ppx_jane ppx_optional))
+ (package feel)
  (libraries
    feel
   core

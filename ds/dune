@@ -1,5 +1,6 @@
 (library
  (name ds)
+  (public_name ds)
  (preprocess
   (pps ppx_jane))
  (inline_tests)

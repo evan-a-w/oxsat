@@ -23,4 +23,12 @@
  (tags
   ("add topics" "to describe" your project)))
 
+(package
+ (name ds)
+ (synopsis "A short synopsis")
+ (description "A longer description")
+ (depends ocaml dune core)
+ (tags
+  ("add topics" "to describe" your project)))
+
 ; See the complete stanza docs at https://dune.readthedocs.io/en/stable/reference/dune-project/index.html

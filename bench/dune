@@ -31,6 +31,7 @@
 (executable
   (public_name feel_bench)
  (name feel_bench)
+  (package feel)
  (modules feel_bench)
  (preprocess
   (pps ppx_jane ppx_optional))
