@@ -792,7 +792,11 @@ let%template unsat t failed_clause_idx : Sat_result.t @ m =
    in
    let learned_clause =
      (* raise when it's conflicts from a unit clause we deduced. *)
-     try learn_clause_from_failure t ~failed_clause with
+     try
+       let clause = learn_clause_from_failure t ~failed_clause in
+       Clause.negate clause;
+       clause
+     with
      | _ -> Clause.copy failed_clause
    in
    Unsat { unsat_core = learned_clause })
@@ -898,16 +902,7 @@ let%template solve ?(local_ assumptions = [||]) t : Sat_result.t @ m =
   else (
     match[@exclave_if_stack a] add_assumptions ~assumptions t with
     | `Continue -> (solve' [@alloc a]) t
-    | `Failed_clause failed_clause_idx ->
-      let failed_clause =
-        Clause.Pool.get t.clauses (Ptr.of_int failed_clause_idx)
-      in
-      let learned_clause =
-        (* raise when it's conflicts from a unit clause we deduced. *)
-        try learn_clause_from_failure t ~failed_clause with
-        | _ -> Clause.copy failed_clause
-      in
-      Unsat { unsat_core = learned_clause })
+    | `Failed_clause failed_clause_idx -> (unsat [@alloc a]) t failed_clause_idx)
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
