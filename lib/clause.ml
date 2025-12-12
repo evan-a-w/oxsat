@@ -3,6 +3,8 @@ open! Import
 
 module T = struct
   type t = int Vec.Value.t
+  [@@deriving sexp]
+
 
   let create_for_pool () = Vec.Value.create ()
 end

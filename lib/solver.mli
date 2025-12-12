@@ -5,6 +5,7 @@ module Sat_result : sig
   type t =
     | Sat of { assignments : Clause.t }
     | Unsat of { global_ unsat_core : Clause.t }
+  [@@deriving sexp]
 end
 
 type t
