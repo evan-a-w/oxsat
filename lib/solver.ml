@@ -10,7 +10,6 @@ end
 
 module Reason : sig
   type (_ : value mod external_, _ : bits64) tag : value mod external_ =
-    | Assumption : (_, Literal.t) tag
     | Decision : (_, Literal.t) tag
     | Clause_idx : (int, _) tag
 
@@ -23,12 +22,10 @@ module Reason : sig
   *)
   [@@unsafe_allow_any_mode_crossing]
 
-  val assumption : Literal.t -> t
   val decision : Literal.t -> t
   val clause_idx : int -> t
 end = struct
   type (_ : value mod external_, _ : bits64) tag : value mod external_ =
-    | Assumption : (_, Literal.t) tag
     | Decision : (_, Literal.t) tag
     | Clause_idx : (int, _) tag
 
@@ -36,7 +33,6 @@ end = struct
     | T : #(('a, 'b) tag * 'a * 'b) -> t
   [@@unboxed] [@@unsafe_allow_any_mode_crossing]
 
-  let assumption literal = T #(Assumption, 0, literal)
   let decision literal = T #(Decision, 0, literal)
   let clause_idx idx = T #(Clause_idx, idx, Literal.of_int 0)
 end
@@ -171,7 +167,7 @@ let learn_clause_from_failure ~failed_clause t =
        , trail_entry.#reason )
     with
     | #(true, _) -> ()
-    | #(false, T #((Decision | Assumption), _, _)) ->
+    | #(false, T #(Decision, _, _)) ->
       failwith "found decision walking back from conflict"
     | #(false, T #(Clause_idx, clause_idx, _)) ->
       Vsids.add_activity t.vsids ~literal:trail_entry.#literal;
@@ -512,7 +508,7 @@ let add_to_trail t ~(trail_entry : Trail_entry.t) =
             (Tf_pair.get t.assignments false)
             (Literal.var trail_entry.#literal)));
   (match trail_entry.#reason with
-   | T #((Decision | Assumption), _, _) -> ()
+   | T #(Decision, _, _) -> ()
    | T #(Clause_idx, clause_ptr, _) ->
      Int.H_set.insert t.clauses_with_active_unit ~key:clause_ptr ~data:());
   Bitset.set
@@ -540,7 +536,7 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
       (Tf_pair.get t.assignments (Literal.value trail_entry.#literal))
       (Literal.var trail_entry.#literal));
   (match trail_entry.#reason with
-   | T #((Decision | Assumption), _, _) -> ()
+   | T #(Decision, _, _) -> ()
    | T #(Clause_idx, clause_ptr, _) ->
      Int.H_set.remove t.clauses_with_active_unit clause_ptr);
   Vsids.add_to_pool t.vsids ~var:(Literal.var trail_entry.#literal);
@@ -620,10 +616,7 @@ let%template make_decision' ~is_assumption t ~literal : _ @ m =
   t.decision_level <- I64.O.(t.decision_level + #1L);
   if is_assumption then t.decision_level_of_last_assumption <- t.decision_level;
   let trail_entry : Trail_entry.t =
-    #{ reason =
-         (if is_assumption
-          then Reason.assumption literal
-          else Reason.decision literal)
+    #{ reason = Reason.decision literal
      ; literal
      ; decision_level = t.decision_level
      }
@@ -865,8 +858,7 @@ and add_assumptions ~(local_ assumptions) t = exclave_
                Trail_entry.Vec.get t.trail (I64.to_int_trunc trail_entry_idx)
              in
              match trail_entry.#reason with
-             | T #((Decision | Assumption), _, _) ->
-               failwith "invalid assumptions"
+             | T #(Decision, _, _) -> failwith "invalid assumptions"
              | T #(Clause_idx, failed_clause_idx, _) ->
                `Failed_clause failed_clause_idx)))
   in
