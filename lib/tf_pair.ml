@@ -4,6 +4,7 @@ type 'a t =
   #{ t : 'a
    ; f : 'a
    }
+[@@deriving sexp]
 
 let%template get (t : _ @ m) (b : _ @ m) = if b then t.#t else t.#f
 [@@mode m = (local, global)]

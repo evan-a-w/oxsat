@@ -2,7 +2,7 @@ open! Core
 open! Import
 
 module type%template S = sig
-  type t : k
+  type t : k [@@deriving sexp]
 
   val copy : t -> t
   val is_satisfied : t -> assignments:Bitset.t Tf_pair.t -> bool

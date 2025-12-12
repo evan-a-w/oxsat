@@ -58,7 +58,7 @@ let%expect_test "contradictory unit clauses are unsatisfiable" =
    | Sat _ -> print_endline "SAT"
    | Unsat { unsat_core } ->
      print_s [%message "UNSAT" (Clause.to_int_array unsat_core : int array)]);
-  [%expect {| (UNSAT ("Clause.to_int_array unsat_core" (-1))) |}]
+  [%expect {| (UNSAT ("Clause.to_int_array unsat_core" (1))) |}]
 ;;
 
 let%expect_test "simple two-literal clause" =
@@ -128,7 +128,7 @@ let%expect_test "unit propagation leads to conflict" =
    | Sat _ -> print_endline "SAT"
    | Unsat { unsat_core } ->
      print_s [%message "UNSAT" (Clause.to_int_array unsat_core : int array)]);
-  [%expect {| (UNSAT ("Clause.to_int_array unsat_core" (2))) |}]
+  [%expect {| (UNSAT ("Clause.to_int_array unsat_core" (-2))) |}]
 ;;
 
 let%expect_test "three-variable satisfiable formula" =
@@ -162,7 +162,7 @@ let%expect_test "pigeonhole principle - 2 pigeons, 1 hole (unsat)" =
    | Sat _ -> print_endline "SAT"
    | Unsat { unsat_core } ->
      print_s [%message "UNSAT" (Clause.to_int_array unsat_core : int array)]);
-  [%expect {| (UNSAT ("Clause.to_int_array unsat_core" (2))) |}]
+  [%expect {| (UNSAT ("Clause.to_int_array unsat_core" (-2))) |}]
 ;;
 
 let%expect_test "clause with multiple literals satisfied by one assignment" =
@@ -233,7 +233,7 @@ let%expect_test "succ dimacs" =
 
 let%expect_test "fail dimacs" =
   run_dimacs Examples.Dimacs.fail_eg;
-  [%expect {| (UNSAT (unsat_core (-93))) |}]
+  [%expect {| (UNSAT (unsat_core (93))) |}]
 ;;
 
 let%expect_test "assumptions" =

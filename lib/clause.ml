@@ -3,6 +3,8 @@ open! Import
 
 module T = struct
   type t = int Vec.Value.t
+  [@@deriving sexp]
+
 
   let create_for_pool () = Vec.Value.create ()
 end
@@ -10,6 +12,7 @@ end
 module Pool = Pool.Make [@kind value] (T)
 include T
 
+let negate t = Vec.Value.map_inplace t ~f:(Int.neg)
 let copy t = Vec.Value.copy t
 
 let is_tautology t =

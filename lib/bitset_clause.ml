@@ -2,7 +2,7 @@ open! Core
 open! Import
 
 module T = struct
-  type t = Bitset.t Tf_pair.t
+  type t = Bitset.t Tf_pair.t [@@deriving sexp]
 
   let create_for_vec () = Tf_pair.create (fun (_ : bool) -> Bitset.create ())
   let create_for_pool = create_for_vec
