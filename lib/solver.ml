@@ -764,6 +764,28 @@ let rec try_unit_propagate t = exclave_
         | This failed_clause_idx -> Some failed_clause_idx))
 ;;
 
+let restart t = exclave_
+  t.conflicts <- #0L;
+  t.decision_level <- #0L;
+  Int.H_set.clear t.unprocessed_unit_clauses;
+  while
+    Trail_entry.Vec.length t.trail <> 0
+    && I64.O.(
+         (Trail_entry.Vec.last_exn t.trail).#decision_level
+         > t.decision_level_of_last_assumption)
+  do
+    undo_entry t ~trail_entry:(Trail_entry.Vec.pop_exn t.trail)
+  done;
+  Clause.Pool.iter t.clauses ~f:(fun ptr ->
+    let clause = Clause.Pool.get t.clauses ptr in
+    match%optional_u
+      (Clause.unit_literal clause ~assignments:t.assignments : Literal.Option.t)
+    with
+    | None -> ()
+    | Some _ ->
+      Int.H_set.insert t.unprocessed_unit_clauses ~key:(Ptr.to_int ptr) ~data:())
+;;
+
 let%template unsat t failed_clause_idx : Sat_result.t @ m =
   (let failed_clause =
      Clause.Pool.get t.clauses (Ptr.of_int failed_clause_idx)
@@ -778,7 +800,7 @@ let%template unsat t failed_clause_idx : Sat_result.t @ m =
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
-let%template rec solve' t ~(local_ assumptions) : Sat_result.t @ m =
+let%template rec solve' t : Sat_result.t @ m =
   (t.iterations <- t.iterations + 1;
    if t.iterations mod t.simplify_clauses_every = 0
    then (
@@ -792,7 +814,7 @@ let%template rec solve' t ~(local_ assumptions) : Sat_result.t @ m =
              (t.decision_level : I64.t)];
      simplify_clauses t;
      decay_clause_activities t);
-   let learn_from_failure ~assumptions failed_clause_idx : Sat_result.t @ m =
+   let learn_from_failure failed_clause_idx : Sat_result.t @ m =
      match[@exclave_if_stack a]
        I64.O.(
          t.decision_level = #0L
@@ -805,31 +827,26 @@ let%template rec solve' t ~(local_ assumptions) : Sat_result.t @ m =
        in
        backtrack t ~failed_clause;
        t.conflicts <- I64.O.(t.conflicts + #1L);
-       let restart_result =
-         `Continue
-         (* if I64.O.(t.conflicts < Luby.value t.luby) *)
-         (* then `Continue *)
-         (* else ( *)
-         (*   ignore (Luby.next t.luby); *)
-         (*   restart ~assumptions t) *)
-       in
-       (match restart_result with
-        | `Continue -> (solve' [@alloc a]) ~assumptions t
-        | `Failed_clause new_failed_clause_idx ->
-          (unsat [@alloc a]) t new_failed_clause_idx)
+       if I64.O.(
+            t.conflicts >= Luby.value t.luby
+            && I64.O.(t.decision_level <> t.decision_level_of_last_assumption))
+       then (
+         ignore (Luby.next t.luby);
+         restart t);
+       (solve' [@alloc a]) t
    in
    match try_unit_propagate t with
-   | Some failed_clause_idx -> learn_from_failure ~assumptions failed_clause_idx
+   | Some failed_clause_idx -> learn_from_failure failed_clause_idx
    | None ->
      (match (make_decision [@alloc a]) t with
-      | `Continue -> (solve' [@alloc a]) ~assumptions t
-      | `Failed_clause failed_clause_idx ->
-        learn_from_failure ~assumptions failed_clause_idx
+      | `Continue -> (solve' [@alloc a]) t
+      | `Failed_clause failed_clause_idx -> learn_from_failure failed_clause_idx
       | `Done sat_result -> (check_sat_result [@alloc a]) t ~sat_result))
   [@exclave_if_stack a]
 [@@alloc a @ m = (stack_local, heap_global)]
+;;
 
-and add_assumptions ~(local_ assumptions) t = exclave_
+let add_assumptions ~(local_ assumptions) t = exclave_
   let rec go i = exclave_
     if i = Array.length assumptions
     then `Continue
@@ -863,24 +880,6 @@ and add_assumptions ~(local_ assumptions) t = exclave_
                `Failed_clause failed_clause_idx)))
   in
   go 0
-
-and restart ~assumptions t = exclave_
-  t.conflicts <- #0L;
-  t.decision_level <- #0L;
-  t.decision_level_of_last_assumption <- #0L;
-  Int.H_set.clear t.unprocessed_unit_clauses;
-  while Trail_entry.Vec.length t.trail <> 0 do
-    undo_entry t ~trail_entry:(Trail_entry.Vec.pop_exn t.trail)
-  done;
-  Clause.Pool.iter t.clauses ~f:(fun ptr ->
-    let clause = Clause.Pool.get t.clauses ptr in
-    match%optional_u
-      (Clause.unit_literal clause ~assignments:t.assignments : Literal.Option.t)
-    with
-    | None -> ()
-    | Some _ ->
-      Int.H_set.insert t.unprocessed_unit_clauses ~key:(Ptr.to_int ptr) ~data:());
-  add_assumptions ~assumptions t
 ;;
 
 let%template solve ?(local_ assumptions = [||]) t : Sat_result.t @ m =
@@ -890,29 +889,25 @@ let%template solve ?(local_ assumptions = [||]) t : Sat_result.t @ m =
     print_s
       [%message
         "solve" ~assumptions:([%globalize: int array] assumptions : int array)];
+  if t.iterations > 0
+  then (
+    t.iterations <- 0;
+    restart t);
   if t.has_empty_clause
   then Unsat { unsat_core = Clause.of_int_array [||] }
   else (
-    (let assumptions_result =
-       if t.iterations > 0
-       then (
-         t.iterations <- 0;
-         restart ~assumptions t)
-       else add_assumptions ~assumptions t
-     in
-     match assumptions_result with
-     | `Continue -> (solve' [@alloc a]) t ~assumptions
-     | `Failed_clause failed_clause_idx ->
-       let failed_clause =
-         Clause.Pool.get t.clauses (Ptr.of_int failed_clause_idx)
-       in
-       let learned_clause =
-         (* raise when it's conflicts from a unit clause we deduced. *)
-         try learn_clause_from_failure t ~failed_clause with
-         | _ -> Clause.copy failed_clause
-       in
-       Unsat { unsat_core = learned_clause })
-    [@exclave_if_stack a])
+    match[@exclave_if_stack a] add_assumptions ~assumptions t with
+    | `Continue -> (solve' [@alloc a]) t
+    | `Failed_clause failed_clause_idx ->
+      let failed_clause =
+        Clause.Pool.get t.clauses (Ptr.of_int failed_clause_idx)
+      in
+      let learned_clause =
+        (* raise when it's conflicts from a unit clause we deduced. *)
+        try learn_clause_from_failure t ~failed_clause with
+        | _ -> Clause.copy failed_clause
+      in
+      Unsat { unsat_core = learned_clause })
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 

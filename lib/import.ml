@@ -84,7 +84,7 @@ end = struct
   let length_local l =
     let rec go acc l =
       match l with
-      | [] -> 0
+      | [] -> acc
       | _ :: rest -> go (acc + 1) rest
     in
     go 0 l
