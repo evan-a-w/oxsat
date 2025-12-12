@@ -801,7 +801,9 @@ let%template rec solve' t ~(local_ assumptions) : Sat_result.t @ m =
      decay_clause_activities t);
    let learn_from_failure ~assumptions failed_clause_idx : Sat_result.t @ m =
      match[@exclave_if_stack a]
-       I64.O.(t.decision_level = t.decision_level_of_last_assumption + #1L)
+       I64.O.(
+         t.decision_level = #0L
+         || t.decision_level < t.decision_level_of_last_assumption)
      with
      | true -> (unsat [@alloc a]) t failed_clause_idx
      | false ->
@@ -811,11 +813,12 @@ let%template rec solve' t ~(local_ assumptions) : Sat_result.t @ m =
        backtrack t ~failed_clause;
        t.conflicts <- I64.O.(t.conflicts + #1L);
        let restart_result =
-         if I64.O.(t.conflicts < Luby.value t.luby && t.decision_level > #0L)
-         then `Continue
-         else (
-           ignore (Luby.next t.luby);
-           restart ~assumptions t)
+         `Continue
+         (* if I64.O.(t.conflicts < Luby.value t.luby) *)
+         (* then `Continue *)
+         (* else ( *)
+         (*   ignore (Luby.next t.luby); *)
+         (*   restart ~assumptions t) *)
        in
        (match restart_result with
         | `Continue -> (solve' [@alloc a]) ~assumptions t
@@ -862,7 +865,8 @@ and add_assumptions ~(local_ assumptions) t = exclave_
                Trail_entry.Vec.get t.trail (I64.to_int_trunc trail_entry_idx)
              in
              match trail_entry.#reason with
-             | T #((Decision | Assumption), _, _) -> failwith "bug"
+             | T #((Decision | Assumption), _, _) ->
+               failwith "invalid assumptions"
              | T #(Clause_idx, failed_clause_idx, _) ->
                `Failed_clause failed_clause_idx)))
   in
@@ -873,11 +877,7 @@ and restart ~assumptions t = exclave_
   t.decision_level <- #0L;
   t.decision_level_of_last_assumption <- #0L;
   Int.H_set.clear t.unprocessed_unit_clauses;
-  while
-    Trail_entry.Vec.length t.trail <> 0
-    && I64.O.(
-         (Trail_entry.Vec.last_exn t.trail).#decision_level > t.decision_level)
-  do
+  while Trail_entry.Vec.length t.trail <> 0 do
     undo_entry t ~trail_entry:(Trail_entry.Vec.pop_exn t.trail)
   done;
   Clause.Pool.iter t.clauses ~f:(fun ptr ->
@@ -901,25 +901,26 @@ let%template solve ?(local_ assumptions = [||]) t : Sat_result.t @ m =
   if t.has_empty_clause
   then Unsat { unsat_core = Clause.of_int_array [||] }
   else (
-    let assumptions_result =
-      if t.iterations > 0
-      then (
-        t.iterations <- 0;
-        restart ~assumptions t)
-      else add_assumptions ~assumptions t
-    in
-    match assumptions_result with
-    | `Continue -> (solve' [@alloc a]) t ~assumptions [@exclave_if_stack a]
-    | `Failed_clause failed_clause_idx ->
-      let failed_clause =
-        Clause.Pool.get t.clauses (Ptr.of_int failed_clause_idx)
-      in
-      let learned_clause =
-        (* raise when it's conflicts from a unit clause we deduced. *)
-        try learn_clause_from_failure t ~failed_clause with
-        | _ -> Clause.copy failed_clause
-      in
-      Unsat { unsat_core = learned_clause })
+    (let assumptions_result =
+       if t.iterations > 0
+       then (
+         t.iterations <- 0;
+         restart ~assumptions t)
+       else add_assumptions ~assumptions t
+     in
+     match assumptions_result with
+     | `Continue -> (solve' [@alloc a]) t ~assumptions
+     | `Failed_clause failed_clause_idx ->
+       let failed_clause =
+         Clause.Pool.get t.clauses (Ptr.of_int failed_clause_idx)
+       in
+       let learned_clause =
+         (* raise when it's conflicts from a unit clause we deduced. *)
+         try learn_clause_from_failure t ~failed_clause with
+         | _ -> Clause.copy failed_clause
+       in
+       Unsat { unsat_core = learned_clause })
+    [@exclave_if_stack a])
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
