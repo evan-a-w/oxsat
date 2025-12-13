@@ -3,6 +3,6 @@
  (preprocess
   (pps ppx_jane))
  (inline_tests)
- (libraries core core_unix vec)
+ (libraries core core_unix)
  (flags
   (:standard -extension-universe beta)))
