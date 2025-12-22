@@ -1,31 +1,36 @@
 open Core
 
-(** Parse a DIMACS-style string (with a leading header line) into a list of clauses,
-    throwing away any zeros or unparsable tokens. *)
+(** Parse a DIMACS-style string (with a leading header line) into a list of
+    clauses, throwing away any zeros or unparsable tokens. *)
 let read_string s =
   let lines = String.split_lines s in
   (* drop the header *)
-  let lines = match lines with
+  let lines =
+    match lines with
     | [] -> []
     | _ :: rest -> rest
   in
   List.filter_map lines ~f:(fun line ->
-      let line = String.strip line in
-    if String.is_prefix line ~prefix:"p cnf" then None else
-    let lits =
-      String.split line ~on:' '
-      |> List.filter_map ~f:(fun tok ->
-           match String.strip tok with
-           | "" -> None
-           | tok -> Int.of_string_opt tok)
-      |> List.filter ~f:(fun lit -> lit <> 0)
-    in
-    Some lits)
+    let line = String.strip line in
+    if String.is_prefix line ~prefix:"p cnf"
+    then None
+    else (
+      let lits =
+        String.split line ~on:' '
+        |> List.filter_map ~f:(fun tok ->
+          match String.strip tok with
+          | "" -> None
+          | tok -> Int.of_string_opt tok)
+        |> List.filter ~f:(fun lit -> lit <> 0)
+      in
+      Some lits))
+;;
 
 (** Read an entire file and parse it as above. *)
 let read_file path =
   let contents = In_channel.read_all path in
   read_string contents
+;;
 
 (** Given a list of clauses (int list list), emit a DIMACS "p cnf …" string. *)
 let of_int_array_array arr =
@@ -41,18 +46,19 @@ let of_int_array_array arr =
       String.concat ~sep:" " lit_strings ^ " 0")
   in
   String.concat ~sep:"\n" (header :: clause_lines)
+;;
 
 let%expect_test "small formula" =
   let formula = {|
     p cnf 3 2
     1 -3 4 0
-    -2 3 0|}
-    in
-    print_s [%sexp (read_string formula : int list list)];
-    [%expect {| ((1 -3 4) (-2 3)) |}]
+    -2 3 0|} in
+  print_s [%sexp (read_string formula : int list list)];
+  [%expect {| ((1 -3 4) (-2 3)) |}]
+;;
 
-
-let sudoku = {|
+let sudoku =
+  {|
 p cnf 729 3270
 1 2 3 4 5 6 7 8 9 0
 -1 -2 0
@@ -3325,8 +3331,10 @@ p cnf 729 3270
 718 0
 729 0
 |}
+;;
 
-let fail_eg = {|
+let fail_eg =
+  {|
 p cnf 112 245
 -1 -2 0
 -1 -3 0
@@ -3573,8 +3581,10 @@ p cnf 112 245
 -83 112 0
 -84 112 0
 -112 82 83 84 0|}
+;;
 
-let succ_eg = {|
+let succ_eg =
+  {|
 p cnf 140 301
 -1 -2 0
 -1 -3 0
@@ -3878,8 +3888,10 @@ p cnf 140 301
 -105 140 0
 -140 103 104 105 0"
 |}
+;;
 
-let factor_1234321 = {|
+let factor_1234321 =
+  {|
 p cnf 1433 7585
 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 0
 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 0
@@ -11467,8 +11479,10 @@ p cnf 1433 7585
 1433 -43 0
 -1433 43 0"
 |}
+;;
 
-let factor_1235321 = {|
+let factor_1235321 =
+  {|
 p cnf 1433 7585
 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 0
 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 0
@@ -19056,10 +19070,10 @@ p cnf 1433 7585
 1433 -43 0
 -1433 43 0"
 |}
+;;
 
-
-
-let subsets_100 = {|
+let subsets_100 =
+  {|
 p cnf 3357 15212
 101 0
 -102 0
@@ -34274,3 +34288,4 @@ p cnf 3357 15212
 3343 0
 -3344 0"
 |}
+;;

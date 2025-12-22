@@ -15,8 +15,7 @@ module Config : sig
       - sample_runs: 100
       - min_iterations: 1
       - max_iterations: 1_000_000_000
-      - target_time_ns: 100_000_000 (100ms)
-  *)
+      - target_time_ns: 100_000_000 (100ms) *)
   val default : t
 
   (** Create a custom configuration *)
@@ -72,7 +71,10 @@ val run_all : ?config:Config.t -> (string * (unit -> 'a)) list -> Result.t list
 val run_and_print : ?config:Config.t -> name:string -> (unit -> 'a) -> Result.t
 
 (** Run multiple benchmarks and print results *)
-val run_all_and_print : ?config:Config.t -> (string * (unit -> 'a)) list -> Result.t list
+val run_all_and_print
+  :  ?config:Config.t
+  -> (string * (unit -> 'a)) list
+  -> Result.t list
 
 (** Print benchmark results *)
 val print_results : Result.t list -> unit

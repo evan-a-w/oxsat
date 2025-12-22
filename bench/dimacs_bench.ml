@@ -31,7 +31,11 @@ let dimacs_instance ~name dimacs_string =
 ;;
 
 let default_benchmark_config =
-  Benchmark.Config.create ~warmup_runs:1 ~sample_runs:5 ~target_time_ns:1_000_000_000 ()
+  Benchmark.Config.create
+    ~warmup_runs:1
+    ~sample_runs:5
+    ~target_time_ns:1_000_000_000
+    ()
 ;;
 
 let run_dimacs_examples ?(benchmark_config = default_benchmark_config) () =

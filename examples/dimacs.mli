@@ -1,5 +1,5 @@
-(** Parse a DIMACS-style string (with a leading header line) into a list of clauses,
-    throwing away any zeros or unparsable tokens. *)
+(** Parse a DIMACS-style string (with a leading header line) into a list of
+    clauses, throwing away any zeros or unparsable tokens. *)
 val read_string : string -> int list list
 
 (** Read an entire file and parse it as above. *)

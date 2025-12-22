@@ -58,7 +58,8 @@ let%expect_test "basic operations" =
 
 let%expect_test "removals and reinsertion" =
   let t = Int_table.create ~capacity:4 () in
-  List.iter [ 0; 1; 2; 3 ] ~f:(fun key -> Int_table.insert t ~key ~data:(key * 10));
+  List.iter [ 0; 1; 2; 3 ] ~f:(fun key ->
+    Int_table.insert t ~key ~data:(key * 10));
   Int_table.remove t 1;
   Int_table.remove t 2;
   Int_table.insert t ~key:5 ~data:50;
@@ -82,7 +83,7 @@ let%expect_test "removals and reinsertion" =
 let%expect_test "clear resets table" =
   let t = Int_table.create () in
   List.iter [ 1; 2; 3 ] ~f:(fun key -> Int_table.insert t ~key ~data:(key * 10));
-  let has_load () = Float.(>) (Int_table.load_factor t) 0. in
+  let has_load () = Float.( > ) (Int_table.load_factor t) 0. in
   print_s
     [%message
       "before"
@@ -149,7 +150,11 @@ module Quickcheck_modules = struct
         if table_data <> data
         then
           failwith
-            (sprintf "value mismatch for key %d table=%d reference=%d" key table_data data)));
+            (sprintf
+               "value mismatch for key %d table=%d reference=%d"
+               key
+               table_data
+               data)));
     Table.iter table ~f:(fun ~key ~data ->
       match Hashtbl.find reference key with
       | None -> failwith (sprintf "key %d missing from reference" key)
@@ -188,7 +193,9 @@ module Quickcheck_modules = struct
       let ours = Table.mem table key in
       let theirs = Hashtbl.mem reference key in
       if Bool.( <> ) ours theirs
-      then failwith (sprintf "mem mismatch key=%d table=%b reference=%b" key ours theirs)
+      then
+        failwith
+          (sprintf "mem mismatch key=%d table=%b reference=%b" key ours theirs)
     | Find key ->
       let ours = Table.find table key in
       let theirs = Hashtbl.find reference key in
@@ -204,8 +211,10 @@ module Quickcheck_modules = struct
                 ours_value
                 ref_value)
        | false, None -> ()
-       | true, None -> failwith (sprintf "key %d found in table but not reference" key)
-       | false, Some _ -> failwith (sprintf "key %d found in reference but not table" key))
+       | true, None ->
+         failwith (sprintf "key %d found in table but not reference" key)
+       | false, Some _ ->
+         failwith (sprintf "key %d found in reference but not table" key))
   ;;
 end
 

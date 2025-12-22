@@ -36,12 +36,14 @@ let operation_generator ~key_range =
 (* Generate a random map of size n *)
 let generate_random_map ~size =
   let keys = List.init size ~f:Fn.id |> List.permute in
-  List.fold keys ~init:Int.Map.empty ~f:(fun map key -> Map.add_exn map ~key ~data:())
+  List.fold keys ~init:Int.Map.empty ~f:(fun map key ->
+    Map.add_exn map ~key ~data:())
 ;;
 
 (* Execute a single operation on the map - returns new map since Core Map is immutable *)
 let execute_operation map op =
-  match op with | Insert key -> Map.set map ~key ~data:()
+  match op with
+  | Insert key -> Map.set map ~key ~data:()
   | Find key ->
     ignore (Map.find map key : unit option);
     map
@@ -70,23 +72,29 @@ type bench_config =
   ; key_range : int option
   }
 
-let default_config = { tree_size = 1000; num_operations = 100; key_range = None }
+let default_config =
+  { tree_size = 1000; num_operations = 100; key_range = None }
+;;
 
 let create_config ?tree_size ?num_operations ?key_range () =
   { tree_size = Option.value tree_size ~default:default_config.tree_size
-  ; num_operations = Option.value num_operations ~default:default_config.num_operations
+  ; num_operations =
+      Option.value num_operations ~default:default_config.num_operations
   ; key_range = Option.first_some key_range default_config.key_range
   }
 ;;
 
 (* Create a benchmark function that generates a map and runs operations *)
 let make_benchmark_fn ~config =
-  let key_range = Option.value config.key_range ~default:(config.tree_size * 100) in
+  let key_range =
+    Option.value config.key_range ~default:(config.tree_size * 100)
+  in
   let initial_map = generate_random_map ~size:config.tree_size in
   let operations = generate_operations ~n:config.num_operations ~key_range in
   fun () ->
     let (_ : unit Int.Map.t) =
-      List.fold operations ~init:initial_map ~f:(fun map op -> execute_operation map op)
+      List.fold operations ~init:initial_map ~f:(fun map op ->
+        execute_operation map op)
     in
     ()
 ;;
@@ -118,7 +126,9 @@ let run_operation_mix_benchmark
   ?(num_operations = 100)
   ()
   =
-  let name = sprintf "Core Map mixed ops (n=%d, ops=%d)" tree_size num_operations in
+  let name =
+    sprintf "Core Map mixed ops (n=%d, ops=%d)" tree_size num_operations
+  in
   let bench_config = create_config ~tree_size ~num_operations () in
   let benchmark_fn = make_benchmark_fn ~config:bench_config in
   Benchmark.run ~config:benchmark_config ~name benchmark_fn

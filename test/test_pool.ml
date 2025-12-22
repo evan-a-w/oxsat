@@ -5,7 +5,10 @@ open! Ds
 
 let%expect_test "basic pool allocation and iteration" =
   let module Elt = struct
-    type t = #{ x : int; y : int }
+    type t =
+      #{ x : int
+       ; y : int
+       }
 
     let create_for_pool () = #{ x = 0; y = 0 }
   end
@@ -28,7 +31,10 @@ let%expect_test "basic pool allocation and iteration" =
 
 let%expect_test "pool iteration after free" =
   let module Elt = struct
-    type t = #{ x : int; y : int }
+    type t =
+      #{ x : int
+       ; y : int
+       }
 
     let create_for_pool () = #{ x = 0; y = 0 }
   end
@@ -56,7 +62,10 @@ let%expect_test "pool iteration after free" =
 
 let%expect_test "pool iteration with alloc after free" =
   let module Elt = struct
-    type t = #{ x : int; y : int }
+    type t =
+      #{ x : int
+       ; y : int
+       }
 
     let create_for_pool () = #{ x = 0; y = 0 }
   end
@@ -84,7 +93,10 @@ let%expect_test "pool iteration with alloc after free" =
 
 let%expect_test "pool iteration across multiple chunks" =
   let module Elt = struct
-    type t = #{ x : int; y : int }
+    type t =
+      #{ x : int
+       ; y : int
+       }
 
     let create_for_pool () = #{ x = 0; y = 0 }
   end
@@ -118,7 +130,10 @@ let%expect_test "pool iteration across multiple chunks" =
 
 let%expect_test "empty pool iteration" =
   let module Elt = struct
-    type t = #{ x : int; y : int }
+    type t =
+      #{ x : int
+       ; y : int
+       }
 
     let create_for_pool () = #{ x = 0; y = 0 }
   end
@@ -134,7 +149,10 @@ let%expect_test "empty pool iteration" =
 
 let%expect_test "pool iteration after allocating and freeing all" =
   let module Elt = struct
-    type t = #{ x : int; y : int }
+    type t =
+      #{ x : int
+       ; y : int
+       }
 
     let create_for_pool () = #{ x = 0; y = 0 }
   end

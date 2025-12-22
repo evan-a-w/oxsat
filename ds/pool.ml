@@ -178,21 +178,30 @@ struct
   module Ptr_helpers = struct
     let chunk t ptr = Ptr.Private.chunk ~chunk_bits:(chunk_bits t) ptr
     let idx t ptr = Ptr.Private.idx ~chunk_bits:(chunk_bits t) ptr
-    let create t ~chunk ~idx = Ptr.Private.create ~chunk_bits:(chunk_bits t) ~chunk ~idx
+
+    let create t ~chunk ~idx =
+      Ptr.Private.create ~chunk_bits:(chunk_bits t) ~chunk ~idx
+    ;;
   end
 
   let outstanding t = t.outstanding
 
   let get t ptr =
-    (Vec.Value.get t.chunks (Ptr_helpers.chunk t ptr)).elts.(Ptr_helpers.idx t ptr)
+    (Vec.Value.get t.chunks (Ptr_helpers.chunk t ptr)).elts.(Ptr_helpers.idx
+                                                               t
+                                                               ptr)
       .#elt
   ;;
 
   let set t ptr elt =
     let chunk_elt =
-      (Vec.Value.get t.chunks (Ptr_helpers.chunk t ptr)).elts.(Ptr_helpers.idx t ptr)
+      (Vec.Value.get t.chunks (Ptr_helpers.chunk t ptr)).elts.(Ptr_helpers.idx
+                                                                 t
+                                                                 ptr)
     in
-    (Vec.Value.get t.chunks (Ptr_helpers.chunk t ptr)).elts.(Ptr_helpers.idx t ptr)
+    (Vec.Value.get t.chunks (Ptr_helpers.chunk t ptr)).elts.(Ptr_helpers.idx
+                                                               t
+                                                               ptr)
     <- #{ chunk_elt with elt }
   ;;
 

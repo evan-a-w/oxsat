@@ -46,7 +46,8 @@ let%expect_test "clear bit" =
   print_s [%message "after set" (Bitset.get bs 5 : bool)];
   Bitset.clear bs 5;
   print_s [%message "after clear" (Bitset.get bs 5 : bool)];
-  [%expect {|
+  [%expect
+    {|
     ("after set" ("Bitset.get bs 5" true))
     ("after clear" ("Bitset.get bs 5" false))
     |}]
@@ -59,7 +60,8 @@ let%expect_test "toggle bit" =
   print_s [%message "after first toggle" (Bitset.get bs 3 : bool)];
   Bitset.toggle bs 3;
   print_s [%message "after second toggle" (Bitset.get bs 3 : bool)];
-  [%expect {|
+  [%expect
+    {|
     (initial ("Bitset.get bs 3" false))
     ("after first toggle" ("Bitset.get bs 3" true))
     ("after second toggle" ("Bitset.get bs 3" false))
@@ -73,8 +75,11 @@ let%expect_test "clear_all" =
   Bitset.set bs 100;
   print_s [%message "before clear_all" (Bitset.popcount bs : int)];
   Bitset.clear_all bs;
-  print_s [%message "after clear_all" (Bitset.popcount bs : int) (Bitset.is_empty bs : bool)];
-  [%expect {|
+  print_s
+    [%message
+      "after clear_all" (Bitset.popcount bs : int) (Bitset.is_empty bs : bool)];
+  [%expect
+    {|
     ("before clear_all" ("Bitset.popcount bs" 3))
     ("after clear_all" ("Bitset.popcount bs" 0) ("Bitset.is_empty bs" true))
     |}]
@@ -84,7 +89,8 @@ let%expect_test "set_all" =
   let bs = Bitset.create () in
   Bitset.set_all bs ~up_to:10;
   print_s [%message (to_list bs : int list) (Bitset.popcount bs : int)];
-  [%expect {| (("to_list bs" (0 1 2 3 4 5 6 7 8 9)) ("Bitset.popcount bs" 10)) |}]
+  [%expect
+    {| (("to_list bs" (0 1 2 3 4 5 6 7 8 9)) ("Bitset.popcount bs" 10)) |}]
 ;;
 
 let%expect_test "copy bitset" =
@@ -96,8 +102,13 @@ let%expect_test "copy bitset" =
   print_s [%message "copy" (to_list bs2 : int list)];
   (* Modify original and verify copy is unchanged *)
   Bitset.set bs1 10;
-  print_s [%message "after modifying original" (to_list bs1 : int list) (to_list bs2 : int list)];
-  [%expect {|
+  print_s
+    [%message
+      "after modifying original"
+        (to_list bs1 : int list)
+        (to_list bs2 : int list)];
+  [%expect
+    {|
     (original ("to_list bs1" (1 5)))
     (copy ("to_list bs2" (1 5)))
     ("after modifying original" ("to_list bs1" (1 5 10)) ("to_list bs2" (1 5)))
@@ -134,7 +145,8 @@ let%expect_test "find_first_set - multiple bits" =
         (or_null_to_option result2 : int option)
         (or_null_to_option result3 : int option)
         (or_null_to_option result4 : int option)];
-  [%expect {|
+  [%expect
+    {|
     (("or_null_to_option result1" (10)) ("or_null_to_option result2" (20))
      ("or_null_to_option result3" (30)) ("or_null_to_option result4" ()))
     |}]
@@ -290,7 +302,8 @@ let%expect_test "lnot_ (bitwise NOT) - limited range" =
         (Bitset.get result 2 : bool)
         (Bitset.get result 3 : bool)
         (Bitset.get result 4 : bool)];
-  [%expect {|
+  [%expect
+    {|
     (("Bitset.get result 0" false) ("Bitset.get result 1" true)
      ("Bitset.get result 2" false) ("Bitset.get result 3" true)
      ("Bitset.get result 4" false))
@@ -310,7 +323,8 @@ let%expect_test "lnot_inplace (bitwise NOT in-place)" =
         (Bitset.get bs 2 : bool)
         (Bitset.get bs 3 : bool)
         (Bitset.get bs 4 : bool)];
-  [%expect {|
+  [%expect
+    {|
     (("Bitset.get bs 0" false) ("Bitset.get bs 1" true) ("Bitset.get bs 2" false)
      ("Bitset.get bs 3" true) ("Bitset.get bs 4" false))
     |}]
@@ -351,7 +365,8 @@ let%expect_test "capacity grows as needed" =
   print_s [%message "after setting bit 5" (Bitset.capacity bs : int)];
   Bitset.set bs 100;
   print_s [%message "after setting bit 100" (Bitset.capacity bs : int)];
-  [%expect {|
+  [%expect
+    {|
     ("initial capacity" ("Bitset.capacity bs" 64))
     ("after setting bit 5" ("Bitset.capacity bs" 64))
     ("after setting bit 100" ("Bitset.capacity bs" 128))

@@ -81,22 +81,26 @@ type bench_config =
   ; key_range : int option
   }
 
-let default_config = { tree_size = 1000; num_operations = 100; key_range = None }
+let default_config =
+  { tree_size = 1000; num_operations = 100; key_range = None }
+;;
 
 let create_config ?tree_size ?num_operations ?key_range () =
   { tree_size = Option.value tree_size ~default:default_config.tree_size
-  ; num_operations = Option.value num_operations ~default:default_config.num_operations
+  ; num_operations =
+      Option.value num_operations ~default:default_config.num_operations
   ; key_range = Option.first_some key_range default_config.key_range
   }
 ;;
 
 (* Create a benchmark function that generates a tree and runs operations *)
 let make_benchmark_fn ~config =
-  let key_range = Option.value config.key_range ~default:(config.tree_size * 100) in
+  let key_range =
+    Option.value config.key_range ~default:(config.tree_size * 100)
+  in
   let tree = generate_random_tree ~size:config.tree_size in
   let operations = generate_operations ~n:config.num_operations ~key_range in
-  fun () ->
-    List.iter operations ~f:(fun op -> execute_operation tree op)
+  fun () -> List.iter operations ~f:(fun op -> execute_operation tree op)
 ;;
 
 (* Run a single benchmark with the given configuration *)
@@ -128,7 +132,9 @@ let run_operation_mix_benchmark
   =
   (* For now, we use the random mix from quickcheck *)
   (* In the future, we could add weighted generators for different mixes *)
-  let name = sprintf "RB tree mixed ops (n=%d, ops=%d)" tree_size num_operations in
+  let name =
+    sprintf "RB tree mixed ops (n=%d, ops=%d)" tree_size num_operations
+  in
   let bench_config = create_config ~tree_size ~num_operations () in
   let benchmark_fn = make_benchmark_fn ~config:bench_config in
   Benchmark.run ~config:benchmark_config ~name benchmark_fn

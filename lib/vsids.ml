@@ -101,10 +101,7 @@ let add_activity t ~literal =
   | Some score ->
     let new_score = F64.O.(score + Adjusting_score.unit t.adjusting_score) in
     F64.Option.Vec.set vec (Literal.var literal) (F64.Option.some new_score);
-    if
-      Literal_with_score.Rb.mem
-        t.literals_with_score
-        #{ literal; score }
+    if Literal_with_score.Rb.mem t.literals_with_score #{ literal; score }
     then (
       Literal_with_score.Rb.remove t.literals_with_score #{ literal; score };
       Literal_with_score.Rb.insert
