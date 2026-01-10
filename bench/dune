@@ -2,41 +2,46 @@
  (name benchmark)
  (modules benchmark)
  (libraries core core_unix)
- (preprocess (pps ppx_jane)))
+ (preprocess
+  (pps ppx_jane)))
 
 (library
  (name rb_bench)
  (modules rb_bench)
  (libraries core ds benchmark)
- (preprocess (pps ppx_jane ppx_optional)))
+ (preprocess
+  (pps ppx_jane ppx_optional)))
 
 (library
  (name map_bench)
  (modules map_bench)
-(libraries core benchmark)
-(preprocess (pps ppx_jane)))
+ (libraries core benchmark)
+ (preprocess
+  (pps ppx_jane)))
 
 (library
  (name sat_bench)
  (modules sat_bench)
  (libraries core feel benchmark)
- (preprocess (pps ppx_jane)))
+ (preprocess
+  (pps ppx_jane)))
 
 (library
  (name dimacs_bench)
  (modules dimacs_bench)
  (libraries core feel examples benchmark)
- (preprocess (pps ppx_jane)))
+ (preprocess
+  (pps ppx_jane)))
 
 (executable
-  (public_name feel_bench)
+ (public_name feel_bench)
  (name feel_bench)
-  (package feel)
+ (package feel)
  (modules feel_bench)
  (preprocess
   (pps ppx_jane ppx_optional))
  (libraries
-   feel
+  feel
   core
   examples
   core_unix

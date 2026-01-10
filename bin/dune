@@ -4,11 +4,6 @@
  (preprocess
   (pps ppx_jane ppx_optional))
  (package feel)
- (libraries
-   feel
-  core
-  core_unix
-  ds
-  unboxed)
+ (libraries feel core core_unix ds unboxed)
  (flags
   (:standard -extension-universe beta)))
