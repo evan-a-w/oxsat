@@ -1,18 +1,10 @@
 open! Core
 open! Import
 
-module T = struct
-  type t = int Vec.Value.t
-
-  let create_for_pool () = Vec.Value.create ()
-
-  let sexp_of_t t = [%sexp (Vec.Value.to_array t : int array)]
-  let t_of_sexp sexp = Vec.Value.of_array_taking_ownership ([%of_sexp: int array] sexp)
-end
-
-include T
-
-module Pool = Pool.Make (T)
+type t =
+  { mutable lits : int array
+  }
+[@@deriving sexp]
 
 let sort_compare a b =
   let c = Int.compare (Int.abs a) (Int.abs b) in
@@ -30,36 +22,39 @@ let normalize_literals arr =
   |> Array.of_list
 ;;
 
-let of_int_array arr = Vec.Value.of_array_taking_ownership (normalize_literals (Array.copy arr))
-let to_int_array t = Vec.Value.to_array t
-let copy = Vec.Value.copy
-let clear = Vec.Value.clear
-let negate t = Vec.Value.map_inplace t ~f:Int.neg
-let literals_list t = Vec.Value.to_list t
+let of_int_array arr = { lits = normalize_literals (Array.copy arr) }
+let to_int_array t = Array.copy t.lits
+let copy t = { lits = Array.copy t.lits }
+let clear t = t.lits <- [||]
 
-let iter_literals t ~f = Vec.Value.iter t ~f:(fun lit -> f (Literal.of_int lit))
+let negate t =
+  for i = 0 to Array.length t.lits - 1 do
+    t.lits.(i) <- -t.lits.(i)
+  done
+;;
+
+let literals_list t = Array.to_list t.lits
+
+let iter_literals t ~f = Array.iter t.lits ~f:(fun lit -> f (Literal.of_int lit))
 
 let contains t ~var =
   let var = Int.abs var in
-  Vec.Value.fold t ~init:false ~f:(fun acc lit -> acc || Int.equal (Int.abs lit) var)
+  Array.exists t.lits ~f:(fun lit -> Int.equal (Int.abs lit) var)
 ;;
 
 let contains_literal t ~literal =
-  Vec.Value.fold t ~init:false ~f:(fun acc lit -> acc || Int.equal lit (Literal.to_int literal))
+  Array.exists t.lits ~f:(fun lit -> Int.equal lit (Literal.to_int literal))
 ;;
 
 let is_tautology t =
   let seen = Int.Table.create () in
-  Vec.Value.fold t ~init:false ~f:(fun taut lit ->
-    if taut
-    then true
-    else (
-      let v = Int.abs lit in
-      match Hashtbl.find seen v with
-      | None ->
-        Hashtbl.set seen ~key:v ~data:(lit > 0);
-        false
-      | Some b -> Bool.( <> ) b (lit > 0)))
+  Array.exists t.lits ~f:(fun lit ->
+    let v = Int.abs lit in
+    match Hashtbl.find seen v with
+    | None ->
+      Hashtbl.set seen ~key:v ~data:(lit > 0);
+      false
+    | Some b -> Bool.( <> ) b (lit > 0))
 ;;
 
 let literal_assignment assignments lit =
@@ -74,9 +69,7 @@ let literal_assignment assignments lit =
 ;;
 
 let is_satisfied t ~assignments =
-  Vec.Value.fold t ~init:false ~f:(fun acc lit ->
-    acc
-    ||
+  Array.exists t.lits ~f:(fun lit ->
     match literal_assignment assignments lit with
     | Some b -> Bool.equal b (lit > 0)
     | None -> false)
@@ -88,7 +81,7 @@ let unit_literal t ~assignments =
   else (
     let unknown = ref None in
     let many_unknown = ref false in
-    Vec.Value.iter t ~f:(fun lit ->
+    Array.iter t.lits ~f:(fun lit ->
       match literal_assignment assignments lit with
       | Some _ -> ()
       | None ->
@@ -101,8 +94,8 @@ let unit_literal t ~assignments =
 ;;
 
 let can_resolve t ~other ~on_var =
-  let has_pos clause = Vec.Value.fold clause ~init:false ~f:(fun acc lit -> acc || Int.equal lit on_var) in
-  let has_neg clause = Vec.Value.fold clause ~init:false ~f:(fun acc lit -> acc || Int.equal lit (-on_var)) in
+  let has_pos clause = Array.exists clause.lits ~f:(fun lit -> Int.equal lit on_var) in
+  let has_neg clause = Array.exists clause.lits ~f:(fun lit -> Int.equal lit (-on_var)) in
   (has_pos t && has_neg other) || (has_neg t && has_pos other)
 ;;
 
@@ -116,9 +109,10 @@ let resolve_exn t ~other ~on_var =
       then ()
       else Hashtbl.set out ~key:lit ~data:()
     in
-    Vec.Value.iter t ~f:add;
-    Vec.Value.iter other ~f:add;
-    let merged = Hashtbl.keys out |> List.sort ~compare:sort_compare |> Array.of_list in
-    clear t;
-    Array.iter merged ~f:(Vec.Value.push t))
+    Array.iter t.lits ~f:add;
+    Array.iter other.lits ~f:add;
+    t.lits <-
+      Hashtbl.keys out
+      |> List.sort ~compare:sort_compare
+      |> Array.of_list)
 ;;

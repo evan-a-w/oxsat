@@ -15,14 +15,14 @@ module Int_value = struct
   let create_for_hash_table () = 0
 end
 
-module Int_table = Hash_table.Make [@kind value value] (Int_key) (Int_value)
+module Int_table = Hash_table.Make (Int_key) (Int_value)
 
 let value_opt t key =
   let kv = Int_table.find t key in
   if Int_table.Kv_option.is_none kv
   then None
   else (
-    let #(_, data) = Int_table.Kv_option.value_exn kv in
+    let (_, data) = Int_table.Kv_option.value_exn kv in
     Some data)
 ;;
 
@@ -120,7 +120,7 @@ module Quickcheck_modules = struct
     let create_for_hash_table () = 0
   end
 
-  module Table = Hash_table.Make [@kind value value] (Int_key) (Int_value)
+  module Table = Hash_table.Make (Int_key) (Int_value)
 
   type operation =
     | Insert of int * int
@@ -146,7 +146,7 @@ module Quickcheck_modules = struct
       if Table.Kv_option.is_none kv
       then failwith (sprintf "key %d missing from hash table" key)
       else (
-        let #(_, table_data) = Table.Kv_option.value_exn kv in
+        let (_, table_data) = Table.Kv_option.value_exn kv in
         if table_data <> data
         then
           failwith
@@ -201,7 +201,7 @@ module Quickcheck_modules = struct
       let theirs = Hashtbl.find reference key in
       (match Table.Kv_option.is_some ours, theirs with
        | true, Some ref_value ->
-         let #(_, ours_value) = Table.Kv_option.value_exn ours in
+         let (_, ours_value) = Table.Kv_option.value_exn ours in
          if ours_value <> ref_value
          then
            failwith

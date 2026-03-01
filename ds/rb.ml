@@ -5,13 +5,7 @@ module Make (Key : Key) (Value : Value) = struct
   module Key = Key
   module Value = Value
 
-  module M = Stdlib.Map.Make (struct
-      type t = Key.t
-
-      let compare = Key.compare
-    end)
-
-  type t = { mutable map : Value.t M.t }
+  type t = { mutable map : (Key.t, Value.t) Map.Poly.t }
 
   module Kv_option = struct
     type t = (Key.t * Value.t) option
@@ -35,27 +29,27 @@ module Make (Key : Key) (Value : Value) = struct
     end
   end
 
-  let create () = { map = M.empty }
-  let insert t ~key ~data = t.map <- M.add key data t.map
-  let mem t key = M.mem key t.map
-  let remove t key = t.map <- M.remove key t.map
-  let iter t ~f = M.iter (fun key data -> f ~key ~data) t.map
+  let create () = { map = Map.Poly.empty }
+  let insert t ~key ~data = t.map <- Map.Poly.set t.map ~key ~data
+  let mem t key = Map.Poly.mem t.map key
+  let remove t key = t.map <- Map.Poly.remove t.map key
+  let iter t ~f = Map.Poly.iteri t.map ~f:(fun ~key ~data -> f ~key ~data)
   let iteri = iter
 
   let find t key =
-    match M.find_opt key t.map with
+    match Map.Poly.find t.map key with
     | None -> Kv_option.none ()
     | Some data -> Kv_option.some (key, data)
   ;;
 
-  let min t = M.min_binding_opt t.map
-  let max t = M.max_binding_opt t.map
+  let min t = Map.Poly.min_elt t.map
+  let max t = Map.Poly.max_elt t.map
 
   let pop_min t =
     match min t with
     | None -> None
     | Some (key, _data) as res ->
-      t.map <- M.remove key t.map;
+      t.map <- Map.Poly.remove t.map key;
       res
   ;;
 
@@ -63,11 +57,11 @@ module Make (Key : Key) (Value : Value) = struct
     match max t with
     | None -> None
     | Some (key, _data) as res ->
-      t.map <- M.remove key t.map;
+      t.map <- Map.Poly.remove t.map key;
       res
   ;;
 
-  let find_exn t key = M.find key t.map
+  let find_exn t key = Map.Poly.find_exn t.map key
 
   let min_exn t =
     match min t with
@@ -93,7 +87,9 @@ module Make (Key : Key) (Value : Value) = struct
     | None -> failwith "Rb.pop_max_exn on empty tree"
   ;;
 
-  let fold t ~init ~f = M.fold (fun key data acc -> f ~acc ~key ~data) t.map init
+  let fold t ~init ~f =
+    Map.Poly.fold t.map ~init ~f:(fun ~key ~data acc -> f ~acc ~key ~data)
+  ;;
 
   let fold_or_null t ~init ~f =
     let done_ = ref false in
@@ -101,12 +97,12 @@ module Make (Key : Key) (Value : Value) = struct
       if !done_ then acc else f ~done_ ~acc ~key ~data)
   ;;
 
-  let length t = M.cardinal t.map
-  let is_empty t = M.is_empty t.map
-  let clear t = t.map <- M.empty
+  let length t = Map.Poly.length t.map
+  let is_empty t = Map.Poly.is_empty t.map
+  let clear t = t.map <- Map.Poly.empty
 
-  let to_array t = M.bindings t.map |> Array.of_list
-  let to_keys_array t = M.bindings t.map |> List.map ~f:fst |> Array.of_list
+  let to_array t = Map.Poly.to_alist t.map |> Array.of_list
+  let to_keys_array t = Map.Poly.keys t.map |> Array.of_list
 
   let of_array_exn arr =
     let t = create () in
@@ -122,10 +118,13 @@ module Make (Key : Key) (Value : Value) = struct
   module Iter = struct
     type t = { mutable rest : (Key.t * Value.t) list }
 
-    let create tree = { rest = M.bindings tree.map }
+    let create tree = { rest = Map.Poly.to_alist tree.map }
 
     let create_from tree start =
-      { rest = List.filter (M.bindings tree.map) ~f:(fun (key, _) -> Key.compare key start >= 0) }
+      { rest =
+          List.filter (Map.Poly.to_alist tree.map) ~f:(fun (key, _) ->
+            Key.compare key start >= 0)
+      }
     ;;
 
     let next t =

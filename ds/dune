@@ -5,18 +5,11 @@
   bitset
   hash_table
   hash_table_intf
-  local_ref
-  option_u
-  option_u_intf
-  optional_pair
-  optional_pair_intf
   pool
   pool_intf
   ptr
   rb
-  rb_intf
-  vec
-  vec_intf)
+  rb_intf)
  (preprocess
   (pps ppx_jane))
  (inline_tests)

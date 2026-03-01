@@ -1,6 +1,5 @@
 open! Core
 open! Ds
-open! Unboxed
 
 [@@@warning "-69"]
 
@@ -11,12 +10,8 @@ let to_list bs =
   List.sort ~compare:Int.compare !result
 ;;
 
-(* Helper to convert or_null to option for pretty printing *)
-let or_null_to_option (type a) (x : a or_null) : a option =
-  match x with
-  | Null -> None
-  | This v -> Some v
-;;
+(* Legacy helper name retained; values are already options in regular OCaml. *)
+let or_null_to_option x = x
 
 let%expect_test "create empty bitset" =
   let bs = Bitset.create () in

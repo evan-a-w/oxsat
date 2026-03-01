@@ -16,6 +16,4 @@ module type S = sig
   val of_int_array : int array -> t
   val to_int_array : t -> int array
   val unit_literal : t -> assignments:Ds.Bitset.t Tf_pair.t -> Literal.Option.t
-
-  module Pool : Ds.Pool_intf.S with type Elt.t := t
 end

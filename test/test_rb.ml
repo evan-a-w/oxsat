@@ -15,7 +15,7 @@ let%expect_test "basic insertion and lookup" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   RB.insert t ~key:5 ~data:50;
   RB.insert t ~key:3 ~data:30;
@@ -55,7 +55,7 @@ let%expect_test "iteration" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   RB.insert t ~key:5 ~data:50;
   RB.insert t ~key:3 ~data:30;
@@ -87,7 +87,7 @@ let%expect_test "removal" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   RB.insert t ~key:5 ~data:50;
   RB.insert t ~key:3 ~data:30;
@@ -128,7 +128,7 @@ let%expect_test "large random insertions" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   let keys = List.init 100 ~f:(fun i -> i) in
   let shuffled = List.permute keys in
@@ -163,7 +163,7 @@ let%expect_test "update existing key" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   RB.insert t ~key:5 ~data:50;
   print_s [%message (RB.find_exn t 5 : int)];
@@ -194,7 +194,7 @@ let%expect_test "fold operation" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   List.iter [ 1; 2; 3; 4; 5 ] ~f:(fun key -> RB.insert t ~key ~data:(key * 10));
   let sum = RB.fold t ~init:0 ~f:(fun ~acc ~key:_ ~data -> acc + data) in
@@ -217,13 +217,13 @@ let%expect_test "to_array and of_array_exn" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
-  let arr = [| #(5, 50); #(3, 30); #(7, 70); #(1, 10); #(9, 90) |] in
+  let module RB = Rb.Make (Int_key) (Int_value) in
+  let arr = [| (5, 50); (3, 30); (7, 70); (1, 10); (9, 90) |] in
   let t = RB.of_array_exn arr in
   print_s [%message (RB.length t : int)];
   let result = RB.to_array t in
   for i = 0 to Array.length result - 1 do
-    let #(key, data) = result.(i) in
+    let (key, data) = result.(i) in
     print_s [%message (key : int) (data : int)]
   done;
   RB.validate t;
@@ -251,7 +251,7 @@ let%expect_test "stress test with many operations" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   for i = 0 to 999 do
     RB.insert t ~key:i ~data:(i * 2)
@@ -298,7 +298,7 @@ let%expect_test "empty tree operations" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   print_s [%message (RB.is_empty t : bool)];
   print_s [%message (RB.length t : int)];
@@ -328,7 +328,7 @@ let%expect_test "single element operations" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   RB.insert t ~key:42 ~data:84;
   print_s [%message (RB.is_empty t : bool)];
@@ -366,7 +366,7 @@ let%expect_test "clear operation" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   for i = 0 to 99 do
     RB.insert t ~key:i ~data:(i * 2)
@@ -403,7 +403,7 @@ let%expect_test "sequential insertions ascending" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   for i = 0 to 49 do
     RB.insert t ~key:i ~data:(i * 2)
@@ -436,7 +436,7 @@ let%expect_test "sequential insertions descending" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   for i = 49 downto 0 do
     RB.insert t ~key:i ~data:(i * 2)
@@ -469,7 +469,7 @@ let%expect_test "remove root repeatedly" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   for i = 0 to 19 do
     RB.insert t ~key:i ~data:(i * 2)
@@ -522,7 +522,7 @@ let%expect_test "remove non-existent keys" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   for i = 0 to 9 do
     RB.insert t ~key:(i * 2) ~data:(i * 4)
@@ -553,7 +553,7 @@ let%expect_test "alternating insert and remove" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   for i = 0 to 99 do
     RB.insert t ~key:i ~data:(i * 2);
@@ -578,7 +578,7 @@ let%expect_test "duplicate keys behavior" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   RB.insert t ~key:10 ~data:100;
   RB.insert t ~key:20 ~data:200;
@@ -611,7 +611,7 @@ let%expect_test "find on empty tree" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   (match RB.find_exn t 5 with
    | _ -> print_endline "Found"
@@ -634,7 +634,7 @@ let%expect_test "iteration on empty tree" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   let count = ref 0 in
   RB.iter t ~f:(fun ~key:_ ~data:_ -> incr count);
@@ -656,7 +656,7 @@ let%expect_test "fold on empty tree" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   let result = RB.fold t ~init:42 ~f:(fun ~acc ~key:_ ~data:_ -> acc + 1) in
   print_s [%message (result : int)];
@@ -677,7 +677,7 @@ let%expect_test "large tree all operations" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   let keys = List.init 500 ~f:(fun i -> i) in
   let shuffled = List.permute keys in
@@ -695,8 +695,8 @@ let%expect_test "large tree all operations" =
       if i >= Array.length arr - 1
       then true
       else (
-        let #(k1, _) = arr.(i) in
-        let #(k2, _) = arr.(i + 1) in
+        let (k1, _) = arr.(i) in
+        let (k2, _) = arr.(i + 1) in
         k1 < k2 && check (i + 1))
     in
     if Array.length arr = 0 then true else check 0
@@ -728,15 +728,15 @@ let%expect_test "min_exn and max_exn basic" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   RB.insert t ~key:5 ~data:50;
   RB.insert t ~key:3 ~data:30;
   RB.insert t ~key:7 ~data:70;
   RB.insert t ~key:1 ~data:10;
   RB.insert t ~key:9 ~data:90;
-  let #(min_key, min_val) = RB.min_exn t in
-  let #(max_key, max_val) = RB.max_exn t in
+  let (min_key, min_val) = RB.min_exn t in
+  let (max_key, max_val) = RB.max_exn t in
   print_s [%message (min_key : int) (min_val : int)];
   print_s [%message (max_key : int) (max_val : int)];
   print_s [%message (RB.length t : int)];
@@ -762,7 +762,7 @@ let%expect_test "min_exn and max_exn on empty tree" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   (match RB.min_exn t with
    | _ -> print_endline "Found min"
@@ -791,11 +791,11 @@ let%expect_test "min_exn and max_exn single element" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   RB.insert t ~key:42 ~data:100;
-  let #(min_key, min_val) = RB.min_exn t in
-  let #(max_key, max_val) = RB.max_exn t in
+  let (min_key, min_val) = RB.min_exn t in
+  let (max_key, max_val) = RB.max_exn t in
   print_s [%message (min_key : int) (min_val : int)];
   print_s [%message (max_key : int) (max_val : int)];
   [%expect
@@ -818,7 +818,7 @@ let%expect_test "pop_min_exn basic" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   RB.insert t ~key:5 ~data:50;
   RB.insert t ~key:3 ~data:30;
@@ -826,12 +826,12 @@ let%expect_test "pop_min_exn basic" =
   RB.insert t ~key:1 ~data:10;
   RB.insert t ~key:9 ~data:90;
   print_s [%message "Initial" (RB.length t : int)];
-  let #(min_key, min_val) = RB.pop_min_exn t in
+  let (min_key, min_val) = RB.pop_min_exn t in
   print_s [%message "Popped" (min_key : int) (min_val : int)];
   print_s [%message "After pop" (RB.length t : int)];
   print_s [%message (RB.mem t 1 : bool)];
   RB.validate t;
-  let #(new_min_key, new_min_val) = RB.min_exn t in
+  let (new_min_key, new_min_val) = RB.min_exn t in
   print_s [%message "New min" (new_min_key : int) (new_min_val : int)];
   [%expect
     {|
@@ -856,7 +856,7 @@ let%expect_test "pop_max_exn basic" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   RB.insert t ~key:5 ~data:50;
   RB.insert t ~key:3 ~data:30;
@@ -864,12 +864,12 @@ let%expect_test "pop_max_exn basic" =
   RB.insert t ~key:1 ~data:10;
   RB.insert t ~key:9 ~data:90;
   print_s [%message "Initial" (RB.length t : int)];
-  let #(max_key, max_val) = RB.pop_max_exn t in
+  let (max_key, max_val) = RB.pop_max_exn t in
   print_s [%message "Popped" (max_key : int) (max_val : int)];
   print_s [%message "After pop" (RB.length t : int)];
   print_s [%message (RB.mem t 9 : bool)];
   RB.validate t;
-  let #(new_max_key, new_max_val) = RB.max_exn t in
+  let (new_max_key, new_max_val) = RB.max_exn t in
   print_s [%message "New max" (new_max_key : int) (new_max_val : int)];
   [%expect
     {|
@@ -894,14 +894,14 @@ let%expect_test "pop all elements via pop_min_exn" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   List.iter [ 5; 3; 7; 1; 9; 2; 4; 6; 8 ] ~f:(fun i ->
     RB.insert t ~key:i ~data:(i * 10));
   print_s [%message "Initial" (RB.length t : int)];
   let popped = ref [] in
   while not (RB.is_empty t) do
-    let #(key, _val) = RB.pop_min_exn t in
+    let (key, _val) = RB.pop_min_exn t in
     popped := key :: !popped;
     RB.validate t
   done;
@@ -929,14 +929,14 @@ let%expect_test "pop all elements via pop_max_exn" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   List.iter [ 5; 3; 7; 1; 9; 2; 4; 6; 8 ] ~f:(fun i ->
     RB.insert t ~key:i ~data:(i * 10));
   print_s [%message "Initial" (RB.length t : int)];
   let popped = ref [] in
   while not (RB.is_empty t) do
-    let #(key, _val) = RB.pop_max_exn t in
+    let (key, _val) = RB.pop_max_exn t in
     popped := key :: !popped;
     RB.validate t
   done;
@@ -964,7 +964,7 @@ let%expect_test "pop_min_exn on empty tree" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   (match RB.pop_min_exn t with
    | _ -> print_endline "Popped"
@@ -987,7 +987,7 @@ let%expect_test "pop_max_exn on empty tree" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   (match RB.pop_max_exn t with
    | _ -> print_endline "Popped"
@@ -1010,19 +1010,19 @@ let%expect_test "alternating pop_min and pop_max" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   List.iter (List.range 1 21) ~f:(fun i -> RB.insert t ~key:i ~data:(i * 10));
   print_s [%message "Initial" (RB.length t : int)];
-  let #(min1, _) = RB.pop_min_exn t in
-  let #(max1, _) = RB.pop_max_exn t in
-  let #(min2, _) = RB.pop_min_exn t in
-  let #(max2, _) = RB.pop_max_exn t in
+  let (min1, _) = RB.pop_min_exn t in
+  let (max1, _) = RB.pop_max_exn t in
+  let (min2, _) = RB.pop_min_exn t in
+  let (max2, _) = RB.pop_max_exn t in
   print_s [%message (min1 : int) (max1 : int) (min2 : int) (max2 : int)];
   print_s [%message "After pops" (RB.length t : int)];
   RB.validate t;
-  let #(new_min, _) = RB.min_exn t in
-  let #(new_max, _) = RB.max_exn t in
+  let (new_min, _) = RB.min_exn t in
+  let (new_max, _) = RB.max_exn t in
   print_s [%message (new_min : int) (new_max : int)];
   [%expect
     {|
@@ -1046,14 +1046,14 @@ let%expect_test "optional find - basic" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   RB.insert t ~key:5 ~data:50;
   RB.insert t ~key:3 ~data:30;
   RB.insert t ~key:7 ~data:70;
   let result = RB.find t 5 in
   print_s [%message (RB.Kv_option.is_some result : bool)];
-  let #(key, value) = RB.Kv_option.value_exn result in
+  let (key, value) = RB.Kv_option.value_exn result in
   print_s [%message (key : int) (value : int)];
   let not_found = RB.find t 10 in
   print_s [%message (RB.Kv_option.is_none not_found : bool)];
@@ -1078,7 +1078,7 @@ let%expect_test "optional find - empty tree" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   let result = RB.find t 5 in
   print_s [%message (RB.Kv_option.is_none result : bool)];
@@ -1099,7 +1099,7 @@ let%expect_test "optional min and max" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   let empty_min = RB.min t in
   let empty_max = RB.max t in
@@ -1110,8 +1110,8 @@ let%expect_test "optional min and max" =
   RB.insert t ~key:7 ~data:70;
   let min_result = RB.min t in
   let max_result = RB.max t in
-  let #(min_key, min_val) = RB.Kv_option.value_exn min_result in
-  let #(max_key, max_val) = RB.Kv_option.value_exn max_result in
+  let (min_key, min_val) = RB.Kv_option.value_exn min_result in
+  let (max_key, max_val) = RB.Kv_option.value_exn max_result in
   print_s [%message (min_key : int) (min_val : int)];
   print_s [%message (max_key : int) (max_val : int)];
   [%expect
@@ -1136,7 +1136,7 @@ let%expect_test "optional pop_min and pop_max" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   let empty_pop_min = RB.pop_min t in
   print_s [%message (RB.Kv_option.is_none empty_pop_min : bool)];
@@ -1145,11 +1145,11 @@ let%expect_test "optional pop_min and pop_max" =
   RB.insert t ~key:7 ~data:70;
   print_s [%message "Initial" (RB.length t : int)];
   let min_result = RB.pop_min t in
-  let #(min_key, min_val) = RB.Kv_option.value_exn min_result in
+  let (min_key, min_val) = RB.Kv_option.value_exn min_result in
   print_s [%message "Popped min" (min_key : int) (min_val : int)];
   print_s [%message "After pop_min" (RB.length t : int)];
   let max_result = RB.pop_max t in
-  let #(max_key, max_val) = RB.Kv_option.value_exn max_result in
+  let (max_key, max_val) = RB.Kv_option.value_exn max_result in
   print_s [%message "Popped max" (max_key : int) (max_val : int)];
   print_s [%message "After pop_max" (RB.length t : int)];
   RB.validate t;
@@ -1177,7 +1177,7 @@ let%expect_test "iterator - basic traversal" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   List.iter [ 5; 3; 7; 1; 9; 2; 8 ] ~f:(fun k ->
     RB.insert t ~key:k ~data:(k * 10));
@@ -1186,7 +1186,7 @@ let%expect_test "iterator - basic traversal" =
     if not (RB.Iter.is_done iter)
     then (
       let result = RB.Iter.next iter in
-      let #(key, value) = RB.Kv_option.value_exn result in
+      let (key, value) = RB.Kv_option.value_exn result in
       print_s [%message (key : int) (value : int)];
       loop ())
   in
@@ -1216,7 +1216,7 @@ let%expect_test "iterator - empty tree" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   let iter = RB.Iter.create t in
   print_s [%message (RB.Iter.is_done iter : bool)];
@@ -1242,21 +1242,21 @@ let%expect_test "iterator - peek without advancing" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   List.iter [ 5; 3; 7 ] ~f:(fun k -> RB.insert t ~key:k ~data:(k * 10));
   let iter = RB.Iter.create t in
   let peek1 = RB.Iter.peek iter in
-  let #(key1, val1) = RB.Kv_option.value_exn peek1 in
+  let (key1, val1) = RB.Kv_option.value_exn peek1 in
   print_s [%message "First peek" (key1 : int) (val1 : int)];
   let peek2 = RB.Iter.peek iter in
-  let #(key2, val2) = RB.Kv_option.value_exn peek2 in
+  let (key2, val2) = RB.Kv_option.value_exn peek2 in
   print_s [%message "Second peek (should be same)" (key2 : int) (val2 : int)];
   let next_result = RB.Iter.next iter in
-  let #(key3, val3) = RB.Kv_option.value_exn next_result in
+  let (key3, val3) = RB.Kv_option.value_exn next_result in
   print_s [%message "After next" (key3 : int) (val3 : int)];
   let peek3 = RB.Iter.peek iter in
-  let #(key4, val4) = RB.Kv_option.value_exn peek3 in
+  let (key4, val4) = RB.Kv_option.value_exn peek3 in
   print_s [%message "Peek after next" (key4 : int) (val4 : int)];
   [%expect
     {|
@@ -1280,13 +1280,13 @@ let%expect_test "iterator - single element" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   RB.insert t ~key:42 ~data:100;
   let iter = RB.Iter.create t in
   print_s [%message (RB.Iter.is_done iter : bool)];
   let result = RB.Iter.next iter in
-  let #(key, value) = RB.Kv_option.value_exn result in
+  let (key, value) = RB.Kv_option.value_exn result in
   print_s [%message (key : int) (value : int)];
   print_s [%message (RB.Iter.is_done iter : bool)];
   let empty_result = RB.Iter.next iter in
@@ -1313,7 +1313,7 @@ let%expect_test "iterator - create_from exact match" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   List.iter [ 1; 3; 5; 7; 9 ] ~f:(fun k -> RB.insert t ~key:k ~data:(k * 10));
   let iter = RB.Iter.create_from t 5 in
@@ -1322,7 +1322,7 @@ let%expect_test "iterator - create_from exact match" =
     if not (RB.Iter.is_done iter)
     then (
       let result = RB.Iter.next iter in
-      let #(key, value) = RB.Kv_option.value_exn result in
+      let (key, value) = RB.Kv_option.value_exn result in
       print_s [%message (key : int) (value : int)];
       loop ())
   in
@@ -1349,7 +1349,7 @@ let%expect_test "iterator - create_from greater than all" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   List.iter [ 1; 3; 5 ] ~f:(fun k -> RB.insert t ~key:k ~data:(k * 10));
   let iter = RB.Iter.create_from t 10 in
@@ -1375,7 +1375,7 @@ let%expect_test "iterator - create_from less than all" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   List.iter [ 5; 7; 9 ] ~f:(fun k -> RB.insert t ~key:k ~data:(k * 10));
   let iter = RB.Iter.create_from t 0 in
@@ -1384,7 +1384,7 @@ let%expect_test "iterator - create_from less than all" =
     if not (RB.Iter.is_done iter)
     then (
       let result = RB.Iter.next iter in
-      let #(key, value) = RB.Kv_option.value_exn result in
+      let (key, value) = RB.Kv_option.value_exn result in
       print_s [%message (key : int) (value : int)];
       loop ())
   in
@@ -1411,7 +1411,7 @@ let%expect_test "iterator - create_from between elements" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   List.iter [ 1; 3; 5; 7; 9; 11 ] ~f:(fun k ->
     RB.insert t ~key:k ~data:(k * 10));
@@ -1421,7 +1421,7 @@ let%expect_test "iterator - create_from between elements" =
     if not (RB.Iter.is_done iter)
     then (
       let result = RB.Iter.next iter in
-      let #(key, value) = RB.Kv_option.value_exn result in
+      let (key, value) = RB.Kv_option.value_exn result in
       print_s [%message (key : int) (value : int)];
       loop ())
   in
@@ -1448,7 +1448,7 @@ let%expect_test "iterator - create_from on empty tree" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   let iter = RB.Iter.create_from t 5 in
   print_s [%message (RB.Iter.is_done iter : bool)];
@@ -1469,7 +1469,7 @@ let%expect_test "iterator - create_from large tree" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   for i = 0 to 99 do
     RB.insert t ~key:i ~data:(i * 10)
@@ -1481,7 +1481,7 @@ let%expect_test "iterator - create_from large tree" =
     if not (RB.Iter.is_done iter)
     then (
       let result = RB.Iter.next iter in
-      let #(key, _) = RB.Kv_option.value_exn result in
+      let (key, _) = RB.Kv_option.value_exn result in
       if !count < 5 then print_s [%message (key : int)];
       incr count;
       loop ())
@@ -1513,22 +1513,22 @@ let%expect_test "iterator - multiple iterators on same tree" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   List.iter [ 1; 2; 3; 4; 5 ] ~f:(fun k -> RB.insert t ~key:k ~data:(k * 10));
   let iter1 = RB.Iter.create t in
   let iter2 = RB.Iter.create_from t 3 in
   let r1 = RB.Iter.next iter1 in
-  let #(k1, _) = RB.Kv_option.value_exn r1 in
+  let (k1, _) = RB.Kv_option.value_exn r1 in
   print_s [%message "iter1 first" (k1 : int)];
   let r2 = RB.Iter.next iter2 in
-  let #(k2, _) = RB.Kv_option.value_exn r2 in
+  let (k2, _) = RB.Kv_option.value_exn r2 in
   print_s [%message "iter2 first" (k2 : int)];
   let r3 = RB.Iter.next iter1 in
-  let #(k3, _) = RB.Kv_option.value_exn r3 in
+  let (k3, _) = RB.Kv_option.value_exn r3 in
   print_s [%message "iter1 second" (k3 : int)];
   let r4 = RB.Iter.next iter2 in
-  let #(k4, _) = RB.Kv_option.value_exn r4 in
+  let (k4, _) = RB.Kv_option.value_exn r4 in
   print_s [%message "iter2 second" (k4 : int)];
   [%expect
     {|
@@ -1552,7 +1552,7 @@ let%expect_test "iterator - stress test with create_from" =
     let create_for_rb () = 0
   end
   in
-  let module RB = Rb.Make [@kind value value] (Int_key) (Int_value) in
+  let module RB = Rb.Make (Int_key) (Int_value) in
   let t = RB.create () in
   for i = 0 to 999 do
     RB.insert t ~key:i ~data:(i * 2)
@@ -1563,7 +1563,7 @@ let%expect_test "iterator - stress test with create_from" =
     let first_result = RB.Iter.next iter in
     if RB.Kv_option.is_some first_result
     then (
-      let #(first_key, _) = RB.Kv_option.value_exn first_result in
+      let (first_key, _) = RB.Kv_option.value_exn first_result in
       (* Verify first key is >= start *)
       if first_key < start
       then
@@ -1591,7 +1591,7 @@ module Quickcheck_modules = struct
     let create_for_rb () = 0
   end
 
-  module RB = Rb.Make [@kind value value] (Int_key) (Int_value)
+  module RB = Rb.Make (Int_key) (Int_value)
 
   type operation =
     | Insert of int * int
@@ -1652,7 +1652,7 @@ module Quickcheck_modules = struct
       let map_result = Map.find map key in
       (match RB.Kv_option.is_some rb_result, map_result with
        | true, Some map_value ->
-         let #(_, rb_value) = RB.Kv_option.value_exn rb_result in
+         let (_, rb_value) = RB.Kv_option.value_exn rb_result in
          if rb_value <> map_value
          then
            failwith
@@ -1684,7 +1684,7 @@ module Quickcheck_modules = struct
       let map_result = Map.min_elt map in
       (match RB.Kv_option.is_some rb_result, map_result with
        | true, Some (map_key, map_value) ->
-         let #(rb_key, rb_value) = RB.Kv_option.value_exn rb_result in
+         let (rb_key, rb_value) = RB.Kv_option.value_exn rb_result in
          if rb_key <> map_key || rb_value <> map_value
          then
            failwith
@@ -1703,7 +1703,7 @@ module Quickcheck_modules = struct
       let map_result = Map.max_elt map in
       (match RB.Kv_option.is_some rb_result, map_result with
        | true, Some (map_key, map_value) ->
-         let #(rb_key, rb_value) = RB.Kv_option.value_exn rb_result in
+         let (rb_key, rb_value) = RB.Kv_option.value_exn rb_result in
          if rb_key <> map_key || rb_value <> map_value
          then
            failwith
@@ -1722,7 +1722,7 @@ module Quickcheck_modules = struct
       let map_result = Map.min_elt map in
       (match RB.Kv_option.is_some rb_result, map_result with
        | true, Some (map_key, map_value) ->
-         let #(rb_key, rb_value) = RB.Kv_option.value_exn rb_result in
+         let (rb_key, rb_value) = RB.Kv_option.value_exn rb_result in
          if rb_key <> map_key || rb_value <> map_value
          then
            failwith
@@ -1741,7 +1741,7 @@ module Quickcheck_modules = struct
       let map_result = Map.max_elt map in
       (match RB.Kv_option.is_some rb_result, map_result with
        | true, Some (map_key, map_value) ->
-         let #(rb_key, rb_value) = RB.Kv_option.value_exn rb_result in
+         let (rb_key, rb_value) = RB.Kv_option.value_exn rb_result in
          if rb_key <> map_key || rb_value <> map_value
          then
            failwith
@@ -1839,7 +1839,7 @@ let%test_unit "pop_min drains tree correctly" =
         match map_min with
         | None -> failwith "Map is empty but RB is not"
         | Some (min_key, min_value) ->
-          let #(rb_key, rb_value) = RB.Kv_option.value_exn rb_result in
+          let (rb_key, rb_value) = RB.Kv_option.value_exn rb_result in
           if rb_key <> min_key || rb_value <> min_value
           then
             failwith
@@ -1874,7 +1874,7 @@ let%test_unit "pop_max drains tree correctly" =
         match map_max with
         | None -> failwith "Map is empty but RB is not"
         | Some (max_key, max_value) ->
-          let #(rb_key, rb_value) = RB.Kv_option.value_exn rb_result in
+          let (rb_key, rb_value) = RB.Kv_option.value_exn rb_result in
           if rb_key <> max_key || rb_value <> max_value
           then
             failwith

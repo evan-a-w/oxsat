@@ -185,9 +185,9 @@ let iter_set_bits t ~f =
 ;;
 
 let to_set_bits_array t =
-  let out = Vec.Value.create () in
-  iter_set_bits t ~f:(Vec.Value.push out);
-  Vec.Value.to_array out
+  let out = ref [] in
+  iter_set_bits t ~f:(fun i -> out := i :: !out);
+  List.rev !out |> Array.of_list
 ;;
 
 let of_set_bits_array bits =
