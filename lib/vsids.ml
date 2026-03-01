@@ -18,9 +18,11 @@ let create () =
 ;;
 
 let on_new_var t ~var =
-  if not (Hashtbl.mem t.score_true var) then Hashtbl.set t.score_true ~key:var ~data:0.0;
-  if not (Hashtbl.mem t.score_false var) then Hashtbl.set t.score_false ~key:var ~data:0.0;
-  Hash_set.add t.pool var
+  if not (Hashtbl.mem t.score_true var)
+  then (
+    Hashtbl.set t.score_true ~key:var ~data:0.0;
+    Hashtbl.set t.score_false ~key:var ~data:0.0;
+    Hash_set.add t.pool var)
 ;;
 
 let add_activity t ~literal =

@@ -116,3 +116,21 @@ let resolve_exn t ~other ~on_var =
       |> List.sort ~compare:sort_compare
       |> Array.of_list)
 ;;
+
+module Pool = struct
+  module P = Pool.Make (struct
+      type nonrec t = t
+
+      let create_for_pool () = of_int_array [||]
+    end)
+
+  type pool = P.t
+
+  let create = P.create
+  let alloc = P.alloc
+  let free = P.free
+  let get = P.get
+  let set = P.set
+  let iter = P.iter
+  let outstanding = P.outstanding
+end

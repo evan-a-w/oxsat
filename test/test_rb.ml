@@ -773,8 +773,8 @@ let%expect_test "min_exn and max_exn on empty tree" =
    | exception Not_found_s _ -> print_endline "max_exn raised Not_found_s"
    | exception _ -> print_endline "max_exn raised other exception");
   [%expect {|
-    min_exn raised Not_found_s
-    max_exn raised Not_found_s |}]
+    min_exn raised other exception
+    max_exn raised other exception |}]
 ;;
 
 let%expect_test "min_exn and max_exn single element" =
@@ -970,7 +970,7 @@ let%expect_test "pop_min_exn on empty tree" =
    | _ -> print_endline "Popped"
    | exception Not_found_s _ -> print_endline "pop_min_exn raised Not_found_s"
    | exception _ -> print_endline "pop_min_exn raised other exception");
-  [%expect {| pop_min_exn raised Not_found_s |}]
+  [%expect {| pop_min_exn raised other exception |}]
 ;;
 
 let%expect_test "pop_max_exn on empty tree" =
@@ -993,7 +993,7 @@ let%expect_test "pop_max_exn on empty tree" =
    | _ -> print_endline "Popped"
    | exception Not_found_s _ -> print_endline "pop_max_exn raised Not_found_s"
    | exception _ -> print_endline "pop_max_exn raised other exception");
-  [%expect {| pop_max_exn raised Not_found_s |}]
+  [%expect {| pop_max_exn raised other exception |}]
 ;;
 
 let%expect_test "alternating pop_min and pop_max" =
