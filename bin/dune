@@ -2,8 +2,6 @@
  (public_name feel)
  (name main)
  (preprocess
-  (pps ppx_jane ppx_optional))
+  (pps ppx_jane))
  (package feel)
- (libraries feel core core_unix ds unboxed)
- (flags
-  (:standard -extension-universe beta)))
+ (libraries feel core core_unix ds))

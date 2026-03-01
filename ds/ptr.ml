@@ -1,30 +1,40 @@
 open! Core
-open! Unboxed
 
-type t = I64.t [@@deriving sexp]
+type t = int [@@deriving sexp]
 
-let null () = I64.max_value ()
-let is_null t = I64.equal t (null ())
-let of_int = I64.of_int
-let to_int = I64.to_int_trunc
-let equal = I64.equal
+let null () = -1
+let is_null t = Int.equal t (null ())
+let of_int x = x
+let to_int x = x
+let equal = Int.equal
 
-module Private = struct
-  let chunk ~chunk_bits ptr =
-    let t : I64.t = Obj.magic ptr in
-    I64.(t lsr chunk_bits |> to_int_trunc)
+module Option = struct
+  type value = t
+  type t = value option
+
+  let none () = None
+  let some v = Some v
+  let unchecked_some v = Some v
+  let some_is_representable _ = true
+  let is_none = Option.is_none
+  let is_some = Option.is_some
+  let value t ~default = Option.value t ~default
+
+  let unchecked_value = function
+    | Some v -> v
+    | None -> failwith "Ptr.Option.unchecked_value on none"
   ;;
 
-  let idx ~chunk_bits ptr =
-    let t : I64.t = Obj.magic ptr in
-    I64.(t land ((#1L lsl chunk_bits) - #1L) |> to_int_trunc)
-  ;;
-
-  let create ~chunk_bits ~chunk ~idx =
-    let idx = I64.of_int idx in
-    let chunk = I64.of_int chunk in
-    I64.((chunk lsl chunk_bits) lor idx)
-  ;;
+  module Optional_syntax = struct
+    module Optional_syntax = struct
+      let is_none = is_none
+      let unsafe_value = unchecked_value
+    end
+  end
 end
 
-module Option = I64.Option
+module Private = struct
+  let chunk ~chunk_bits ptr = ptr lsr chunk_bits
+  let idx ~chunk_bits ptr = ptr land ((1 lsl chunk_bits) - 1)
+  let create ~chunk_bits ~chunk ~idx = (chunk lsl chunk_bits) lor idx
+end

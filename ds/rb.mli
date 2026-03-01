@@ -1,1 +1,1 @@
-include Rb_intf.Rb (** @inline *)
+include Rb_intf.Rb

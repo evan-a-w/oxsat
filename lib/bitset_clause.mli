@@ -1,1 +1,1 @@
-include Clause_intf.S [@kind value & value]
+include module type of Clause

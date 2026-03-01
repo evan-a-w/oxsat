@@ -1,14 +1,14 @@
 open! Core
 
-type ('a : immediate) t
+type 'a t
 
-val create : 'a @ local -> 'a t @ local
-val get : 'a t @ local -> 'a @ local
-val set : 'a t @ local -> 'a @ local -> unit
-val ( ! ) : 'a t @ local -> 'a @ local
-val ( := ) : 'a t @ local -> 'a @ local -> unit
+val create : 'a -> 'a t
+val get : 'a t -> 'a
+val set : 'a t -> 'a -> unit
+val ( ! ) : 'a t -> 'a
+val ( := ) : 'a t -> 'a -> unit
 
 module O : sig
-  val ( ! ) : 'a t @ local -> 'a @ local
-  val ( := ) : 'a t @ local -> 'a @ local -> unit
+  val ( ! ) : 'a t -> 'a
+  val ( := ) : 'a t -> 'a -> unit
 end

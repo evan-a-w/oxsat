@@ -1,32 +1,26 @@
 open! Core
-open! Unboxed
 
-module type%template
-  [@kind k = (value, bits64, bits64 & bits64, bits64 & float64)] Key = sig
-  type t : k mod external_
+module type Key = sig
+  type t
 
   val hash : t -> int
   val equal : t -> t -> bool
   val create_for_hash_table : unit -> t
 end
 
-module type%template
-  [@kind v = (value, bits64, bits64 & bits64, bits64 & float64)] Value = sig
-  type t : v mod external_
+module type Value = sig
+  type t
 
   val create_for_hash_table : unit -> t
 end
 
-module type%template
-  [@kind
-    k = (value, bits64, bits64 & bits64, bits64 & float64)
-    , v = (value, bits64, bits64 & bits64)] S = sig
-  module Key : Key [@kind k]
-  module Value : Value [@kind v]
+module type S = sig
+  module Key : Key
+  module Value : Value
 
   type t
 
-  val create : ?capacity:local_ int -> ?max_load_percent:local_ int -> unit -> t
+  val create : ?capacity:int -> ?max_load_percent:int -> unit -> t
   val length : t -> int
   val is_empty : t -> bool
   val load_factor : t -> float
@@ -35,36 +29,34 @@ module type%template
   val mem : t -> Key.t -> bool
   val remove : t -> Key.t -> unit
 
-  module Kv_option :
-    Optional_pair.S [@kind k v] with type Fst.t = Key.t and type Snd.t = Value.t
+  module Kv_option : sig
+    type t = (Key.t * Value.t) option
+
+    val none : unit -> t
+    val some : Key.t * Value.t -> t
+    val is_none : t -> bool
+    val is_some : t -> bool
+    val value : t -> default:(Key.t * Value.t) -> Key.t * Value.t
+    val value_exn : t -> Key.t * Value.t
+
+    module Optional_syntax : sig
+      module Optional_syntax : sig
+        val is_none : t -> bool
+        val unsafe_value : t -> Key.t * Value.t
+      end
+    end
+  end
 
   val find : t -> Key.t -> Kv_option.t
   val find_exn : t -> Key.t -> Value.t
-  val iter : t -> f:(key:Key.t -> data:Value.t -> unit) @ local -> unit
-  val iteri : t -> f:(key:Key.t -> data:Value.t -> unit) @ local -> unit
-
-  val fold
-    :  t
-    -> init:'acc
-    -> f:(acc:'acc -> key:Key.t -> data:Value.t -> 'acc) @ local
-    -> 'acc
-
-  val%template to_array : t -> #(Key.t * Value.t) array @ m
-  [@@alloc a @ m = (stack_local, heap_global)]
-
-  val%template to_keys_array : t -> Key.t array @ m
-  [@@alloc a @ m = (stack_local, heap_global)]
-
+  val iter : t -> f:(key:Key.t -> data:Value.t -> unit) -> unit
+  val iteri : t -> f:(key:Key.t -> data:Value.t -> unit) -> unit
+  val fold : t -> init:'acc -> f:(acc:'acc -> key:Key.t -> data:Value.t -> 'acc) -> 'acc
+  val to_array : t -> (Key.t * Value.t) array
+  val to_keys_array : t -> Key.t array
   val choose_arbitrarily : t -> Kv_option.t
 end
 
 module type Hash_table = sig
-  module%template
-    [@kind
-      k = (value, bits64, bits64 & bits64, bits64 & float64)
-      , v = (value, bits64, bits64 & bits64)] Make
-      (Key : Key
-    [@kind k])
-      (Value : Value
-    [@kind v]) : S [@kind k v] with module Key := Key and module Value := Value
+  module Make (Key : Key) (Value : Value) : S with module Key := Key and module Value := Value
 end

@@ -10,7 +10,7 @@
  (modules rb_bench)
  (libraries core ds benchmark)
  (preprocess
-  (pps ppx_jane ppx_optional)))
+  (pps ppx_jane)))
 
 (library
  (name map_bench)
@@ -39,7 +39,7 @@
  (package feel)
  (modules feel_bench)
  (preprocess
-  (pps ppx_jane ppx_optional))
+  (pps ppx_jane))
  (libraries
   feel
   core
@@ -47,11 +47,8 @@
   core_unix
   core_unix.command_unix
   ds
-  unboxed
   benchmark
   rb_bench
   map_bench
   sat_bench
-  dimacs_bench)
- (flags
-  (:standard -extension-universe beta)))
+  dimacs_bench))

@@ -1,1 +1,1 @@
-include Vec_intf.Vec (** @inline *)
+include Vec_intf.Vec

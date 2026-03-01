@@ -1,622 +1,358 @@
 open! Core
-open! Unboxed
 open Vec_intf
 
-module type%template
-  [@kind
-    k
-    = ( value
-      , float64
-      , value & value
-      , value & value & value
-      , bits64
-      , bits64 & bits64
-      , immediate & value & value
-      , bits64 & bits64 & bits64
-      , bits64 & bits64 & immediate & immediate & bits64
-      , bits64 & bits64 & value & value & bits64
-      , (value & value & bits64) & bits64 & bits64 )] S = S [@kind k]
-
-module%template
-  [@kind
-    k
-    = ( value
-      , value & value
-      , bits64
-      , float64
-      , immediate & value & value
-      , bits64 & bits64
-      , value & value & value
-      , bits64 & bits64 & bits64
-      , bits64 & bits64 & immediate & immediate & bits64
-      , bits64 & bits64 & value & value & bits64
-      , (value & value & bits64) & bits64 & bits64 )] Make
-    (Arg : Elt
-  [@kind k]) : S [@kind k] with module Elt = Arg = struct
-  module Elt = Arg
-
-  type t =
-    { mutable arr : Elt.t array
-    ; mutable length : int
-    }
-
-  let create ?(capacity = 0) () =
-    { arr = Array.create ~len:capacity (Elt.create_for_vec ()); length = 0 }
-  ;;
-
-  let clear t =
-    t.arr <- [||];
-    t.length <- 0
-  ;;
-
-  let singleton x = { arr = [| x |]; length = 1 }
-  let length t = t.length
-
-  let rec push t v =
-    if t.length = Array.length t.arr
-    then (
-      let new_len = 2 * (t.length + 1) in
-      let new_ = Array.create ~len:new_len (Elt.create_for_vec ()) in
-      for i = 0 to t.length - 1 do
-        new_.(i) <- t.arr.(i)
-      done;
-      t.arr <- new_;
-      push t v)
-    else (
-      t.arr.(t.length) <- v;
-      t.length <- t.length + 1)
-  ;;
-
-  let pop_exn t : Elt.t =
-    if t.length = 0 then raise (Invalid_argument "Empty array");
-    t.length <- t.length - 1;
-    t.arr.(t.length)
-  ;;
-
-  let get t i : Elt.t =
-    if i < 0 || i >= t.length
-    then raise (Invalid_argument [%string "Index %{i#Int} out of bounds"]);
-    t.arr.(i)
-  ;;
-
-  let set t i v =
-    if i < 0 || i >= t.length
-    then raise (Invalid_argument "Index out of bounds");
-    t.arr.(i) <- v
-  ;;
-
-  let iter t ~f =
-    for i = 0 to t.length - 1 do
-      f t.arr.(i)
-    done
-  ;;
-
-  let iteri t ~f =
-    for i = 0 to t.length - 1 do
-      f i t.arr.(i)
-    done
-  ;;
-
-  let iteri_rev t ~(local_ f) =
-    for i = t.length - 1 downto 0 do
-      f i t.arr.(i)
-    done
-  ;;
-
-  let iter_rev t ~(local_ f) = iteri_rev t ~f:(fun _ x -> f x) [@nontail]
-
-  let fold t ~init ~f =
-    let r = ref init in
-    for i = 0 to t.length - 1 do
-      r := f !r t.arr.(i)
-    done;
-    !r
-  ;;
-
-  let foldr t ~init ~f =
-    let r = ref init in
-    for i = length t - 1 downto 0 do
-      r := f !r t.arr.(i)
-    done;
-    !r
-  ;;
-
-  let fill_to_length t ~length ~f =
-    let i = ref (t.length - 1) in
-    while !i < length - 1 do
-      push t (f !i);
-      incr i
-    done
-  ;;
-
-  let take t ~other =
-    t.arr <- other.arr;
-    t.length <- other.length;
-    other.arr <- [||];
-    other.length <- 0
-  ;;
-
-  let switch t1 t2 =
-    let arr = t1.arr in
-    let length = t1.length in
-    t1.arr <- t2.arr;
-    t1.length <- t2.length;
-    t2.arr <- arr;
-    t2.length <- length
-  ;;
-
-  let last_exn t = get t (length t - 1)
-
-  let filter t ~f =
-    let new_ = create () in
-    for i = 0 to t.length - 1 do
-      if f t.arr.(i) then push new_ t.arr.(i)
-    done;
-    new_
-  ;;
-
-  let map_inplace t ~f =
-    for i = 0 to t.length - 1 do
-      t.arr.(i) <- f t.arr.(i)
-    done
-  ;;
-
-  let filter_inplace t ~f =
-    let write = ref 0 in
-    for i = 0 to t.length - 1 do
-      if f t.arr.(i)
-      then (
-        t.arr.(!write) <- t.arr.(i);
-        incr write)
-    done;
-    t.length <- !write
-  ;;
-
-  let append t t' = iter t' ~f:(push t)
-
-  let reverse_inplace t =
-    let end_ = ref (length t - 1) in
-    let start = ref 0 in
-    while !start < !end_ do
-      let tmp = t.arr.(!start) in
-      t.arr.(!start) <- t.arr.(!end_);
-      t.arr.(!end_) <- tmp;
-      incr start;
-      decr end_
-    done
-  ;;
-end
+module type S = Vec_intf.S
 
 module Value = struct
   type 'a t =
-    { mutable arr : 'a array
-    ; mutable length : int
+    { mutable arr : 'a option array
+    ; mutable len : int
     }
-  [@@deriving fields]
 
   let create ?(capacity = 0) () =
-    { arr = Array.create ~len:capacity (Obj.magic ()); length = 0 }
+    let capacity = Int.max 0 capacity in
+    { arr = Array.create ~len:capacity None; len = 0 }
   ;;
 
-  let of_array_taking_ownership arr = { arr; length = Array.length arr }
+  let length t = t.len
 
-  let clear t =
-    t.arr <- [||];
-    t.length <- 0
-  ;;
-
-  let singleton x = { arr = [| x |]; length = 1 }
-  let length t = t.length
-
-  let rec push t v =
-    if t.length = Array.length t.arr
-    then (
-      let new_len = 2 * (t.length + 1) in
-      let new_ = Array.create ~len:new_len (Obj.magic ()) in
-      Array.blit ~src:t.arr ~src_pos:0 ~dst:new_ ~dst_pos:0 ~len:t.length;
-      t.arr <- new_;
-      push t v)
-    else (
-      t.arr.(t.length) <- v;
-      t.length <- t.length + 1)
-  ;;
-
-  let pop_exn t =
-    if t.length = 0
-    then raise (Invalid_argument "Empty array")
-    else (
-      t.length <- t.length - 1;
-      t.arr.(t.length))
+  let bounds_check t i =
+    if i < 0 || i >= t.len then invalid_arg "Vec index out of bounds"
   ;;
 
   let get t i =
-    if i < 0 || i >= t.length
-    then raise (Invalid_argument [%string "Index %{i#Int} out of bounds"])
-    else t.arr.(i)
+    bounds_check t i;
+    match t.arr.(i) with
+    | Some x -> x
+    | None -> failwith "Vec internal invariant violated"
   ;;
 
-  let get_opt t i = if i < 0 || i >= t.length then None else Some t.arr.(i)
+  let get_opt t i = if i < 0 || i >= t.len then None else t.arr.(i)
 
-  let set t i v =
-    if i < 0 || i >= t.length
-    then raise (Invalid_argument "Index out of bounds")
-    else t.arr.(i) <- v
+  let set t i x =
+    bounds_check t i;
+    t.arr.(i) <- Some x
   ;;
 
-  let iter t ~f =
-    for i = 0 to t.length - 1 do
-      f t.arr.(i)
-    done
+  let ensure_capacity t needed =
+    if needed <= Array.length t.arr
+    then ()
+    else (
+      let rec grow cap = if cap >= needed then cap else grow (Int.max 1 (cap * 2)) in
+      let new_cap = grow (Array.length t.arr) in
+      let new_arr = Array.create ~len:new_cap None in
+      Array.blit ~src:t.arr ~src_pos:0 ~dst:new_arr ~dst_pos:0 ~len:t.len;
+      t.arr <- new_arr)
   ;;
 
-  let iteri t ~f =
-    for i = 0 to t.length - 1 do
-      f i t.arr.(i)
-    done
+  let push t x =
+    ensure_capacity t (t.len + 1);
+    t.arr.(t.len) <- Some x;
+    t.len <- t.len + 1
   ;;
 
-  let iteri_rev t ~f =
-    for i = t.length - 1 downto 0 do
-      f i t.arr.(i)
-    done
+  let pop_exn t =
+    if Int.equal t.len 0 then failwith "Vec.pop_exn on empty vec";
+    let i = t.len - 1 in
+    let x = get t i in
+    t.arr.(i) <- None;
+    t.len <- i;
+    x
   ;;
 
-  let%template fold t ~init ~f =
-    let r = ref init in
-    for i = 0 to t.length - 1 do
-      r := f !r t.arr.(i)
+  let iter t ~f = for i = 0 to t.len - 1 do f (get t i) done
+  let iteri t ~f = for i = 0 to t.len - 1 do f i (get t i) done
+  let iteri_rev t ~f = for i = t.len - 1 downto 0 do f i (get t i) done
+  let iter_rev t ~f = for i = t.len - 1 downto 0 do f (get t i) done
+
+  let iter_nested t ~f = iter t ~f:(fun inner -> iter inner ~f)
+
+  let copy t =
+    let out = create ~capacity:t.len () in
+    for i = 0 to t.len - 1 do
+      push out (get t i)
     done;
-    !r
-  [@@mode global]
+    out
   ;;
 
-  let%template fold t ~(local_ init) ~f = exclave_
-    let rec go acc i = exclave_
-      if i >= length t then acc else go (f acc (get t i)) (i + 1)
-    in
-    go init 0
-  [@@mode local]
+  let of_array_taking_ownership arr =
+    { arr = Array.map arr ~f:(fun x -> Some x); len = Array.length arr }
+  ;;
+
+  let fold t ~init ~f =
+    let acc = ref init in
+    iter t ~f:(fun x -> acc := f !acc x);
+    !acc
   ;;
 
   let foldr t ~init ~f =
-    let r = ref init in
-    for i = length t - 1 downto 0 do
-      r := f !r t.arr.(i)
-    done;
-    !r
+    let acc = ref init in
+    iter_rev t ~f:(fun x -> acc := f !acc x);
+    !acc
   ;;
 
-  let copy t =
-    { arr = Array.sub t.arr ~pos:0 ~len:(length t); length = length t }
-  ;;
-
-  let fill_to_length t ~length ~f =
-    let i = ref (t.length - 1) in
-    while !i < length - 1 do
-      push t (f !i);
-      incr i
-    done
-  ;;
+  let fill_to_length t ~length ~f = while t.len < length do push t (f t.len) done
 
   let map t ~f =
-    let new_ = create ~capacity:t.length () in
-    for i = 0 to t.length - 1 do
-      push new_ (f t.arr.(i))
-    done;
-    new_
+    let out = create ~capacity:t.len () in
+    iter t ~f:(fun x -> push out (f x));
+    out
   ;;
+
+  let sort t ~compare =
+    let arr = Array.init t.len ~f:(get t) in
+    Array.sort arr ~compare;
+    t.arr <- Array.map arr ~f:(fun x -> Some x);
+    t.len <- Array.length arr
+  ;;
+
+  let sort_partitioned t ~a_len:_ ~compare = sort t ~compare
 
   let fold_map t ~init ~f =
     let acc = ref init in
-    let new_ = create ~capacity:t.length () in
-    for i = 0 to t.length - 1 do
-      let acc', x = f !acc t.arr.(i) in
+    let out = create ~capacity:t.len () in
+    iter t ~f:(fun x ->
+      let acc', y = f !acc x in
       acc := acc';
-      push new_ x
-    done;
-    new_
+      push out y);
+    out
   ;;
 
-  let zip_exn a b =
-    let new_ = create ~capacity:a.length () in
-    if a.length <> b.length then failwith "[zip_exn] diff lengths";
-    for i = 0 to a.length - 1 do
-      push new_ (a.arr.(i), b.arr.(i))
-    done;
-    new_
+  let of_list xs =
+    let out = create ~capacity:(List.length xs) () in
+    List.iter xs ~f:(push out);
+    out
   ;;
 
-  let of_list l =
-    let t = create ~capacity:(List.length l) () in
-    List.iter l ~f:(push t);
-    t
+  let to_list t =
+    let out = ref [] in
+    iter_rev t ~f:(fun x -> out := x :: !out);
+    !out
   ;;
 
-  let to_list t = fold t ~init:[] ~f:(fun acc x -> x :: acc) |> List.rev
-  let to_array t = Array.sub t.arr ~pos:0 ~len:t.length
-
-  let%expect_test "push" =
-    let t = create () in
-    push t 1;
-    push t 2;
-    push t 3;
-    push t 4;
-    push t 5;
-    iter t ~f:(fun x -> Int.to_string x |> print_endline);
-    [%expect {|
-    1
-    2
-    3
-    4
-    5
-    |}]
-  ;;
-
-  let sexp_of_t sexp_of_a t = [%sexp_of: a list] (to_list t)
-  let t_of_sexp a_of_sexp sexp = [%of_sexp: a list] sexp |> of_list
-
-  let mem t v ~compare =
-    let rec loop i =
-      if i = t.length
-      then false
-      else if compare t.arr.(i) v = 0
-      then true
-      else loop (i + 1)
-    in
-    loop 0
+  let to_array t = Array.init t.len ~f:(get t)
+  let mem t x ~compare =
+    try
+      iter t ~f:(fun y -> if Int.equal (compare x y) 0 then raise Exit);
+      false
+    with
+    | Exit -> true
   ;;
 
   let take t ~other =
-    t.arr <- other.arr;
-    t.length <- other.length;
-    other.arr <- [||];
-    other.length <- 0
+    t.arr <- Array.copy other.arr;
+    t.len <- other.len;
+    for i = 0 to other.len - 1 do
+      other.arr.(i) <- None
+    done;
+    other.len <- 0
   ;;
 
-  let switch t1 t2 =
-    let arr = t1.arr in
-    let length = t1.length in
-    t1.arr <- t2.arr;
-    t1.length <- t2.length;
-    t2.arr <- arr;
-    t2.length <- length
+  let switch a b =
+    let tmp = { arr = a.arr; len = a.len } in
+    a.arr <- b.arr;
+    a.len <- b.len;
+    b.arr <- tmp.arr;
+    b.len <- tmp.len
   ;;
 
-  let last_exn t = get t (length t - 1)
-  let last t = if length t = 0 then None else Some (get t (length t - 1))
+  let last t = if Int.equal t.len 0 then None else Some (get t (t.len - 1))
+
+  let last_exn t =
+    match last t with
+    | Some x -> x
+    | None -> failwith "Vec.last_exn on empty vec"
+  ;;
 
   let filter t ~f =
-    let new_ = create () in
-    for i = 0 to t.length - 1 do
-      if f t.arr.(i) then push new_ t.arr.(i)
-    done;
-    new_
+    let out = create ~capacity:t.len () in
+    iter t ~f:(fun x -> if f x then push out x);
+    out
   ;;
 
   let filter_map t ~f =
-    let new_ = create () in
-    for i = 0 to t.length - 1 do
-      match f t.arr.(i) with
-      | Some x -> push new_ x
-      | None -> ()
-    done;
-    new_
-  ;;
-
-  let findi t ~f =
-    let res = ref None in
-    let i = ref 0 in
-    while !i < t.length && Option.is_none !res do
-      (match f !i t.arr.(!i) with
-       | Some _ as x -> res := x
-       | None -> ());
-      incr i
-    done;
-    !res
-  ;;
-
-  let map_inplace t ~f =
-    for i = 0 to t.length - 1 do
-      t.arr.(i) <- f t.arr.(i)
-    done
+    let out = create ~capacity:t.len () in
+    iter t ~f:(fun x -> Option.iter (f x) ~f:(push out));
+    out
   ;;
 
   let filter_inplace t ~f =
     let write = ref 0 in
-    for i = 0 to t.length - 1 do
-      if f t.arr.(i)
+    for i = 0 to t.len - 1 do
+      let x = get t i in
+      if f x
       then (
-        t.arr.(!write) <- t.arr.(i);
-        incr write)
+        t.arr.(!write) <- Some x;
+        write := !write + 1)
     done;
-    t.length <- !write
+    for i = !write to t.len - 1 do
+      t.arr.(i) <- None
+    done;
+    t.len <- !write
   ;;
 
   let filter_map_inplace t ~f =
     let write = ref 0 in
-    for i = 0 to t.length - 1 do
-      match f t.arr.(i) with
+    for i = 0 to t.len - 1 do
+      match f (get t i) with
       | None -> ()
       | Some x ->
-        t.arr.(!write) <- x;
-        incr write
+        t.arr.(!write) <- Some x;
+        write := !write + 1
     done;
-    t.length <- !write
-  ;;
-
-  let append t t' = iter t' ~f:(push t)
-  let append_list t l = List.iter l ~f:(push t)
-
-  let concat_mapi t ~f =
-    let new_ = create () in
-    for i = 0 to t.length do
-      f i t.arr.(i) |> append new_
+    for i = !write to t.len - 1 do
+      t.arr.(i) <- None
     done;
-    new_
+    t.len <- !write
   ;;
 
-  let concat_map t ~f =
-    let new_ = create () in
-    for i = 0 to t.length - 1 do
-      f t.arr.(i) |> append new_
-    done;
-    new_
+  let findi t ~f =
+    let rec go i =
+      if i >= t.len
+      then None
+      else (
+        match f i (get t i) with
+        | Some _ as res -> res
+        | None -> go (i + 1))
+    in
+    go 0
   ;;
 
-  let concat t =
-    let new_ = create () in
-    iter t ~f:(iter ~f:(push new_));
-    new_
-  ;;
-
-  let concat_list l =
-    let new_ = create () in
-    List.iter l ~f:(iter ~f:(push new_));
-    new_
-  ;;
-
-  let to_sequence t =
-    Sequence.unfold ~init:0 ~f:(fun i ->
-      get_opt t i |> Option.map ~f:(fun x -> x, i + 1))
-  ;;
-
-  let iter_nested t ~f = iter t ~f:(iter ~f) [@nontail]
-  let iter_rev t ~f = iteri_rev t ~f:(fun _ x -> f x) [@nontail]
-
-  let reverse t =
-    let new_ = create ~capacity:(length t) () in
-    iter_rev t ~f:(push new_);
-    new_
-  ;;
-
-  let sort t ~compare = Array.sort t.arr ~len:t.length ~compare
-
-  let reverse_inplace t =
-    let end_ = ref (length t - 1) in
-    let start = ref 0 in
-    while !start < !end_ do
-      let tmp = t.arr.(!start) in
-      t.arr.(!start) <- t.arr.(!end_);
-      t.arr.(!end_) <- tmp;
-      incr start;
-      decr end_
+  let map_inplace t ~f =
+    for i = 0 to t.len - 1 do
+      t.arr.(i) <- Some (f (get t i))
     done
   ;;
 
-  let%expect_test "concat_map" =
-    let a = of_list [ 1; 2; 3; 4; 5 ] in
-    print_s
-      [%sexp
-        (concat_map a ~f:(fun i -> List.init i ~f:Fn.id |> of_list) : int t)];
-    [%expect {| (0 0 1 0 1 2 0 1 2 3 0 1 2 3 4) |}]
+  let singleton x =
+    let t = create ~capacity:1 () in
+    push t x;
+    t
   ;;
 
-  let sort_partitioned t ~a_len ~(local_ compare) =
-    let b_len = length t - a_len in
-    if length t = 0 || b_len <= 0
-    then ()
-    else (
-      let b = Array.create__stack ~len:b_len (get t 0) in
-      Array.blit ~src:t.arr ~src_pos:a_len ~len:b_len ~dst:b ~dst_pos:0;
-      let rec go i a_i b_i =
-        if i < 0
-        then ()
-        else if b_i < 0
-        then (
-          t.arr.(i) <- t.arr.(a_i);
-          go (i - 1) (a_i - 1) b_i)
-        else if a_i < 0
-        then (
-          t.arr.(i) <- b.(b_i);
-          go (i - 1) a_i (b_i - 1))
-        else if compare t.arr.(a_i) b.(b_i) < 0
-        then (
-          t.arr.(i) <- b.(b_i);
-          go (i - 1) a_i (b_i - 1))
-        else (
-          t.arr.(i) <- t.arr.(a_i);
-          go (i - 1) (a_i - 1) b_i)
-      in
-      go (length t - 1) (a_len - 1) (b_len - 1) [@nontail])
+  let append t other = iter other ~f:(fun x -> push t x)
+  let append_list t xs = List.iter xs ~f:(push t)
+
+  let concat_map t ~f =
+    let out = create () in
+    iter t ~f:(fun x -> append out (f x));
+    out
   ;;
 
-  let%expect_test "sort_partitioned" =
-    let t = of_list [ 1; 3; 5; 7; 2; 4; 6; 8 ] in
-    sort_partitioned t ~a_len:4 ~compare:Int.compare;
-    print_s [%sexp (to_list t : int list)];
-    [%expect {| (1 2 3 4 5 6 7 8) |}];
-    let t2 = of_list [ 1; 2; 3; 4; 5 ] in
-    sort_partitioned t2 ~a_len:2 ~compare:Int.compare;
-    print_s [%sexp (to_list t2 : int list)];
-    [%expect {| (1 2 3 4 5) |}]
+  let concat_mapi t ~f =
+    let out = create () in
+    iteri t ~f:(fun i x -> append out (f i x));
+    out
   ;;
 
-  let binary_search ?(local_ end_) t ~f ~which = exclave_
-    let len =
-      match end_ with
-      | None -> t.length
-      | Some len -> len
+  let concat t = concat_map t ~f:Fn.id
+  let concat_list ts = List.fold ts ~init:(create ()) ~f:(fun acc t -> append acc t; acc)
+
+  let to_sequence t = Sequence.of_list (to_list t)
+
+  let clear t =
+    for i = 0 to t.len - 1 do
+      t.arr.(i) <- None
+    done;
+    t.len <- 0
+  ;;
+
+  let reverse t =
+    let out = copy t in
+    for i = 0 to (out.len / 2) - 1 do
+      let j = out.len - 1 - i in
+      let xi = out.arr.(i) in
+      out.arr.(i) <- out.arr.(j);
+      out.arr.(j) <- xi
+    done;
+    out
+  ;;
+
+  let reverse_inplace t =
+    for i = 0 to (t.len / 2) - 1 do
+      let j = t.len - 1 - i in
+      let xi = t.arr.(i) in
+      t.arr.(i) <- t.arr.(j);
+      t.arr.(j) <- xi
+    done
+  ;;
+
+  let zip_exn a b =
+    if not (Int.equal a.len b.len) then failwith "Vec.zip_exn: length mismatch";
+    let out = create ~capacity:a.len () in
+    for i = 0 to a.len - 1 do
+      push out (get a i, get b i)
+    done;
+    out
+  ;;
+
+  let binary_search ?end_ t ~f ~which =
+    let hi = Option.value end_ ~default:t.len in
+    let hi = Int.min hi t.len in
+    let lo = 0 in
+    let arr = to_array t in
+    let rec first_true l r pred =
+      if l >= r
+      then l
+      else (
+        let m = (l + r) / 2 in
+        if pred arr.(m) then first_true l m pred else first_true (m + 1) r pred)
     in
-    if len = 0
-    then None
-    else (
-      let accept, search_left =
-        match which with
-        | `First_equal -> (fun c -> c = 0), true
-        | `First_ge -> (fun c -> c >= 0), true
-        | `First_gt -> (fun c -> c > 0), true
-        | `Last_le -> (fun c -> c <= 0), false
-        | `Last_lt -> (fun c -> c < 0), false
-      in
-      let rec loop left right best = exclave_
-        if left > right
-        then best
-        else (
-          let mid = left + ((right - left) / 2) in
-          let c = f t.arr.(mid) in
-          if accept c
-          then
-            if search_left
-            then loop left (mid - 1) (Some t.arr.(mid))
-            else loop (mid + 1) right (Some t.arr.(mid))
-          else if c < 0
-          then loop (mid + 1) right best
-          else if c > 0
-          then loop left (mid - 1) best
-          else if search_left
-          then loop (mid + 1) right best
-          else loop left (mid - 1) best)
-      in
-      loop 0 (len - 1) None)
-  ;;
-
-  let%expect_test "binary_search" =
-    let t = of_list [ 1; 3; 3; 3; 5; 7; 9 ] in
-    let search target which =
-      [%globalize: int option]
-        (binary_search t ~f:(fun x -> Int.compare x target) ~which) [@nontail]
+    let rec last_true l r pred =
+      if l >= r
+      then l - 1
+      else (
+        let m = (l + r) / 2 in
+        if pred arr.(m) then last_true (m + 1) r pred else last_true l m pred)
     in
-    print_s [%sexp (search 3 `First_equal : int option)];
-    [%expect {| (3) |}];
-    print_s [%sexp (search 3 `First_ge : int option)];
-    [%expect {| (3) |}];
-    print_s [%sexp (search 3 `First_gt : int option)];
-    [%expect {| (5) |}];
-    print_s [%sexp (search 3 `Last_le : int option)];
-    [%expect {| (3) |}];
-    print_s [%sexp (search 3 `Last_lt : int option)];
-    [%expect {| (1) |}];
-    print_s [%sexp (search 4 `First_ge : int option)];
-    [%expect {| (5) |}];
-    print_s [%sexp (search 10 `First_ge : int option)];
-    [%expect {| () |}];
-    print_s [%sexp (search 0 `Last_le : int option)];
-    [%expect {| () |}]
+    let result_idx =
+      match which with
+      | `First_ge ->
+        let i = first_true lo hi (fun x -> f x >= 0) in
+        if i < hi then Some i else None
+      | `First_gt ->
+        let i = first_true lo hi (fun x -> f x > 0) in
+        if i < hi then Some i else None
+      | `First_equal ->
+        let i = first_true lo hi (fun x -> f x >= 0) in
+        if i < hi && Int.equal (f arr.(i)) 0 then Some i else None
+      | `Last_lt ->
+        let i = last_true lo hi (fun x -> f x < 0) in
+        if i >= lo then Some i else None
+      | `Last_le ->
+        let i = last_true lo hi (fun x -> f x <= 0) in
+        if i >= lo then Some i else None
+    in
+    Option.map result_idx ~f:(Array.get arr)
   ;;
+end
 
-  let%expect_test "fold" =
-    let t = of_list [ -5; 10; 14; 18 ] in
-    (fold [@mode local]) t ~init:0 ~f:( + ) |> Int.to_string |> print_endline;
-    [%expect {| 37 |}]
-  ;;
+module Make (Arg : Elt) = struct
+  module Elt = Arg
+
+  type t = Elt.t Value.t
+
+  let create = Value.create
+  let length = Value.length
+  let get = Value.get
+  let set = Value.set
+  let iter = Value.iter
+  let iteri = Value.iteri
+  let iteri_rev = Value.iteri_rev
+  let iter_rev = Value.iter_rev
+  let fold = Value.fold
+  let foldr = Value.foldr
+  let push = Value.push
+  let pop_exn = Value.pop_exn
+  let fill_to_length = Value.fill_to_length
+  let take t ~other = Value.take t ~other
+  let switch = Value.switch
+  let last_exn = Value.last_exn
+  let filter = Value.filter
+  let filter_inplace = Value.filter_inplace
+  let map_inplace = Value.map_inplace
+  let singleton = Value.singleton
+  let append = Value.append
+  let clear = Value.clear
+  let reverse_inplace = Value.reverse_inplace
 end

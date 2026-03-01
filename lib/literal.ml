@@ -1,15 +1,37 @@
 open! Core
-open! Import
-open! Unboxed
 
-type t = I64.t [@@deriving sexp, equal]
+type t = int [@@deriving sexp]
 
-let var t = I64.abs t |> I64.to_int_trunc
-let value t = I64.O.(t > #0L)
-let create ~var ~value = if value then I64.of_int var else I64.of_int (-var)
-let compare = I64.compare
-let to_int t = I64.to_int_trunc t
-let of_int i = I64.of_int i
-let negate t = I64.neg t
+let equal = Int.equal
+let create ~var ~value = if value then Int.abs var else -Int.abs var
+let var t = Int.abs t
+let value t = t > 0
+let compare = Int.compare
+let to_int t = t
+let of_int t = t
+let negate t = -t
 
-module Option = I64.Option
+module Option = struct
+  type value = t
+  type t = value option
+
+  let none () = None
+  let some v = Some v
+  let unchecked_some v = Some v
+  let some_is_representable _ = true
+  let is_none = Option.is_none
+  let is_some = Option.is_some
+  let value t ~default = Option.value t ~default
+
+  let unchecked_value = function
+    | Some v -> v
+    | None -> failwith "Literal.Option.unchecked_value on none"
+  ;;
+
+  module Optional_syntax = struct
+    module Optional_syntax = struct
+      let is_none = is_none
+      let unsafe_value = unchecked_value
+    end
+  end
+end

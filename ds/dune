@@ -1,9 +1,23 @@
 (library
  (name ds)
  (public_name ds)
+ (modules
+  bitset
+  hash_table
+  hash_table_intf
+  local_ref
+  option_u
+  option_u_intf
+  optional_pair
+  optional_pair_intf
+  pool
+  pool_intf
+  ptr
+  rb
+  rb_intf
+  vec
+  vec_intf)
  (preprocess
   (pps ppx_jane))
  (inline_tests)
- (libraries core core_unix unboxed)
- (flags
-  (:standard -extension-universe beta)))
+ (libraries core core_unix))

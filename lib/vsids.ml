@@ -1,155 +1,50 @@
 open! Core
-open! Import
-
-module Literal_with_score = struct
-  module T = struct
-    type t =
-      #{ literal : Literal.t
-       ; score : F64.t
-       }
-
-    let create_for_rb () =
-      #{ score = #0.; literal = Literal.create ~var:0 ~value:true }
-    ;;
-
-    let compare a b =
-      match F64.compare a.#score b.#score with
-      | 0 -> Literal.compare a.#literal b.#literal
-      | o -> o
-    ;;
-  end
-
-  include T
-
-  module Rb =
-    Rb.Make [@kind (bits64 & float64) value]
-      (T)
-      (struct
-        type t = unit
-
-        let create_for_rb () = ()
-      end)
-end
 
 type t =
-  { literals_with_score : Literal_with_score.Rb.t
-  ; score_by_literal : F64.Option.Vec.t Tf_pair.t
-  ; mutable adjusting_score : Adjusting_score.t
+  { score_true : float Int.Table.t
+  ; score_false : float Int.Table.t
+  ; pool : Int.Hash_set.t
+  ; mutable inc : float
+  ; decay_factor : float
   }
 
 let create () =
-  { literals_with_score = Literal_with_score.Rb.create ()
-  ; score_by_literal =
-      Tf_pair.create (fun (_ : bool) -> F64.Option.Vec.create ())
-  ; adjusting_score = Adjusting_score.default ()
+  { score_true = Int.Table.create ()
+  ; score_false = Int.Table.create ()
+  ; pool = Int.Hash_set.create ()
+  ; inc = 1.0
+  ; decay_factor = 0.95
   }
 ;;
 
 let on_new_var t ~var =
-  Tf_pair.iteri t.score_by_literal ~f:(fun ~key:value ~data:score_by_var ->
-    F64.Option.Vec.fill_to_length
-      score_by_var
-      ~length:(var + 1)
-      ~f:(fun (_ : int) -> F64.Option.none ());
-    match%optional_u (F64.Option.Vec.get score_by_var var : F64.Option.t) with
-    | Some _ -> ()
-    | None ->
-      let score = Adjusting_score.unit t.adjusting_score in
-      F64.Option.Vec.set score_by_var var (F64.Option.some score);
-      Literal_with_score.Rb.insert
-        t.literals_with_score
-        ~key:
-          (#{ literal = Literal.create ~var ~value; score }
-           : Literal_with_score.t)
-        ~data:())
-;;
-
-let rescale t =
-  Tf_pair.iteri t.score_by_literal ~f:(fun ~key:value ~data:score_by_var ->
-    F64.Option.Vec.iteri score_by_var ~f:(fun i score ->
-      let literal = Literal.create ~var:i ~value in
-      match%optional_u.F64.Option score with
-      | None -> ()
-      | Some score ->
-        let new_score = F64.O.(score / t.adjusting_score.#rescale) in
-        F64.Option.Vec.set score_by_var i (F64.Option.some new_score);
-        (match
-           Literal_with_score.Rb.mem t.literals_with_score #{ literal; score }
-         with
-         | false -> ()
-         | true ->
-           Literal_with_score.Rb.remove
-             t.literals_with_score
-             #{ literal; score };
-           Literal_with_score.Rb.insert
-             t.literals_with_score
-             ~key:#{ literal; score = new_score }
-             ~data:())));
-  t.adjusting_score <- Adjusting_score.rescale t.adjusting_score
+  if not (Hashtbl.mem t.score_true var) then Hashtbl.set t.score_true ~key:var ~data:0.0;
+  if not (Hashtbl.mem t.score_false var) then Hashtbl.set t.score_false ~key:var ~data:0.0;
+  Hash_set.add t.pool var
 ;;
 
 let add_activity t ~literal =
-  let vec = Tf_pair.get t.score_by_literal (Literal.value literal) in
-  match%optional_u
-    (F64.Option.Vec.get vec (Literal.var literal) : F64.Option.t)
-  with
-  | None ->
-    F64.Option.Vec.set
-      vec
-      (Literal.var literal)
-      (Adjusting_score.unit t.adjusting_score |> F64.Option.some)
-  | Some score ->
-    let new_score = F64.O.(score + Adjusting_score.unit t.adjusting_score) in
-    F64.Option.Vec.set vec (Literal.var literal) (F64.Option.some new_score);
-    if Literal_with_score.Rb.mem t.literals_with_score #{ literal; score }
-    then (
-      Literal_with_score.Rb.remove t.literals_with_score #{ literal; score };
-      Literal_with_score.Rb.insert
-        t.literals_with_score
-        ~key:#{ literal; score = new_score }
-        ~data:());
-    if F64.O.(new_score > t.adjusting_score.#rescale) then rescale t
+  let var = Literal.var literal in
+  on_new_var t ~var;
+  let table = if Literal.value literal then t.score_true else t.score_false in
+  let old = Hashtbl.find table var |> Option.value ~default:0.0 in
+  Hashtbl.set table ~key:var ~data:(old +. t.inc)
 ;;
 
-let decay t = t.adjusting_score <- Adjusting_score.decay t.adjusting_score
-
-let remove_from_pool t ~var =
-  let rem value =
-    Literal_with_score.Rb.remove
-      t.literals_with_score
-      #{ literal = Literal.create ~var ~value
-       ; score =
-           F64.Option.Vec.get (Tf_pair.get t.score_by_literal value) var
-           |> F64.Option.value_exn
-       }
-  in
-  rem true;
-  rem false
-;;
-
-let add_to_pool t ~var =
-  let add value =
-    Literal_with_score.Rb.insert
-      t.literals_with_score
-      ~key:
-        #{ literal = Literal.create ~var ~value
-         ; score =
-             F64.Option.Vec.get (Tf_pair.get t.score_by_literal value) var
-             |> F64.Option.value_exn
-         }
-      ~data:()
-  in
-  add true;
-  add false
-;;
+let decay t = t.inc <- t.inc /. t.decay_factor
+let remove_from_pool t ~var = Hash_set.remove t.pool var
+let add_to_pool t ~var = Hash_set.add t.pool var
 
 let choose_literal t =
-  match%optional_u
-    (Literal_with_score.Rb.max t.literals_with_score
-     : Literal_with_score.Rb.Kv_option.t)
-  with
+  let best = ref None in
+  Hash_set.iter t.pool ~f:(fun var ->
+    let st = Hashtbl.find t.score_true var |> Option.value ~default:0.0 in
+    let sf = Hashtbl.find t.score_false var |> Option.value ~default:0.0 in
+    let cand = if Float.( >= ) st sf then Literal.create ~var ~value:true, st else Literal.create ~var ~value:false, sf in
+    match !best with
+    | None -> best := Some cand
+    | Some (_, score) -> if Float.(snd cand > score) then best := Some cand);
+  match !best with
   | None -> Literal.Option.none ()
-  | Some kv ->
-    let #(k, _) = kv in
-    Literal.Option.some k.#literal
+  | Some (lit, _) -> Literal.Option.some lit
 ;;
