@@ -128,11 +128,6 @@ module Conflict_analysis_state = struct
   ;;
 end
 
-type conflict_analysis =
-  { learned_clause : Clause.t
-  ; backjump_level : int64#
-  }
-
 type t =
   { debug : bool
   ; mutable has_empty_clause : bool
@@ -246,12 +241,64 @@ let decay_clause_activities t =
   t.clause_adjusting_score <- Adjusting_score.decay t.clause_adjusting_score
 ;;
 
+let simplify_learned_clause ~clause ~uip_literal t =
+  (* just don't add redundant literals
+
+     redundant if the learned clause is implied by the literals we've already seen *)
+  let backjump_level = ref 0 in
+  let learned_clause = Vec.Value.of_array_taking_ownership [| uip_literal |] in
+  let rec go i =
+    if i >= Vec.Value.length clause
+    then ()
+    else (
+      let literal = Vec.Value.get clause i in
+      match%optional_u
+        (I64.Option.Vec.get t.trail_entry_idx_by_var (Int.abs literal)
+         : I64.Option.t)
+      with
+      | None -> go (i + 1)
+      | Some idx ->
+        let trail_entry = Trail_entry.Vec.get t.trail (I64.to_int_trunc idx) in
+        let skip =
+          match trail_entry.#reason with
+          | T #(Decision, _, _) -> false
+          | T #(Clause_idx, clause_idx, _) ->
+            let reason = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
+            let all_marked = ref (Clause.length reason > 1) in
+            Clause.iteri reason ~f:(fun _i literal ->
+              if Literal.var literal = Int.abs uip_literal
+              then ()
+              else if not
+                        (Conflict_analysis_state.is_seen
+                           t.conflict_analysis_state
+                           ~var:(Literal.var literal))
+              then all_marked := false);
+            !all_marked
+        in
+        if skip
+        then ()
+        else (
+          let dl = I64.to_int_trunc trail_entry.#decision_level in
+          Vec.Value.push learned_clause literal;
+          if !backjump_level < dl
+          then (
+            backjump_level := dl;
+            Vec.Value.set
+              learned_clause
+              (Vec.Value.length learned_clause - 1)
+              (Vec.Value.get learned_clause 1);
+            Vec.Value.set learned_clause 1 literal));
+        go (i + 1))
+  in
+  go 1;
+  #( ~learned_clause:(Clause.of_int_array (Vec.Value.to_array learned_clause))
+   , ~backjump_level:(I64.of_int !backjump_level) )
+;;
+
 let analyze_conflict ~failed_clause t =
   let state = t.conflict_analysis_state in
   Conflict_analysis_state.reset state;
   let path_count = ref 0 in
-  let backjump_level = ref 0 in
-  let backjump_literal_idx = ref None in
   let rescale = Local_ref.create false in
   let mark_literal literal =
     let var = Literal.var literal in
@@ -269,14 +316,7 @@ let analyze_conflict ~failed_clause t =
         then ()
         else if I64.O.(dl = t.decision_level)
         then incr path_count
-        else (
-          let idx = Vec.Value.length state.learned in
-          Vec.Value.push state.learned (Literal.to_int literal);
-          let dl = I64.to_int_trunc dl in
-          if dl > !backjump_level
-          then (
-            backjump_level := dl;
-            backjump_literal_idx := Some idx)))
+        else Vec.Value.push state.learned (Literal.to_int literal))
   in
   Clause.iter_literals failed_clause ~f:mark_literal;
   if t.debug
@@ -322,25 +362,15 @@ let analyze_conflict ~failed_clause t =
             then mark_literal reason_literal)));
     decr i
   done;
-  if Local_ref.get rescale then rescale_clause_activities t;
   if not !found_uip then failwith "conflict analysis failed to find UIP";
-  let learned_len = Vec.Value.length state.learned in
-  let clause = Array.create ~len:(learned_len + 1) 0 in
-  clause.(0) <- !uip_literal;
-  for i = 0 to learned_len - 1 do
-    clause.(i + 1) <- Vec.Value.get state.learned i
-  done;
-  (match !backjump_literal_idx with
-   | None -> ()
-   | Some _ when learned_len = 0 -> ()
-   | Some idx ->
-     let idx = idx + 1 in
-     let tmp = clause.(1) in
-     clause.(1) <- clause.(idx);
-     clause.(idx) <- tmp);
-  { learned_clause = Clause.of_int_array clause
-  ; backjump_level = I64.of_int !backjump_level
-  }
+  let uip_literal = !uip_literal in
+  if Local_ref.get rescale then rescale_clause_activities t;
+  if Vec.Value.length state.learned = 0
+  then Vec.Value.push state.learned uip_literal
+  else (
+    Vec.Value.push state.learned (Vec.Value.get state.learned 0);
+    Vec.Value.set state.learned 0 uip_literal);
+  simplify_learned_clause ~clause:state.learned ~uip_literal t
 ;;
 
 (** can be called multiple times for the same var *)
@@ -808,7 +838,7 @@ let clause_lbd t ~clause =
 ;;
 
 let backtrack t ~failed_clause =
-  let { learned_clause; backjump_level } = analyze_conflict t ~failed_clause in
+  let #(~learned_clause, ~backjump_level) = analyze_conflict t ~failed_clause in
   t.learned_clauses <- t.learned_clauses + 1;
   t.learned_clause_literals
   <- t.learned_clause_literals + Clause.length learned_clause;
@@ -986,9 +1016,12 @@ let%template unsat t failed_clause_idx : Sat_result.t @ m =
      Clause.Pool.get t.clauses (Ptr.of_int failed_clause_idx)
    in
    let learned_clause =
+     (* TODO: this is jank, and idk why we die sometimes *)
      (* raise when it's conflicts from a unit clause we deduced. *)
      try
-       let clause = (analyze_conflict t ~failed_clause).learned_clause in
+       let #(~learned_clause:clause, ~backjump_level:_) =
+         analyze_conflict t ~failed_clause
+       in
        Clause.negate clause;
        clause
      with
