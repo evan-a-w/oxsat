@@ -113,6 +113,23 @@ let run_dimacs ?min_iterations ?max_iterations ?sample_runs () =
   ()
 ;;
 
+let run_dimacs_sat_js ?min_iterations ?max_iterations ?sample_runs () =
+  print_endline "DIMACS example benchmarks with sat.js:";
+  let benchmark_config =
+    Benchmark.Config.create
+      ?min_iterations
+      ?max_iterations
+      ~warmup_runs:1
+      ~sample_runs:(Option.value sample_runs ~default:5)
+      ~target_time_ns:1_000_000_000
+      ()
+  in
+  let (_ : Benchmark.Result.t list) =
+    Sat_js_dimacs_bench.run_dimacs_examples ~benchmark_config ()
+  in
+  ()
+;;
+
 let command =
   Command.basic
     ~summary:"Run benchmarks"
@@ -122,8 +139,8 @@ let command =
          "bench"
          (optional string)
          ~doc:
-           "BENCH Which benchmark to run (examples, rb, map, sat, dimacs, or \
-            all). Default: all"
+           "BENCH Which benchmark to run (examples, rb, map, sat, dimacs, \
+            dimacs-sat-js, or all). Default: all"
      and sat_max_n =
        flag
          "sat-max-n"
@@ -178,9 +195,12 @@ let command =
            ()
        | Some "dimacs" ->
          run_dimacs ?min_iterations ?max_iterations ?sample_runs ()
+       | Some "dimacs-sat-js" ->
+         run_dimacs_sat_js ?min_iterations ?max_iterations ?sample_runs ()
        | Some other ->
          eprintf "Unknown benchmark: %s\n" other;
-         eprintf "Valid options: examples, rb, map, sat, dimacs, all\n";
+         eprintf
+           "Valid options: examples, rb, map, sat, dimacs, dimacs-sat-js, all\n";
          exit 1)
 ;;
 

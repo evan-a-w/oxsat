@@ -4,6 +4,7 @@ open! Feel
 module Instance = struct
   type t =
     { name : string
+    ; dimacs : string
     ; clauses : int array array
     }
 end
@@ -21,13 +22,23 @@ let benchmark_of_instance (instance : Instance.t) =
   instance.name, run
 ;;
 
-let dimacs_instance ~name dimacs_string =
+let dimacs_instance ~name dimacs =
   let clauses =
-    Examples.Dimacs.read_string dimacs_string
+    Examples.Dimacs.read_string dimacs
     |> List.map ~f:(fun clause -> Array.of_list clause)
     |> Array.of_list
   in
-  Instance.{ name; clauses }
+  Instance.{ name; dimacs; clauses }
+;;
+
+let default_instances () =
+  [ dimacs_instance ~name:"SUDOKU" Examples.Dimacs.sudoku
+  ; dimacs_instance ~name:"SUCC_EG" Examples.Dimacs.succ_eg
+  ; dimacs_instance ~name:"FACTOR_1234321" Examples.Dimacs.factor_1234321
+  ; dimacs_instance ~name:"FACTOR_1235321" Examples.Dimacs.factor_1235321
+  ; dimacs_instance ~name:"FAIL_EG" Examples.Dimacs.fail_eg
+  ; dimacs_instance ~name:"SUBSETS_100" Examples.Dimacs.subsets_100
+  ]
 ;;
 
 let default_benchmark_config =
@@ -39,15 +50,7 @@ let default_benchmark_config =
 ;;
 
 let run_dimacs_examples ?(benchmark_config = default_benchmark_config) () =
-  let instances =
-    [ dimacs_instance ~name:"SUDOKU" Examples.Dimacs.sudoku
-    ; dimacs_instance ~name:"SUCC_EG" Examples.Dimacs.succ_eg
-    ; dimacs_instance ~name:"FACTOR_1234321" Examples.Dimacs.factor_1234321
-    ; dimacs_instance ~name:"FACTOR_1235321" Examples.Dimacs.factor_1235321
-    ; dimacs_instance ~name:"FAIL_EG" Examples.Dimacs.fail_eg
-    ; dimacs_instance ~name:"SUBSETS_100" Examples.Dimacs.subsets_100
-    ]
-  in
+  let instances = default_instances () in
   let benchmarks = List.map instances ~f:benchmark_of_instance in
   Benchmark.run_all_and_print ~config:benchmark_config benchmarks
 ;;

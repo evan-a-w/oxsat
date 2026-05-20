@@ -69,6 +69,12 @@ type t =
   ; mutable decision_level : int64#
   ; mutable decision_level_of_last_assumption : int64#
   ; mutable iterations : int
+  ; mutable decisions : int
+  ; mutable propagations : int
+  ; mutable total_conflicts : int
+  ; mutable learned_clauses : int
+  ; mutable learned_clause_literals : int
+  ; mutable max_decision_level : int
   ; mutable clause_adjusting_score : Adjusting_score.t
   ; assignments : Bitset.t Tf_pair.t
   ; trail : Trail_entry.Vec.t
@@ -86,6 +92,40 @@ type t =
   ; luby : Luby.t
   ; mutable conflicts : int64#
   }
+
+module Stats = struct
+  type t =
+    { iterations : int
+    ; decisions : int
+    ; propagations : int
+    ; conflicts : int
+    ; learned_clauses : int
+    ; learned_clause_literals : int
+    ; max_decision_level : int
+    }
+  [@@deriving sexp]
+end
+
+let stats t : Stats.t =
+  { iterations = t.iterations
+  ; decisions = t.decisions
+  ; propagations = t.propagations
+  ; conflicts = t.total_conflicts
+  ; learned_clauses = t.learned_clauses
+  ; learned_clause_literals = t.learned_clause_literals
+  ; max_decision_level = t.max_decision_level
+  }
+;;
+
+let reset_stats t =
+  t.iterations <- 0;
+  t.decisions <- 0;
+  t.propagations <- 0;
+  t.total_conflicts <- 0;
+  t.learned_clauses <- 0;
+  t.learned_clause_literals <- 0;
+  t.max_decision_level <- 0
+;;
 
 let assignment t ~var = exclave_
   if Bitset.get (Tf_pair.get t.assignments true) var
@@ -318,6 +358,12 @@ let on_new_var
   ; vsids
   ; assignments = _
   ; iterations = _
+  ; decisions = _
+  ; propagations = _
+  ; total_conflicts = _
+  ; learned_clauses = _
+  ; learned_clause_literals = _
+  ; max_decision_level = _
   ; decision_level = _
   ; decision_level_of_last_assumption = _
   ; trail = _
@@ -473,6 +519,12 @@ let populate_watched_literals_for_new_clause
    ; clauses_by_literal = _
    ; assignments = _
    ; iterations = _
+   ; decisions = _
+   ; propagations = _
+   ; total_conflicts = _
+   ; learned_clauses = _
+   ; learned_clause_literals = _
+   ; max_decision_level = _
    ; decision_level_of_last_assumption = _
    ; decision_level = _
    ; trail = _
@@ -550,6 +602,12 @@ let push_clause
    ; clause_adjusting_score
    ; watched_clauses_by_literal = _
    ; iterations = _
+   ; decisions = _
+   ; propagations = _
+   ; total_conflicts = _
+   ; learned_clauses = _
+   ; learned_clause_literals = _
+   ; max_decision_level = _
    ; pending_units = _
    ; assignments = _
    ; decision_level_of_last_assumption = _
@@ -599,6 +657,12 @@ let free_clause
    ; decision_level_of_last_assumption = _
    ; trail = _
    ; iterations = _
+   ; decisions = _
+   ; propagations = _
+   ; total_conflicts = _
+   ; learned_clauses = _
+   ; learned_clause_literals = _
+   ; max_decision_level = _
    ; trail_entry_idx_by_var = _
    ; vsids = _
    ; has_empty_clause = _
@@ -771,6 +835,9 @@ let clause_lbd t ~clause =
 
 let backtrack t ~failed_clause =
   let learned_clause = learn_clause_from_failure t ~failed_clause in
+  t.learned_clauses <- t.learned_clauses + 1;
+  t.learned_clause_literals
+  <- t.learned_clause_literals + Clause.length learned_clause;
   if t.debug
   then
     print_s
@@ -793,6 +860,9 @@ let backtrack t ~failed_clause =
 let%template make_decision' ~is_assumption t ~literal : _ @ m =
   if t.debug then print_s [%message "make_decision" (literal : Literal.t)];
   t.decision_level <- I64.O.(t.decision_level + #1L);
+  t.max_decision_level
+  <- Int.max t.max_decision_level (I64.to_int_trunc t.decision_level);
+  if not is_assumption then t.decisions <- t.decisions + 1;
   if is_assumption then t.decision_level_of_last_assumption <- t.decision_level;
   let trail_entry : Trail_entry.t =
     #{ reason = Reason.decision literal
@@ -901,6 +971,7 @@ let rec try_unit_propagate t = exclave_
                 ~clause:(Clause.to_int_array clause : int array)
                 ~assignments:(assignments_array t : int array)
                 (literal : Literal.t)];
+        t.propagations <- t.propagations + 1;
         (match
            add_to_trail
              t
@@ -980,6 +1051,7 @@ let%template rec solve' t : Sat_result.t @ m =
        in
        backtrack t ~failed_clause;
        t.conflicts <- I64.O.(t.conflicts + #1L);
+       t.total_conflicts <- t.total_conflicts + 1;
        if I64.O.(
             t.conflicts >= Luby.value t.luby
             && I64.O.(t.decision_level <> t.decision_level_of_last_assumption))
@@ -1042,10 +1114,9 @@ let%template solve ?(local_ assumptions = [||]) t : Sat_result.t @ m =
     print_s
       [%message
         "solve" ~assumptions:([%globalize: int array] assumptions : int array)];
-  if t.iterations > 0
-  then (
-    t.iterations <- 0;
-    restart t);
+  let has_run_before = t.iterations > 0 in
+  reset_stats t;
+  if has_run_before then restart t;
   if t.has_empty_clause
   then Unsat { unsat_core = Clause.of_int_array [||] }
   else (
@@ -1060,6 +1131,12 @@ let create ?(debug = false) () =
   ; decision_level = #0L
   ; decision_level_of_last_assumption = #0L
   ; iterations = 0
+  ; decisions = 0
+  ; propagations = 0
+  ; total_conflicts = 0
+  ; learned_clauses = 0
+  ; learned_clause_literals = 0
+  ; max_decision_level = 0
   ; assignments = Tf_pair.create (fun (_ : bool) -> Bitset.create ())
   ; trail = Trail_entry.Vec.create ()
   ; clauses = Clause.Pool.create ~chunk_size:4096 ()
