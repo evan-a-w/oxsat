@@ -81,6 +81,8 @@ type t =
   ; vsids : Vsids.t
   ; simplify_clauses_every : int
   ; clause_sorting_buckets : int Vec.Value.t
+  ; lbd_seen_at_level : int Vec.Value.t
+  ; mutable lbd_stamp : int
   ; luby : Luby.t
   ; mutable conflicts : int64#
   }
@@ -229,6 +231,8 @@ let on_new_var
   ; clause_adjusting_score = _
   ; simplify_clauses_every = _
   ; clause_sorting_buckets = _
+  ; lbd_seen_at_level = _
+  ; lbd_stamp = _
   ; luby = _
   ; conflicts = _
   }
@@ -262,7 +266,9 @@ let queue_pending_unit t ~clause_idx ~literal =
   if Clause.pending_unit_generation clause <> generation
   then (
     Clause.set_pending_unit_generation clause generation;
-    Vec.Value.push t.pending_units (clause_idx, generation, Literal.to_int literal))
+    Vec.Value.push
+      t.pending_units
+      (clause_idx, generation, Literal.to_int literal))
 ;;
 
 let clear_pending_units t =
@@ -380,6 +386,8 @@ let populate_watched_literals_for_new_clause
    ; clause_adjusting_score = _
    ; simplify_clauses_every = _
    ; clause_sorting_buckets = _
+   ; lbd_seen_at_level = _
+   ; lbd_stamp = _
    ; luby = _
    ; conflicts = _
    } as t)
@@ -456,6 +464,8 @@ let push_clause
    ; clauses_with_active_unit = _
    ; simplify_clauses_every = _
    ; clause_sorting_buckets = _
+   ; lbd_seen_at_level = _
+   ; lbd_stamp = _
    ; luby = _
    ; conflicts = _
    } as t)
@@ -497,6 +507,8 @@ let free_clause
    ; debug = _
    ; simplify_clauses_every = _
    ; clause_sorting_buckets = _
+   ; lbd_seen_at_level = _
+   ; lbd_stamp = _
    ; luby = _
    ; conflicts = _
    } as t)
@@ -623,8 +635,18 @@ let second_highest_decision_level t ~clause =
   max2
 ;;
 
+let next_lbd_stamp t =
+  if t.lbd_stamp = Int.max_value
+  then (
+    Vec.Value.map_inplace t.lbd_seen_at_level ~f:(fun (_ : int) -> 0);
+    t.lbd_stamp <- 1)
+  else t.lbd_stamp <- t.lbd_stamp + 1;
+  t.lbd_stamp
+;;
+
 let clause_lbd t ~clause =
-  let distinct = Int.H_set.create () in
+  let stamp = next_lbd_stamp t in
+  let distinct = ref 0 in
   for i = 0 to Clause.length clause - 1 do
     let literal = Clause.get clause i in
     match%optional_u
@@ -636,9 +658,17 @@ let clause_lbd t ~clause =
       let dl =
         (Trail_entry.Vec.get t.trail (I64.to_int_trunc idx)).#decision_level
       in
-      Int.H_set.insert distinct ~key:(I64.to_int_trunc dl) ~data:()
+      let dl = I64.to_int_trunc dl in
+      Vec.Value.fill_to_length
+        t.lbd_seen_at_level
+        ~length:(dl + 1)
+        ~f:(fun (_ : int) -> 0);
+      if Vec.Value.get t.lbd_seen_at_level dl <> stamp
+      then (
+        Vec.Value.set t.lbd_seen_at_level dl stamp;
+        incr distinct)
   done;
-  Int.H_set.length distinct
+  !distinct
 ;;
 
 let backtrack t ~failed_clause =
@@ -945,6 +975,8 @@ let create ?(debug = false) () =
   ; vsids = Vsids.create ()
   ; simplify_clauses_every = 2500
   ; clause_sorting_buckets = Vec.Value.create ()
+  ; lbd_seen_at_level = Vec.Value.create ()
+  ; lbd_stamp = 0
   ; luby = Luby.create ~unit_run:#32L
   ; conflicts = #0L
   ; debug
