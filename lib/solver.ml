@@ -81,7 +81,6 @@ type t =
   ; clauses : Clause.Pool.t
   ; clauses_with_active_unit : Int.H_set.t
   ; pending_units : Pending_unit.t Vec.Value.t
-  ; clauses_by_literal : Int.H_set.t Vec.Value.t Tf_pair.t
   ; trail_entry_idx_by_var : I64.Option.Vec.t
   ; watched_clauses_by_literal : (int * int) Vec.Value.t Vec.Value.t Tf_pair.t
   ; vsids : Vsids.t
@@ -352,8 +351,7 @@ let learn_clause_from_failure ~failed_clause t =
 
 (** can be called multiple times for the same var *)
 let on_new_var
-  { clauses_by_literal
-  ; trail_entry_idx_by_var
+  { trail_entry_idx_by_var
   ; watched_clauses_by_literal
   ; vsids
   ; assignments = _
@@ -394,7 +392,6 @@ let on_new_var
         (Vec.Value.fill_to_length ~length:(var + 1) ~f:(fun (_ : int) ->
            with_ ()))
   in
-  fill clauses_by_literal Int.H_set.create;
   fill watched_clauses_by_literal Vec.Value.create [@nontail]
 ;;
 
@@ -516,7 +513,6 @@ let populate_watched_literals_for_new_clause
   ({ clauses
    ; watched_clauses_by_literal = _
    ; pending_units = _
-   ; clauses_by_literal = _
    ; assignments = _
    ; iterations = _
    ; decisions = _
@@ -598,7 +594,6 @@ let populate_watched_literals_for_new_clause
 (** can NOT be called multiple times for the same clause *)
 let push_clause
   ({ clauses
-   ; clauses_by_literal
    ; clause_adjusting_score
    ; watched_clauses_by_literal = _
    ; iterations = _
@@ -636,18 +631,13 @@ let push_clause
   (* bookkeeping for vars *)
   Clause.iter_literals clause ~f:(fun literal ->
     let var = Literal.var literal in
-    on_new_var t ~var;
-    let clauses_for_lit =
-      Vec.Value.get (Tf_pair.get clauses_by_literal (Literal.value literal)) var
-    in
-    Int.H_set.insert clauses_for_lit ~key:(Ptr.to_int ptr) ~data:());
+    on_new_var t ~var);
   populate_watched_literals_for_new_clause t ~ptr;
   ptr
 ;;
 
 let free_clause
   ({ clauses
-   ; clauses_by_literal
    ; watched_clauses_by_literal = _
    ; pending_units = _
    ; clauses_with_active_unit
@@ -680,11 +670,7 @@ let free_clause
   let clause = Clause.Pool.get clauses ptr in
   Clause.iter_literals clause ~f:(fun literal ->
     let var = Literal.var literal in
-    on_new_var t ~var;
-    let get_tang by_literal =
-      Vec.Value.get (Tf_pair.get by_literal (Literal.value literal)) var
-    in
-    Int.H_set.remove (get_tang clauses_by_literal) (Ptr.to_int ptr));
+    on_new_var t ~var);
   remove_clause_watches t clause;
   Int.H_set.remove clauses_with_active_unit clause_idx;
   Clause.set_deleted clause true;
@@ -1143,7 +1129,6 @@ let create ?(debug = false) () =
   ; pending_units = Vec.Value.create ()
   ; clauses_with_active_unit = Int.H_set.create ()
   ; clause_adjusting_score = Adjusting_score.default ()
-  ; clauses_by_literal = Tf_pair.create (fun (_ : bool) -> Vec.Value.create ())
   ; trail_entry_idx_by_var = I64.Option.Vec.create ()
   ; watched_clauses_by_literal =
       Tf_pair.create (fun (_ : bool) -> Vec.Value.create ())
