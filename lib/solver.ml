@@ -136,80 +136,178 @@ let decay_clause_activities t =
 ;;
 
 let learn_clause_from_failure ~failed_clause t =
-  let learned = Clause.copy failed_clause in
-  let num_at_level = ref 0 in
-  if t.debug
-  then
-    print_s
-      [%message
-        "learn_clause_from_failure"
-          ~learned:(Clause.to_int_array learned : int array)];
-  Clause.iter_literals learned ~f:(fun literal ->
+  let module Learned_clause_state = struct
+    type t =
+      { mutable lits : int Vec.Value.t
+      ; seen_by_var : int Vec.Value.t
+      ; seen_by_literal : int Vec.Value.t Tf_pair.t
+      ; mutable stamp : int
+      ; mutable num_at_level : int
+      }
+
+    let create learned =
+      let lits =
+        Vec.Value.of_array_taking_ownership (Clause.to_int_array learned)
+      in
+      { lits
+      ; seen_by_var = Vec.Value.create ()
+      ; seen_by_literal = Tf_pair.create (fun (_ : bool) -> Vec.Value.create ())
+      ; stamp = 1
+      ; num_at_level = 0
+      }
+    ;;
+
+    let reset t =
+      Vec.Value.map_inplace t.seen_by_var ~f:(fun (_ : int) -> 0);
+      Tf_pair.iter t.seen_by_literal ~f:(fun seen ->
+        Vec.Value.map_inplace seen ~f:(fun (_ : int) -> 0));
+      t.stamp <- 1
+    ;;
+
+    let next_stamp t =
+      if t.stamp = Int.max_value then reset t else t.stamp <- t.stamp + 1;
+      t.stamp
+    ;;
+
+    let ensure_capacity t ~var =
+      Vec.Value.fill_to_length
+        t.seen_by_var
+        ~length:(var + 1)
+        ~f:(fun (_ : int) -> 0);
+      Tf_pair.iter t.seen_by_literal ~f:(fun seen ->
+        Vec.Value.fill_to_length seen ~length:(var + 1) ~f:(fun (_ : int) -> 0))
+    ;;
+
+    let mark_literal t ~stamp literal =
+      let var = Literal.var literal in
+      ensure_capacity t ~var;
+      Vec.Value.set t.seen_by_var var stamp;
+      Vec.Value.set
+        (Tf_pair.get t.seen_by_literal (Literal.value literal))
+        var
+        stamp
+    ;;
+
+    let contains_var t ~var =
+      var < Vec.Value.length t.seen_by_var
+      && Vec.Value.get t.seen_by_var var = t.stamp
+    ;;
+
+    let contains_literal t ~literal =
+      let var = Literal.var literal in
+      var
+      < Vec.Value.length (Tf_pair.get t.seen_by_literal (Literal.value literal))
+      && Vec.Value.get
+           (Tf_pair.get t.seen_by_literal (Literal.value literal))
+           var
+         = t.stamp
+    ;;
+  end
+  in
+  let state = Learned_clause_state.create failed_clause in
+  let initial_stamp = state.stamp in
+  Vec.Value.iter state.lits ~f:(fun literal ->
+    Learned_clause_state.mark_literal
+      state
+      ~stamp:initial_stamp
+      (Literal.of_int literal));
+  Vec.Value.iter state.lits ~f:(fun literal ->
     match%optional_u
-      (I64.Option.Vec.get t.trail_entry_idx_by_var (Literal.var literal)
+      (I64.Option.Vec.get t.trail_entry_idx_by_var (Int.abs literal)
        : I64.Option.t)
     with
     | None -> ()
     | Some idx ->
       let trail_entry = Trail_entry.Vec.get t.trail (I64.to_int_trunc idx) in
       if I64.O.(trail_entry.#decision_level = t.decision_level)
-      then incr num_at_level);
+      then state.num_at_level <- state.num_at_level + 1);
+  if t.debug
+  then
+    print_s
+      [%message
+        "learn_clause_from_failure"
+          ~learned:(Vec.Value.to_array state.lits : int array)];
   let rescale = Local_ref.create false in
   Trail_entry.Vec.iter_rev t.trail ~f:(fun trail_entry ->
-    match
-      #( !num_at_level = 1
-         || not
-              (Clause.contains learned ~var:(Literal.var trail_entry.#literal))
-       , trail_entry.#reason )
-    with
-    | #(true, _) -> ()
-    | #(false, T #(Decision, _, _)) ->
-      failwith "found decision walking back from conflict"
-    | #(false, T #(Clause_idx, clause_idx, _)) ->
-      Vsids.add_activity t.vsids ~literal:trail_entry.#literal;
-      Local_ref.O.(rescale := !rescale || add_clause_activity t ~clause_idx);
-      let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
-      if t.debug
-      then
-        print_s
-          [%message
-            "learn_clause_from_failure"
-              ~learned_clause:(Clause.to_int_array learned : int array)
-              ~see:(Clause.to_int_array clause : int array)
-              (trail_entry.#literal : Literal.t)
-              (!num_at_level : int)];
-      Clause.iter_literals clause ~f:(fun literal ->
-        let var = Literal.var literal in
-        if Literal.equal literal trail_entry.#literal
-        then decr num_at_level
-        else if Clause.contains_literal learned ~literal
-        then ()
-        else (
-          match%optional_u
-            (I64.Option.Vec.get t.trail_entry_idx_by_var var : I64.Option.t)
-          with
-          | None -> ()
-          | Some idx ->
-            let trail_entry' =
-              Trail_entry.Vec.get t.trail (I64.to_int_trunc idx)
-            in
-            if I64.O.(trail_entry'.#decision_level = t.decision_level)
-            then incr num_at_level));
-      Clause.resolve_exn
-        learned
-        ~other:clause
-        ~on_var:(Literal.var trail_entry.#literal);
-      if t.debug
-      then
-        print_s
-          [%message
-            "learn_clause_from_failure"
-              ~learned_clause:(Clause.to_int_array learned : int array)
-              ~after_see:(Clause.to_int_array clause : int array)
-              (trail_entry.#literal : Literal.t)
-              (!num_at_level : int)]);
+    if state.num_at_level = 1
+       || not
+            (Learned_clause_state.contains_var
+               state
+               ~var:(Literal.var trail_entry.#literal))
+    then ()
+    else (
+      match trail_entry.#reason with
+      | T #(Decision, _, _) ->
+        failwith "found decision walking back from conflict"
+      | T #(Clause_idx, clause_idx, _) ->
+        Vsids.add_activity t.vsids ~literal:trail_entry.#literal;
+        Local_ref.O.(rescale := !rescale || add_clause_activity t ~clause_idx);
+        let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
+        if t.debug
+        then
+          print_s
+            [%message
+              "learn_clause_from_failure"
+                ~learned_clause:(Vec.Value.to_array state.lits : int array)
+                ~see:(Clause.to_int_array clause : int array)
+                (trail_entry.#literal : Literal.t)
+                (state.num_at_level : int)];
+        let pivot_var = Literal.var trail_entry.#literal in
+        let pivot_literal = Literal.to_int trail_entry.#literal in
+        let next_stamp = Learned_clause_state.next_stamp state in
+        let next_lits =
+          Vec.Value.create
+            ~capacity:(Vec.Value.length state.lits + Clause.length clause)
+            ()
+        in
+        state.stamp <- next_stamp;
+        Vec.Value.iter state.lits ~f:(fun literal ->
+          if Int.abs literal <> pivot_var
+          then (
+            Vec.Value.push next_lits literal;
+            Learned_clause_state.mark_literal
+              state
+              ~stamp:next_stamp
+              (Literal.of_int literal)));
+        Clause.iter_literals clause ~f:(fun literal ->
+          let literal = Literal.to_int literal in
+          let var = Int.abs literal in
+          if var = pivot_var
+          then (
+            if literal = pivot_literal
+            then state.num_at_level <- state.num_at_level - 1)
+          else if not
+                    (Learned_clause_state.contains_literal
+                       state
+                       ~literal:(Literal.of_int literal))
+          then (
+            Vec.Value.push next_lits literal;
+            Learned_clause_state.mark_literal
+              state
+              ~stamp:next_stamp
+              (Literal.of_int literal);
+            match%optional_u
+              (I64.Option.Vec.get t.trail_entry_idx_by_var var : I64.Option.t)
+            with
+            | None -> ()
+            | Some idx ->
+              let trail_entry' =
+                Trail_entry.Vec.get t.trail (I64.to_int_trunc idx)
+              in
+              if I64.O.(trail_entry'.#decision_level = t.decision_level)
+              then state.num_at_level <- state.num_at_level + 1));
+        state.lits <- next_lits;
+        if t.debug
+        then
+          print_s
+            [%message
+              "learn_clause_from_failure"
+                ~learned_clause:(Vec.Value.to_array state.lits : int array)
+                ~after_see:(Clause.to_int_array clause : int array)
+                (trail_entry.#literal : Literal.t)
+                (state.num_at_level : int)]));
   if Local_ref.get rescale then rescale_clause_activities t;
-  learned
+  Clause.of_int_array (Vec.Value.to_array state.lits)
 ;;
 
 (** can be called multiple times for the same var *)
