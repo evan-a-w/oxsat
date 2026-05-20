@@ -247,8 +247,7 @@ let can_resolve t ~other ~on_var =
   try_ true || try_ false [@nontail]
 ;;
 
-let of_int_array ?(lbd = 0) ?(learnt = false) arr =
-  Array.sort arr ~compare:sort_compare;
+let of_int_array_preserve_order ?(lbd = 0) ?(learnt = false) arr =
   { lits = Vec.Value.of_array_taking_ownership arr
   ; activity = #0.
   ; lbd
@@ -261,6 +260,11 @@ let of_int_array ?(lbd = 0) ?(learnt = false) arr =
   ; watch0_slot = -1
   ; watch1_slot = -1
   }
+;;
+
+let of_int_array ?(lbd = 0) ?(learnt = false) arr =
+  Array.sort arr ~compare:sort_compare;
+  of_int_array_preserve_order ~lbd ~learnt arr
 ;;
 
 let t_of_sexp sexp =
