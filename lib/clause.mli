@@ -47,6 +47,8 @@ val deleted : t -> bool
 val set_deleted : t -> bool -> unit
 val generation : t -> int
 val bump_generation : t -> int
+val pending_unit_generation : t -> int
+val set_pending_unit_generation : t -> int -> unit
 val watch_pos : t -> watch:int -> int
 val set_watch_pos : t -> watch:int -> int -> unit
 val watch_slot : t -> watch:int -> int

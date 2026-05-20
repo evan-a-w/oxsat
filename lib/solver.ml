@@ -77,7 +77,7 @@ type t =
   ; pending_units : Pending_unit.t Vec.Value.t
   ; clauses_by_literal : Int.H_set.t Vec.Value.t Tf_pair.t
   ; trail_entry_idx_by_var : I64.Option.Vec.t
-  ; watched_clauses_by_literal : int Vec.Value.t Vec.Value.t Tf_pair.t
+  ; watched_clauses_by_literal : (int * int) Vec.Value.t Vec.Value.t Tf_pair.t
   ; vsids : Vsids.t
   ; simplify_clauses_every : int
   ; clause_sorting_buckets : int Vec.Value.t
@@ -258,29 +258,32 @@ let get_by_literal by_literal literal =
 
 let queue_pending_unit t ~clause_idx ~literal =
   let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
-  Vec.Value.push
-    t.pending_units
-    (clause_idx, Clause.generation clause, Literal.to_int literal)
+  let generation = Clause.generation clause in
+  if Clause.pending_unit_generation clause <> generation
+  then (
+    Clause.set_pending_unit_generation clause generation;
+    Vec.Value.push t.pending_units (clause_idx, generation, Literal.to_int literal))
 ;;
 
-let update_clause_watch_slot clause ~from_slot ~to_slot =
-  if Clause.watch_slot clause ~watch:0 = from_slot
-  then Clause.set_watch_slot clause ~watch:0 to_slot;
-  if Clause.watch_slot clause ~watch:1 = from_slot
-  then Clause.set_watch_slot clause ~watch:1 to_slot
+let clear_pending_units t =
+  Vec.Value.iter t.pending_units ~f:(fun (clause_idx, generation, _) ->
+    let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
+    if Clause.pending_unit_generation clause = generation
+    then Clause.set_pending_unit_generation clause (-1));
+  Vec.Value.clear t.pending_units
 ;;
 
 let remove_watcher_at t ~literal ~slot =
   let watched_clauses = get_by_literal t.watched_clauses_by_literal literal in
   let last_slot = Vec.Value.length watched_clauses - 1 in
-  let moved_clause_idx = Vec.Value.get watched_clauses last_slot in
+  let moved_clause_idx, moved_watch = Vec.Value.get watched_clauses last_slot in
   if slot <> last_slot
   then (
-    Vec.Value.set watched_clauses slot moved_clause_idx;
+    Vec.Value.set watched_clauses slot (moved_clause_idx, moved_watch);
     let moved_clause =
       Clause.Pool.get t.clauses (Ptr.of_int moved_clause_idx)
     in
-    update_clause_watch_slot moved_clause ~from_slot:last_slot ~to_slot:slot);
+    Clause.set_watch_slot moved_clause ~watch:moved_watch slot);
   ignore (Vec.Value.pop_exn watched_clauses)
 ;;
 
@@ -289,7 +292,7 @@ let add_watcher t ~clause_idx ~watch ~watch_pos =
   let literal = Literal.of_int (Clause.get clause watch_pos) in
   let watched_clauses = get_by_literal t.watched_clauses_by_literal literal in
   let slot = Vec.Value.length watched_clauses in
-  Vec.Value.push watched_clauses clause_idx;
+  Vec.Value.push watched_clauses (clause_idx, watch);
   Clause.set_watch_pos clause ~watch watch_pos;
   Clause.set_watch_slot clause ~watch slot
 ;;
@@ -328,33 +331,33 @@ let%template update_watched_clauses t ~set_literal =
     if idx >= Vec.Value.length watched_clauses
     then Null
     else (
-      let clause_idx = Vec.Value.get watched_clauses idx in
+      let clause_idx, watch = Vec.Value.get watched_clauses idx in
       let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
-      let watch =
-        if Clause.watch_pos clause ~watch:0 >= 0
-           && Clause.get clause (Clause.watch_pos clause ~watch:0)
-              = Literal.to_int literal
-        then 0
-        else 1
-      in
       let false_watch_pos = Clause.watch_pos clause ~watch in
-      let other_watch_pos = Clause.watch_pos clause ~watch:(1 - watch) in
-      match
-        Clause.analyze_false_watch
-          clause
-          ~assignments:t.assignments
-          ~false_watch_pos
-          ~other_watch_pos
-      with
-      | Satisfied -> process (idx + 1)
-      | Replacement replacement_pos ->
+      if Clause.watch_slot clause ~watch <> idx
+         || false_watch_pos < 0
+         || Clause.get clause false_watch_pos <> Literal.to_int literal
+      then (
         remove_watcher_at t ~literal ~slot:idx;
-        add_watcher t ~clause_idx ~watch ~watch_pos:replacement_pos;
-        process idx
-      | Unit unit_literal ->
-        queue_pending_unit t ~clause_idx ~literal:unit_literal;
-        process (idx + 1)
-      | Conflict -> This clause_idx)
+        process idx)
+      else (
+        let other_watch_pos = Clause.watch_pos clause ~watch:(1 - watch) in
+        match
+          Clause.analyze_false_watch
+            clause
+            ~assignments:t.assignments
+            ~false_watch_pos
+            ~other_watch_pos
+        with
+        | Satisfied -> process (idx + 1)
+        | Replacement replacement_pos ->
+          remove_watcher_at t ~literal ~slot:idx;
+          add_watcher t ~clause_idx ~watch ~watch_pos:replacement_pos;
+          process idx
+        | Unit unit_literal ->
+          queue_pending_unit t ~clause_idx ~literal:unit_literal;
+          process (idx + 1)
+        | Conflict -> This clause_idx))
   in
   process 0 [@nontail]
 ;;
@@ -650,7 +653,7 @@ let backtrack t ~failed_clause =
     Vsids.add_activity t.vsids ~literal);
   Vsids.decay t.vsids;
   (* This is correct because we backtrack to the previous decision level, where all unit clauses had been applied. Learned clause is set to unit after adding here. *)
-  Vec.Value.clear t.pending_units;
+  clear_pending_units t;
   remove_greater_than_decision_level
     t
     ~decision_level:(second_highest_decision_level t ~clause:learned_clause);
@@ -750,6 +753,8 @@ let rec try_unit_propagate t = exclave_
   | Some (clause_idx, generation, literal) ->
     ignore (Vec.Value.pop_exn t.pending_units);
     let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
+    if Clause.pending_unit_generation clause = generation
+    then Clause.set_pending_unit_generation clause (-1);
     if Clause.deleted clause || Clause.generation clause <> generation
     then try_unit_propagate t
     else (
@@ -784,7 +789,7 @@ let rec try_unit_propagate t = exclave_
 let restart t = exclave_
   t.conflicts <- #0L;
   t.decision_level <- #0L;
-  Vec.Value.clear t.pending_units;
+  clear_pending_units t;
   while
     Trail_entry.Vec.length t.trail <> 0
     && I64.O.(

@@ -8,6 +8,7 @@ type t =
   ; mutable learnt : bool
   ; mutable deleted : bool
   ; mutable generation : int
+  ; mutable pending_unit_generation : int
   ; mutable watch0_pos : int
   ; mutable watch1_pos : int
   ; mutable watch0_slot : int
@@ -23,6 +24,7 @@ let create_for_pool () =
   ; learnt = false
   ; deleted = false
   ; generation = 0
+  ; pending_unit_generation = -1
   ; watch0_pos = -1
   ; watch1_pos = -1
   ; watch0_slot = -1
@@ -41,6 +43,8 @@ let set_learnt t learnt = t.learnt <- learnt
 let deleted t = t.deleted
 let set_deleted t deleted = t.deleted <- deleted
 let generation t = t.generation
+let pending_unit_generation t = t.pending_unit_generation
+let set_pending_unit_generation t generation = t.pending_unit_generation <- generation
 
 let bump_generation t =
   t.generation <- t.generation + 1;
@@ -77,6 +81,7 @@ let copy t =
   ; learnt = t.learnt
   ; deleted = t.deleted
   ; generation = t.generation
+  ; pending_unit_generation = t.pending_unit_generation
   ; watch0_pos = t.watch0_pos
   ; watch1_pos = t.watch1_pos
   ; watch0_slot = t.watch0_slot
@@ -215,6 +220,7 @@ let clear t =
   t.lbd <- 0;
   t.learnt <- false;
   t.deleted <- true;
+  t.pending_unit_generation <- -1;
   clear_watch_data t
 ;;
 
@@ -249,6 +255,7 @@ let of_int_array ?(lbd = 0) ?(learnt = false) arr =
   ; learnt
   ; deleted = false
   ; generation = 0
+  ; pending_unit_generation = -1
   ; watch0_pos = -1
   ; watch1_pos = -1
   ; watch0_slot = -1
