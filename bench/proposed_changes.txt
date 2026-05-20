@@ -1,0 +1,152 @@
+ 1. Rewrite Conflict Analysis Around Standard 1-UIP
+  Current issue: lib/solver.ml:178 repeatedly rebuilds learned-clause vectors during resolution and keeps scanning the reverse trail even after the UIP condition has been reached. That adds a lot of
+  allocation and trail scanning. It also appears to produce much larger learned clauses than sat.js, which means more propagation work later.
+
+  Why it matters: CDCL performance depends heavily on learning short asserting clauses. A learned clause should usually be built by marking literals, walking the trail backward until exactly one current-
+  level literal remains, then emitting one asserting literal plus literals from lower levels.
+
+  Proposed implementation:
+
+  - Replace the current Learned_clause_state vector-rebuild loop with a mutable conflict analyzer state:
+      - seen_by_var : int Vec.Value.t
+      - seen_stamp : int
+      - learned : int Vec.Value.t
+      - path_count : int
+      - backjump_level : int64#
+      - maybe minimize_seen : int Vec.Value.t later.
+  - Start from the failed clause:
+      - For each literal in the conflict clause:
+          - Ignore decision level 0 literals.
+          - Mark its variable as seen.
+          - If literal is assigned at current decision level, increment path_count.
+          - Otherwise push it into learned.
+  - Walk t.trail backward from the end:
+      - Skip entries whose variable is not marked.
+      - When you hit a seen current-level literal:
+          - Clear/consume it.
+          - Decrement path_count.
+          - If path_count = 0, this trail literal is the UIP. Stop immediately.
+          - Otherwise inspect its reason clause and mark/add its literals as above.
+  - Build final learned clause as:
+      - first literal: negation of UIP assignment, the asserting literal;
+      - remaining literals: the lower-level literals collected.
+  - Put the literal with the highest non-current decision level in position 1. That makes backjump calculation trivial and makes the clause immediately asserting after backjump.
+  - Return both the learned clause and the target backjump level, so second_highest_decision_level does not need to rescan the clause.
+
+  This should replace most of lib/solver.ml:178 through the current backtrack use at lib/solver.ml:836.
+
+  2. Add Learned Clause Minimization
+  Current issue: OCaml learned clauses are much larger than JS learned clauses in the sampled runs. The JS solver has a simple minimization pass before adding the nogood: bench/sat.js:345.
+
+  Why it matters: Smaller learned clauses propagate faster, consume less memory, and are usually more useful. This is likely one of the biggest algorithmic gaps.
+
+  Proposed implementation:
+
+  - After building the first-UIP learned clause, run a minimization pass over literals except the asserting literal.
+  - For each candidate literal l:
+      - If it has no reason, keep it.
+      - Otherwise inspect its reason clause.
+      - If every non-level-0 variable in that reason is already marked as part of the learned clause or is recursively removable, then drop l.
+  - Start with a shallow/minisat-style approximation before doing recursive minimization:
+      - Maintain seen_by_var for learned vars.
+      - For each candidate reason clause, if all reason vars are already seen or level 0, remove the candidate.
+  - Later, add recursive minimization with a separate stamp to avoid cycles and repeated work.
+
+  This can be implemented as a helper near conflict analysis, for example:
+
+  val minimize_learned_clause
+    :  t
+    -> learned:int Vec.Value.t
+    -> asserting_literal:int
+    -> int Vec.Value.t
+
+  Keep the first literal fixed. Recompute/select position 1 after minimization.
+
+  3. Stop Scanning All Clauses On Restart
+  Current issue: lib/solver.ml:988 clears pending units, unwinds the trail, then scans every clause and calls Clause.unit_literal on each clause. That is a full formula scan on every restart.
+
+  Why it matters: Standard watched-literal CDCL does not need a full clause scan after backtracking/restart. Unassigning variables cannot make a previously satisfied clause falsified; watched literals are
+  designed to preserve enough state that future assignments trigger propagation.
+
+  Proposed implementation:
+
+  - Change restart to only:
+      - reset conflict counter;
+      - backtrack to level 0 or the last assumption level;
+      - clear stale pending units.
+  - Do not iterate through Clause.Pool.iter.
+  - After restart, the main loop will continue with normal watched propagation when new decisions are made.
+  - Keep a targeted correctness test:
+      - solve a formula requiring propagation after restart;
+      - force a restart if needed through a low restart threshold or test-only config;
+      - print solver stats/result with expect output.
+
+  The likely replacement is concentrated around lib/solver.ml:988.
+
+  5. Simplify Watched Literal Storage
+  Current issue: OCaml keeps watch positions and watch slots on the clause object, and watcher movement goes through lib/solver.ml:426 plus lib/solver.ml:440. JS instead keeps the two watched literals
+  physically in clause[0] and clause[1], then swaps array entries during propagation: bench/sat.js:224.
+
+  Why it matters: Propagation is the hottest SAT-solver path. Extra indirection, slot validation, stale-watch cleanup, and clause metadata writes all compound heavily.
+
+  Proposed implementation:
+
+  - Change the clause invariant:
+      - for clauses of length >= 2, positions 0 and 1 are the watched literals;
+      - moving a watch swaps lits.(watch_idx) with lits.(replacement_pos);
+      - watch lists store only clause_idx, not (clause_idx * watch), or store watch_idx only if needed.
+  - In propagation:
+      - When literal l becomes false, scan the watch list for l.
+      - Determine whether l is at clause position 0 or 1.
+      - Let the other watched literal be the opposite position.
+      - If other watch is true, continue.
+      - Scan from index 2 for a non-false literal.
+      - If found, swap it into the false watch position and move the clause to the new literal’s watch list.
+      - If not found, either propagate the other watch or report conflict.
+  - Remove watch0_pos, watch1_pos, watch0_slot, watch1_slot from Clause.t if the new watcher representation no longer needs them.
+
+  This is a larger refactor, so do it after conflict analysis and restart cleanup. It needs strong expect tests for propagation, backtracking, learned clauses, and clause deletion.
+
+  6. Add Phase Saving And Improve Branching
+  Current issue: lib/vsids.ml:184 chooses a literal directly from per-literal activity. There is no obvious phase saving. SAT instances often benefit a lot from choosing the last successful polarity for a
+  variable.
+
+  Why it matters: The variable choice decides where to search; the phase choice decides whether the solver quickly reconstructs a satisfying assignment. VSIDS without phase saving can churn.
+
+  Proposed implementation:
+
+  - Split decision selection into:
+      - choose variable by activity;
+      - choose polarity by saved phase.
+  - Add saved_phase : Bitset.t or bool option Vec.Value.t to solver state.
+  - Whenever assigning a literal, update saved phase for that variable.
+  - On decision:
+      - choose highest-activity unassigned variable;
+      - use saved phase if present;
+      - otherwise use a default phase, probably false for CNF with many negative pairwise constraints, or initialize by literal occurrence counts.
+  - Simplify Vsids to score variables rather than literals, or keep literal scores but choose variable by max of positive/negative score and polarity by saved phase.
+
+  This change belongs mostly in lib/vsids.ml:91 and lib/solver.ml:879.
+
+  7. Re-tune Restarts And Clause Deletion After The Above
+  Current issue: clause simplification/deletion runs every 2500 solver iterations: lib/solver.ml:1027. Iterations are not the best unit; conflicts are usually the right clock. Also deletion before learned
+  clauses are high quality can throw away useful clauses or spend time sorting weak clauses.
+
+  Why it matters: Restarts and deletion amplify whatever conflict learning produces. Tune them after learned clauses become smaller and cheaper.
+
+  Proposed implementation:
+
+  - Trigger clause database reduction by conflict count, not recursive solver-loop iterations.
+  - Always keep:
+      - binary clauses;
+      - clauses with low LBD, especially LBD <= 2;
+      - clauses currently used as reasons.
+  - Reduce only learned clauses above a size/LBD threshold.
+  - Sort candidates by a combined key such as (lbd, activity, size) rather than activity alone.
+  - Make restart/deletion knobs configurable so benchmarks can compare:
+      - no restarts;
+      - Luby restarts;
+      - geometric restarts;
+      - different deletion intervals.
+
+  Expected sequence: first make learned clauses good, then reduce restart scan cost, then tune deletion. Tuning before that will mostly hide the larger structural costs.

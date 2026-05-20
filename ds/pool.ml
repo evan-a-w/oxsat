@@ -79,11 +79,14 @@ struct
     module Chunk_elt = struct
       type t =
         #{ next_free : int or_null
+         ; prev_taken : int or_null
          ; next_taken : int or_null
          ; elt : Elt.t
          }
 
-      let create ~next_free ~next_taken ~elt = #{ next_free; next_taken; elt }
+      let create ~next_free ~prev_taken ~next_taken ~elt =
+        #{ next_free; prev_taken; next_taken; elt }
+      ;;
     end
 
     type t =
@@ -99,6 +102,7 @@ struct
           ~len:chunk_size
           (Chunk_elt.create
              ~next_free:Null
+             ~prev_taken:Null
              ~next_taken:Null
              ~elt:(Elt.create_for_pool ()))
       in
@@ -124,25 +128,31 @@ struct
             | _ -> next);
         (* Add to taken list *)
         t.elts.(idx)
-        <- #{ (t.elts.(idx)) with next_free = Null; next_taken = t.first_taken };
+        <- #{ (t.elts.(idx)) with
+              next_free = Null
+            ; prev_taken = Null
+            ; next_taken = t.first_taken
+            };
+        (match t.first_taken with
+         | Null -> ()
+         | This old_first ->
+           t.elts.(old_first)
+           <- #{ (t.elts.(old_first)) with prev_taken = This idx });
         t.first_taken <- This idx;
         idx
     ;;
 
     let free t idx =
-      (* Remove from taken list *)
-      let rec remove_from_taken prev curr =
-        match curr with
-        | Null -> ()
-        | This i when i = idx ->
-          (match prev with
-           | Null -> t.first_taken <- t.elts.(i).#next_taken
-           | This prev_i ->
-             t.elts.(prev_i)
-             <- #{ (t.elts.(prev_i)) with next_taken = t.elts.(i).#next_taken })
-        | This i -> remove_from_taken curr t.elts.(i).#next_taken
-      in
-      remove_from_taken Null t.first_taken;
+      let prev_taken = t.elts.(idx).#prev_taken in
+      let next_taken = t.elts.(idx).#next_taken in
+      (match prev_taken with
+       | Null -> t.first_taken <- next_taken
+       | This prev_i ->
+         t.elts.(prev_i) <- #{ (t.elts.(prev_i)) with next_taken });
+      (match next_taken with
+       | Null -> ()
+       | This next_i ->
+         t.elts.(next_i) <- #{ (t.elts.(next_i)) with prev_taken });
       (* Add to free list *)
       t.elts.(idx)
       <- #{ (t.elts.(idx)) with
@@ -150,6 +160,7 @@ struct
               (match t.first_free with
                | Null -> This idx
                | _ -> t.first_free)
+          ; prev_taken = Null
           ; next_taken = Null
           };
       t.first_free <- This idx

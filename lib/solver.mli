@@ -10,6 +10,19 @@ end
 
 type t
 
+module Stats : sig
+  type t =
+    { iterations : int
+    ; decisions : int
+    ; propagations : int
+    ; conflicts : int
+    ; learned_clauses : int
+    ; learned_clause_literals : int
+    ; max_decision_level : int
+    }
+  [@@deriving sexp]
+end
+
 val%template solve : ?assumptions:int array @ local -> t -> Sat_result.t @ m
 [@@alloc a @ m = (heap_global, stack_local)]
 
@@ -20,3 +33,4 @@ val create_with_formula : ?debug:bool @ local -> int array array -> t
 val add_clause : t -> clause:Clause.t -> t
 
 val add_clause' : t -> clause:int array -> t
+val stats : t -> Stats.t
