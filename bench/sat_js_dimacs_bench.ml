@@ -8,7 +8,7 @@ module Prepared_instance = struct
 end
 
 let runner_path = "bench/sat_js_dimacs_runner.js"
-let solver_path = "sat.js"
+let solver_path = "bench/sat.js"
 
 let prepare_instance (instance : Dimacs_bench.Instance.t) =
   let path =
@@ -21,7 +21,10 @@ let prepare_instance (instance : Dimacs_bench.Instance.t) =
   Prepared_instance.{ name = instance.name; path }
 ;;
 
-let command_for_instance (instance : Prepared_instance.t) =
+let command_for_instance
+  ~(benchmark_config : Benchmark.Config.t)
+  (instance : Prepared_instance.t)
+  =
   String.concat
     ~sep:" "
     [ "node"
@@ -30,11 +33,24 @@ let command_for_instance (instance : Prepared_instance.t) =
     ; Filename.quote solver_path
     ; "--dimacs"
     ; Filename.quote instance.path
+    ; "--name"
+    ; Filename.quote instance.name
+    ; "--benchmark"
+    ; "--warmup-runs"
+    ; Int.to_string benchmark_config.warmup_runs
+    ; "--sample-runs"
+    ; Int.to_string benchmark_config.sample_runs
+    ; "--min-iterations"
+    ; Int.to_string benchmark_config.min_iterations
+    ; "--max-iterations"
+    ; Int.to_string benchmark_config.max_iterations
+    ; "--target-time-ns"
+    ; Int.to_string benchmark_config.target_time_ns
     ]
 ;;
 
-let solve_instance instance =
-  match Core_unix.system (command_for_instance instance) with
+let benchmark_instance ~benchmark_config (instance : Prepared_instance.t) =
+  match Core_unix.system (command_for_instance ~benchmark_config instance) with
   | Ok () -> ()
   | Error error ->
     Error.raise_s
@@ -42,11 +58,6 @@ let solve_instance instance =
         "sat.js failed"
           (instance.name : string)
           ~error:(Core_unix.Exit_or_signal.to_string_hum (Error error) : string)]
-;;
-
-let benchmark_of_instance instance =
-  let run () = solve_instance instance in
-  instance.name, run
 ;;
 
 let default_benchmark_config =
@@ -61,6 +72,6 @@ let run_dimacs_examples ?(benchmark_config = default_benchmark_config) () =
   let instances =
     Dimacs_bench.default_instances () |> List.map ~f:prepare_instance
   in
-  let benchmarks = List.map instances ~f:benchmark_of_instance in
-  Benchmark.run_all_and_print ~config:benchmark_config benchmarks
+  List.iter instances ~f:(benchmark_instance ~benchmark_config);
+  []
 ;;

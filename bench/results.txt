@@ -280,3 +280,16 @@ FACTOR_1235321: Mean: 1.06 s  StdDev: 30.58 ms  p50: 1.08 s  p75: 1.09 s  p90: 1
 FAIL_EG: Mean: 44.01 ms  StdDev: 947.74 μs  p50: 43.89 ms  p75: 44.65 ms  p90: 45.42 ms  p95: 45.42 ms  p99: 45.42 ms  (n=5)
 SUBSETS_100: Mean: 57.12 s  StdDev: 716.01 ms  p50: 57.45 s  p75: 57.63 s  p90: 57.85 s  p95: 57.85 s  p99: 57.85 s  (n=5)
 dune exec --profile=release bench/feel_bench.exe -- -bench dimacs  433.31s user 0.43s system 99% cpu 7:13.75 total
+
+
+sat.js DIMACS comparable solve-only benchmark
+---------------------------------------------
+
+$ dune exec --profile=release bench/feel_bench.exe -- -bench dimacs-sat-js -min-iterations 1 -max-iterations 1 -sample-runs 1
+DIMACS example benchmarks with sat.js:
+SUDOKU: Mean: 9.12 ms  StdDev: 0.00 ns  p50: 9.12 ms  p75: 9.12 ms  p90: 9.12 ms  p95: 9.12 ms  p99: 9.12 ms  (n=1)
+SUCC_EG: Mean: 216.88 μs  StdDev: 0.00 ns  p50: 216.88 μs  p75: 216.88 μs  p90: 216.88 μs  p95: 216.88 μs  p99: 216.88 μs  (n=1)
+FACTOR_1234321: Mean: 78.64 ms  StdDev: 0.00 ns  p50: 78.64 ms  p75: 78.64 ms  p90: 78.64 ms  p95: 78.64 ms  p99: 78.64 ms  (n=1)
+FACTOR_1235321: Mean: 87.89 ms  StdDev: 0.00 ns  p50: 87.89 ms  p75: 87.89 ms  p90: 87.89 ms  p95: 87.89 ms  p99: 87.89 ms  (n=1)
+FAIL_EG: Mean: 658.17 ms  StdDev: 0.00 ns  p50: 658.17 ms  p75: 658.17 ms  p90: 658.17 ms  p95: 658.17 ms  p99: 658.17 ms  (n=1)
+SUBSETS_100: Mean: 540.10 ms  StdDev: 0.00 ns  p50: 540.10 ms  p75: 540.10 ms  p90: 540.10 ms  p95: 540.10 ms  p99: 540.10 ms  (n=1)

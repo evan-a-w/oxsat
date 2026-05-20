@@ -159,7 +159,7 @@ function satSolve(size, clauses)
     for (var i = 0; i < size; i++)
         state.vars.push(new Variable());
     for (var i = 0; i < clauses.length; i++)
-        satAddClause(state, clauses[i]);
+        satAddClause(state, clauses[i].slice());
 
     // UNSAT if empty clause has been asserted:
     if (state.empty)
@@ -394,4 +394,3 @@ function satBacktrack(state, reason)
 
     return nogood;
 }
-
