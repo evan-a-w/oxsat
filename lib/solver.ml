@@ -60,7 +60,26 @@ module Trail_entry = struct
 end
 
 module Pending_unit = struct
-  type t = int * int * int
+  type t =
+    { clause_idx : int
+    ; clause_generation : int
+    ; unit_literal : int
+    }
+  [@@deriving fields]
+
+  let create ~clause_idx ~clause_generation ~unit_literal =
+    { clause_idx; clause_generation; unit_literal }
+  ;;
+end
+
+module Watched_clause = struct
+  type t =
+    { clause_idx : int
+    ; watch_index : int
+    }
+  [@@deriving fields]
+
+  let create ~clause_idx ~watch_index = { clause_idx; watch_index }
 end
 
 type t =
@@ -82,7 +101,8 @@ type t =
   ; clauses_with_active_unit : Int.H_set.t
   ; pending_units : Pending_unit.t Vec.Value.t
   ; trail_entry_idx_by_var : I64.Option.Vec.t
-  ; watched_clauses_by_literal : (int * int) Vec.Value.t Vec.Value.t Tf_pair.t
+  ; watched_clauses_by_literal :
+      Watched_clause.t Vec.Value.t Vec.Value.t Tf_pair.t
   ; vsids : Vsids.t
   ; simplify_clauses_every : int
   ; clause_sorting_buckets : int Vec.Value.t
@@ -409,13 +429,18 @@ let queue_pending_unit t ~clause_idx ~literal =
     Clause.set_pending_unit_generation clause generation;
     Vec.Value.push
       t.pending_units
-      (clause_idx, generation, Literal.to_int literal))
+      (Pending_unit.create
+         ~clause_idx
+         ~clause_generation:generation
+         ~unit_literal:(Literal.to_int literal)))
 ;;
 
 let clear_pending_units t =
-  Vec.Value.iter t.pending_units ~f:(fun (clause_idx, generation, _) ->
-    let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
-    if Clause.pending_unit_generation clause = generation
+  Vec.Value.iter t.pending_units ~f:(fun pending_unit ->
+    let clause =
+      Clause.Pool.get t.clauses (Ptr.of_int pending_unit.clause_idx)
+    in
+    if Clause.pending_unit_generation clause = pending_unit.clause_generation
     then Clause.set_pending_unit_generation clause (-1));
   Vec.Value.clear t.pending_units
 ;;
@@ -423,14 +448,17 @@ let clear_pending_units t =
 let remove_watcher_at t ~literal ~slot =
   let watched_clauses = get_by_literal t.watched_clauses_by_literal literal in
   let last_slot = Vec.Value.length watched_clauses - 1 in
-  let moved_clause_idx, moved_watch = Vec.Value.get watched_clauses last_slot in
+  let moved_watched_clause = Vec.Value.get watched_clauses last_slot in
   if slot <> last_slot
   then (
-    Vec.Value.set watched_clauses slot (moved_clause_idx, moved_watch);
+    Vec.Value.set watched_clauses slot moved_watched_clause;
     let moved_clause =
-      Clause.Pool.get t.clauses (Ptr.of_int moved_clause_idx)
+      Clause.Pool.get t.clauses (Ptr.of_int moved_watched_clause.clause_idx)
     in
-    Clause.set_watch_slot moved_clause ~watch:moved_watch slot);
+    Clause.set_watch_slot
+      moved_clause
+      ~watch:moved_watched_clause.watch_index
+      slot);
   ignore (Vec.Value.pop_exn watched_clauses)
 ;;
 
@@ -439,7 +467,9 @@ let add_watcher t ~clause_idx ~watch ~watch_pos =
   let literal = Literal.of_int (Clause.get clause watch_pos) in
   let watched_clauses = get_by_literal t.watched_clauses_by_literal literal in
   let slot = Vec.Value.length watched_clauses in
-  Vec.Value.push watched_clauses (clause_idx, watch);
+  Vec.Value.push
+    watched_clauses
+    (Watched_clause.create ~clause_idx ~watch_index:watch);
   Clause.set_watch_pos clause ~watch watch_pos;
   Clause.set_watch_slot clause ~watch slot
 ;;
@@ -478,17 +508,23 @@ let%template update_watched_clauses t ~set_literal =
     if idx >= Vec.Value.length watched_clauses
     then Null
     else (
-      let clause_idx, watch = Vec.Value.get watched_clauses idx in
-      let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
-      let false_watch_pos = Clause.watch_pos clause ~watch in
-      if Clause.watch_slot clause ~watch <> idx
+      let watched_clause = Vec.Value.get watched_clauses idx in
+      let clause =
+        Clause.Pool.get t.clauses (Ptr.of_int watched_clause.clause_idx)
+      in
+      let false_watch_pos =
+        Clause.watch_pos clause ~watch:watched_clause.watch_index
+      in
+      if Clause.watch_slot clause ~watch:watched_clause.watch_index <> idx
          || false_watch_pos < 0
          || Clause.get clause false_watch_pos <> Literal.to_int literal
       then (
         remove_watcher_at t ~literal ~slot:idx;
         process idx)
       else (
-        let other_watch_pos = Clause.watch_pos clause ~watch:(1 - watch) in
+        let other_watch_pos =
+          Clause.watch_pos clause ~watch:(1 - watched_clause.watch_index)
+        in
         match
           Clause.analyze_false_watch
             clause
@@ -499,12 +535,19 @@ let%template update_watched_clauses t ~set_literal =
         | Satisfied -> process (idx + 1)
         | Replacement replacement_pos ->
           remove_watcher_at t ~literal ~slot:idx;
-          add_watcher t ~clause_idx ~watch ~watch_pos:replacement_pos;
+          add_watcher
+            t
+            ~clause_idx:watched_clause.clause_idx
+            ~watch:watched_clause.watch_index
+            ~watch_pos:replacement_pos;
           process idx
         | Unit unit_literal ->
-          queue_pending_unit t ~clause_idx ~literal:unit_literal;
+          queue_pending_unit
+            t
+            ~clause_idx:watched_clause.clause_idx
+            ~literal:unit_literal;
           process (idx + 1)
-        | Conflict -> This clause_idx))
+        | Conflict -> This watched_clause.clause_idx))
   in
   process 0 [@nontail]
 ;;
@@ -934,20 +977,23 @@ let simplify_clauses t =
 let rec try_unit_propagate t = exclave_
   match Vec.Value.last t.pending_units with
   | None -> None
-  | Some (clause_idx, generation, literal) ->
+  | Some pending_unit ->
     ignore (Vec.Value.pop_exn t.pending_units);
-    let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
-    if Clause.pending_unit_generation clause = generation
+    let clause =
+      Clause.Pool.get t.clauses (Ptr.of_int pending_unit.clause_idx)
+    in
+    if Clause.pending_unit_generation clause = pending_unit.clause_generation
     then Clause.set_pending_unit_generation clause (-1);
-    if Clause.deleted clause || Clause.generation clause <> generation
+    if Clause.deleted clause
+       || Clause.generation clause <> pending_unit.clause_generation
     then try_unit_propagate t
     else (
-      let literal = Literal.of_int literal in
+      let literal = Literal.of_int pending_unit.unit_literal in
       match assignment t ~var:(Literal.var literal) with
       | Some value ->
         if Bool.equal value (Literal.value literal)
         then try_unit_propagate t
-        else Some clause_idx
+        else Some pending_unit.clause_idx
       | None ->
         if t.debug
         then
@@ -964,7 +1010,7 @@ let rec try_unit_propagate t = exclave_
              ~trail_entry:
                #{ decision_level = t.decision_level
                 ; literal
-                ; reason = Reason.clause_idx clause_idx
+                ; reason = Reason.clause_idx pending_unit.clause_idx
                 }
          with
          | Null -> try_unit_propagate t
