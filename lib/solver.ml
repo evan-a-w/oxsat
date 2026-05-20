@@ -274,9 +274,12 @@ let remove_watcher_at t ~literal ~slot =
   let watched_clauses = get_by_literal t.watched_clauses_by_literal literal in
   let last_slot = Vec.Value.length watched_clauses - 1 in
   let moved_clause_idx = Vec.Value.get watched_clauses last_slot in
-  if slot <> last_slot then (
+  if slot <> last_slot
+  then (
     Vec.Value.set watched_clauses slot moved_clause_idx;
-    let moved_clause = Clause.Pool.get t.clauses (Ptr.of_int moved_clause_idx) in
+    let moved_clause =
+      Clause.Pool.get t.clauses (Ptr.of_int moved_clause_idx)
+    in
     update_clause_watch_slot moved_clause ~from_slot:last_slot ~to_slot:slot);
   ignore (Vec.Value.pop_exn watched_clauses)
 ;;
@@ -303,14 +306,14 @@ let remove_clause_watches t clause =
   let pos0 = Clause.watch_pos clause ~watch:0 in
   let pos1 = Clause.watch_pos clause ~watch:1 in
   if pos0 >= 0 && pos1 >= 0 && Clause.get clause pos0 = Clause.get clause pos1
-  then (
+  then
     if Clause.watch_slot clause ~watch:0 > Clause.watch_slot clause ~watch:1
     then (
       remove 0;
       remove 1)
     else (
       remove 1;
-      remove 0))
+      remove 0)
   else (
     remove 1;
     remove 0);
@@ -376,7 +379,7 @@ let populate_watched_literals_for_new_clause
    ; clause_sorting_buckets = _
    ; luby = _
    ; conflicts = _
-  } as t)
+   } as t)
   ~ptr
   =
   let clause = Clause.Pool.get clauses ptr in
@@ -391,24 +394,21 @@ let populate_watched_literals_for_new_clause
     let satisfied = ref false in
     for i = 0 to Clause.length clause - 1 do
       let literal = Literal.of_int (Clause.get clause i) in
-      (match assignment t ~var:(Literal.var literal) with
-       | Some value when Bool.equal value (Literal.value literal) ->
-         satisfied := true;
-         if !first_non_false < 0
-         then first_non_false := i
-         else if !second_non_false < 0
-         then second_non_false := i
-       | Some _ ->
-         if !first_fallback < 0 then first_fallback := i
-       | None ->
-         if !first_non_false < 0
-         then first_non_false := i
-         else if !second_non_false < 0
-         then second_non_false := i);
+      match assignment t ~var:(Literal.var literal) with
+      | Some value when Bool.equal value (Literal.value literal) ->
+        satisfied := true;
+        if !first_non_false < 0
+        then first_non_false := i
+        else if !second_non_false < 0
+        then second_non_false := i
+      | Some _ -> if !first_fallback < 0 then first_fallback := i
+      | None ->
+        if !first_non_false < 0
+        then first_non_false := i
+        else if !second_non_false < 0
+        then second_non_false := i
     done;
-    let watch0 =
-      if !first_non_false >= 0 then !first_non_false else 0
-    in
+    let watch0 = if !first_non_false >= 0 then !first_non_false else 0 in
     let watch1 =
       if !second_non_false >= 0
       then !second_non_false
