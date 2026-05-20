@@ -6,3 +6,6 @@ Prefer to modularize code where possible. For instance, if there is functionalit
 
 You can run the benchmarks, using the same commands as bench/results.txt. You
 can add entries in a similar format. Be brief in descriptions of changes.
+
+Eagerly remove dead code, unless you think it has a good chance of being useful
+in future, and it doesn't add complexity / performance losses / prevent optimisations.

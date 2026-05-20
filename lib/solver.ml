@@ -338,7 +338,7 @@ let analyze_conflict ~failed_clause t =
      let tmp = clause.(1) in
      clause.(1) <- clause.(idx);
      clause.(idx) <- tmp);
-  { learned_clause = Clause.of_int_array_preserve_order clause
+  { learned_clause = Clause.of_int_array clause
   ; backjump_level = I64.of_int !backjump_level
   }
 ;;

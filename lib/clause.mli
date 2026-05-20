@@ -1,6 +1,8 @@
 open! Core
 open! Import
 
+(* TODO: remove dead code *)
+
 type t [@@deriving sexp]
 
 val copy : t -> t
@@ -17,11 +19,8 @@ val%template literals_list : t -> int list @ m
 [@@alloc a @ m = (stack_local, heap_global)]
 
 val contains : t -> var:int -> bool
-val contains_literal : t -> literal:Literal.t -> bool
 val can_resolve : t -> other:t -> on_var:int -> bool
-val resolve_exn : t -> other:t -> on_var:int -> unit
 val of_int_array : ?lbd:int -> ?learnt:bool -> int array -> t
-val of_int_array_preserve_order : ?lbd:int -> ?learnt:bool -> int array -> t
 val to_int_array : t -> int array
 val unit_literal : t -> assignments:Bitset.t Tf_pair.t -> Literal.Option.t
 

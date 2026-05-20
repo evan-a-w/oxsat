@@ -82,7 +82,7 @@ let%expect_test "simple two-literal clause neg" =
    | Sat { assignments } ->
      print_s [%message "SAT" (Clause.to_int_array assignments : int array)]
    | Unsat _ -> print_endline "UNSAT");
-  [%expect {| (SAT ("Clause.to_int_array assignments" (-1 2))) |}]
+  [%expect {| (SAT ("Clause.to_int_array assignments" (2 -1))) |}]
 ;;
 
 let%expect_test "simple satisfiable formula" =
@@ -142,7 +142,7 @@ let%expect_test "three-variable satisfiable formula" =
    | Sat { assignments } ->
      print_s [%message "SAT" (Clause.to_int_array assignments : int array)]
    | Unsat _ -> print_endline "UNSAT");
-  [%expect {| (SAT ("Clause.to_int_array assignments" (1 -2 3))) |}]
+  [%expect {| (SAT ("Clause.to_int_array assignments" (1 3 -2))) |}]
 ;;
 
 let%expect_test "pigeonhole principle - 2 pigeons, 1 hole (unsat)" =
@@ -189,7 +189,7 @@ let%expect_test "larger satisfiable formula requiring backtracking" =
    | Sat { assignments } ->
      print_s [%message "SAT" (Clause.to_int_array assignments : int array)]
    | Unsat _ -> print_endline "UNSAT");
-  [%expect {| (SAT ("Clause.to_int_array assignments" (-1 2 3))) |}]
+  [%expect {| (SAT ("Clause.to_int_array assignments" (2 3 -1))) |}]
 ;;
 
 let%expect_test "larger unsatisfiable formula requiring backtracking" =
@@ -233,7 +233,7 @@ let%expect_test "succ dimacs" =
 
 let%expect_test "fail dimacs" =
   run_dimacs Examples.Dimacs.fail_eg;
-  [%expect {| (UNSAT (unsat_core (93 107))) |}]
+  [%expect {| (UNSAT (unsat_core (-4 86))) |}]
 ;;
 
 let%expect_test "assumptions" =
@@ -274,13 +274,13 @@ let%expect_test "assumptions" =
   solve ~assumptions:[| -1; -2; -3; -4; -5; 6 |] ();
   [%expect
     {|
-    (SAT (assignments (1 -2 3 4 5 6)))
-    (SAT (assignments (1 -2 3 4 5 6)))
+    (SAT (assignments (1 3 4 5 6 -2)))
+    (SAT (assignments (1 3 4 5 6 -2)))
     (SAT (assignments (1 2 3 4 -5 -6)))
     (UNSAT (unsat_core (2 1)))
-    (SAT (assignments (-1 -2 -3 4 -5 6)))
+    (SAT (assignments (4 6 -1 -2 -3 -5)))
     (UNSAT (unsat_core (2)))
     (SAT (assignments (-1 -2 -3 -4 -5 -6)))
-    (SAT (assignments (-1 -2 -3 -4 -5 6)))
+    (SAT (assignments (6 -1 -2 -3 -4 -5)))
     |}]
 ;;

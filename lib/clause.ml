@@ -145,17 +145,6 @@ let sort_compare a b =
   if Int.abs a = Int.abs b then Int.compare a b else Int.compare (Int.abs a) (Int.abs b)
 ;;
 
-let contains_literal t ~literal =
-  let literal = Literal.to_int literal in
-  match
-    Vec.Value.binary_search
-      t.lits
-      ~f:(fun literal' -> sort_compare literal' literal)
-      ~which:`First_equal
-  with
-  | None -> false
-  | Some _ -> true
-;;
 
 let unit_literal t ~assignments =
   let candidate = ref None in
@@ -247,7 +236,7 @@ let can_resolve t ~other ~on_var =
   try_ true || try_ false [@nontail]
 ;;
 
-let of_int_array_preserve_order ?(lbd = 0) ?(learnt = false) arr =
+let of_int_array ?(lbd = 0) ?(learnt = false) arr =
   { lits = Vec.Value.of_array_taking_ownership arr
   ; activity = #0.
   ; lbd
@@ -262,11 +251,6 @@ let of_int_array_preserve_order ?(lbd = 0) ?(learnt = false) arr =
   }
 ;;
 
-let of_int_array ?(lbd = 0) ?(learnt = false) arr =
-  Array.sort arr ~compare:sort_compare;
-  of_int_array_preserve_order ~lbd ~learnt arr
-;;
-
 let t_of_sexp sexp =
   [%of_sexp: int list] sexp
   |> Array.of_list
@@ -274,33 +258,6 @@ let t_of_sexp sexp =
 ;;
 
 let to_int_array t = Vec.Value.to_array t.lits
-
-let resolve_exn t ~other ~on_var =
-  if not (can_resolve t ~other ~on_var)
-  then
-    Error.raise_s
-      [%message
-        "Can't resolve clauses"
-          (on_var : int)
-          ~t:(to_int_array t : int array)
-          ~other:(to_int_array other : int array)]
-  else (
-    let old_len = length t in
-    Vec.Value.iter other.lits ~f:(fun x ->
-      if Int.abs x <> on_var
-      then
-        match
-          Vec.Value.binary_search
-            ~end_:old_len
-            t.lits
-            ~f:(fun y -> sort_compare y x)
-            ~which:`First_equal
-        with
-        | Some _ -> ()
-        | None -> Vec.Value.push t.lits x);
-    Vec.Value.sort_partitioned t.lits ~a_len:old_len ~compare:sort_compare;
-    Vec.Value.filter_inplace t.lits ~f:(fun x -> Int.abs x <> on_var))
-;;
 
 let%expect_test "unit literal detects single remaining negative" =
   let clause = of_int_array [| -1; -4; -6 |] in
