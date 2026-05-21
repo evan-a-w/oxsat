@@ -9,8 +9,6 @@ type t =
   ; mutable deleted : bool
   ; mutable generation : int
   ; mutable pending_unit_generation : int
-  ; mutable watch0_pos : int
-  ; mutable watch1_pos : int
   ; mutable watch0_slot : int
   ; mutable watch1_slot : int
   }
@@ -25,8 +23,6 @@ let create_for_pool () =
   ; deleted = false
   ; generation = 0
   ; pending_unit_generation = -1
-  ; watch0_pos = -1
-  ; watch1_pos = -1
   ; watch0_slot = -1
   ; watch1_slot = -1
   }
@@ -51,20 +47,20 @@ let bump_generation t =
   t.generation
 ;;
 
-let watch_pos t ~watch = if watch = 0 then t.watch0_pos else t.watch1_pos
+let watch_pos t ~watch =
+  let slot = if watch = 0 then t.watch0_slot else t.watch1_slot in
+  if slot >= 0 then watch else -1
+;;
+
 let watch_slot t ~watch = if watch = 0 then t.watch0_slot else t.watch1_slot
 
-let set_watch_pos t ~watch pos =
-  if watch = 0 then t.watch0_pos <- pos else t.watch1_pos <- pos
-;;
+let set_watch_pos _t ~watch:_ _pos = ()
 
 let set_watch_slot t ~watch slot =
   if watch = 0 then t.watch0_slot <- slot else t.watch1_slot <- slot
 ;;
 
 let clear_watch_data t =
-  t.watch0_pos <- -1;
-  t.watch1_pos <- -1;
   t.watch0_slot <- -1;
   t.watch1_slot <- -1
 ;;
@@ -74,6 +70,14 @@ let get t i = Vec.Value.get t.lits i
 let set t i v = Vec.Value.set t.lits i v
 let negate t = Vec.Value.map_inplace t.lits ~f:Int.neg
 
+let swap t i j =
+  if i <> j
+  then (
+    let tmp = get t i in
+    set t i (get t j);
+    set t j tmp)
+;;
+
 let copy t =
   { lits = Vec.Value.copy t.lits
   ; activity = t.activity
@@ -82,8 +86,6 @@ let copy t =
   ; deleted = t.deleted
   ; generation = t.generation
   ; pending_unit_generation = t.pending_unit_generation
-  ; watch0_pos = t.watch0_pos
-  ; watch1_pos = t.watch1_pos
   ; watch0_slot = t.watch0_slot
   ; watch1_slot = t.watch1_slot
   }
@@ -171,7 +173,7 @@ type watched_clause_update =
   | Unit of Literal.t
   | Conflict
 
-let analyze_false_watch t ~assignments ~false_watch_pos ~other_watch_pos =
+let analyze_false_watch t ~assignments ~false_watch_pos:_ ~other_watch_pos =
   let other_literal_is_true =
     other_watch_pos >= 0 && literal_is_true assignments (get t other_watch_pos)
   in
@@ -179,12 +181,10 @@ let analyze_false_watch t ~assignments ~false_watch_pos ~other_watch_pos =
   then Satisfied
   else (
     let replacement = ref (-1) in
-    let i = ref 0 in
+    let i = ref 2 in
     while !i < length t && !replacement < 0 do
-      if !i <> false_watch_pos && !i <> other_watch_pos
-      then (
-        let literal = get t !i in
-        if not (literal_is_false assignments literal) then replacement := !i);
+      let literal = get t !i in
+      if not (literal_is_false assignments literal) then replacement := !i;
       incr i
     done;
     if !replacement >= 0
@@ -239,8 +239,6 @@ let of_int_array ?(lbd = 0) ?(learnt = false) arr =
   ; deleted = false
   ; generation = 0
   ; pending_unit_generation = -1
-  ; watch0_pos = -1
-  ; watch1_pos = -1
   ; watch0_slot = -1
   ; watch1_slot = -1
   }

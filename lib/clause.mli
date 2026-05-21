@@ -9,6 +9,7 @@ val copy : t -> t
 val length : t -> int
 val get : t -> int -> int
 val set : t -> int -> int -> unit
+val swap : t -> int -> int -> unit
 val iteri : t -> f:(int -> Literal.t -> unit) @ local -> unit
 val is_satisfied : t -> assignments:Bitset.t Tf_pair.t -> bool
 val clear : t -> unit

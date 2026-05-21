@@ -591,13 +591,16 @@ let remove_watcher_at t ~literal ~slot =
 
 let add_watcher t ~clause_idx ~watch ~watch_pos =
   let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
-  let literal = Literal.of_int (Clause.get clause watch_pos) in
-  let watched_clauses = get_by_literal t.watched_clauses_by_literal literal in
+  Clause.swap clause watch watch_pos;
+  let watched_literal = Literal.of_int (Clause.get clause watch) in
+  let watched_clauses =
+    get_by_literal t.watched_clauses_by_literal watched_literal
+  in
   let slot = Vec.Value.length watched_clauses in
   Vec.Value.push
     watched_clauses
     (Watched_clause.create ~clause_idx ~watch_index:watch);
-  Clause.set_watch_pos clause ~watch watch_pos;
+  Clause.set_watch_pos clause ~watch watch;
   Clause.set_watch_slot clause ~watch slot
 ;;
 
@@ -774,14 +777,17 @@ let populate_watched_literals_for_new_clause
         fallback)
       else -1
     in
-    add_watcher t ~clause_idx ~watch:0 ~watch_pos:watch0;
-    if watch1 >= 0 then add_watcher t ~clause_idx ~watch:1 ~watch_pos:watch1;
+    Clause.swap clause 0 watch0;
+    let watch1 = if watch1 = 0 then watch0 else watch1 in
+    if watch1 >= 0 then Clause.swap clause 1 watch1;
+    add_watcher t ~clause_idx ~watch:0 ~watch_pos:0;
+    if watch1 >= 0 then add_watcher t ~clause_idx ~watch:1 ~watch_pos:1;
     if (not !satisfied) && !first_non_false >= 0 && !second_non_false < 0
     then
       queue_pending_unit
         t
         ~clause_idx
-        ~literal:(Literal.of_int (Clause.get clause !first_non_false)))
+        ~literal:(Literal.of_int (Clause.get clause 0)))
 ;;
 
 (** can NOT be called multiple times for the same clause *)
