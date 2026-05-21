@@ -314,9 +314,11 @@ let analyze_conflict ~failed_clause t =
         let dl = trail_entry.#decision_level in
         if I64.O.(dl = #0L)
         then ()
-        else if I64.O.(dl = t.decision_level)
-        then incr path_count
-        else Vec.Value.push state.learned (Literal.to_int literal))
+        else (
+          Vsids.add_activity t.vsids ~literal;
+          if I64.O.(dl = t.decision_level)
+          then incr path_count
+          else Vec.Value.push state.learned (Literal.to_int literal)))
   in
   Clause.iter_literals failed_clause ~f:mark_literal;
   if t.debug
@@ -345,7 +347,6 @@ let analyze_conflict ~failed_clause t =
         match trail_entry.#reason with
         | T #(Decision, _, _) -> failwith "found decision before reaching UIP"
         | T #(Clause_idx, clause_idx, _) ->
-          Vsids.add_activity t.vsids ~literal;
           Local_ref.O.(rescale := !rescale || add_clause_activity t ~clause_idx);
           let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
           if t.debug
@@ -848,8 +849,6 @@ let backtrack t ~failed_clause =
       [%message
         "backtrack"
           ~learned_clause:(Clause.literals_list learned_clause : int list)];
-  Clause.iter_literals learned_clause ~f:(fun literal ->
-    Vsids.add_activity t.vsids ~literal);
   Vsids.decay t.vsids;
   (* This is correct because we backtrack to the previous decision level, where all unit clauses had been applied. Learned clause is set to unit after adding here. *)
   clear_pending_units t;

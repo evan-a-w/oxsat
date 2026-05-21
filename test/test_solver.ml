@@ -233,7 +233,7 @@ let%expect_test "succ dimacs" =
 
 let%expect_test "fail dimacs" =
   run_dimacs Examples.Dimacs.fail_eg;
-  [%expect {| (UNSAT (unsat_core (99 85))) |}]
+  [%expect {| (UNSAT (unsat_core (106 92))) |}]
 ;;
 
 let%expect_test "assumptions" =
@@ -278,7 +278,7 @@ let%expect_test "assumptions" =
     (SAT (assignments (1 3 4 5 6 -2)))
     (SAT (assignments (1 2 3 4 -5 -6)))
     (UNSAT (unsat_core (2 1)))
-    (SAT (assignments (4 6 -1 -2 -3 -5)))
+    (SAT (assignments (1 3 6 -2 -4 -5)))
     (UNSAT (unsat_core (2)))
     (SAT (assignments (-1 -2 -3 -4 -5 -6)))
     (SAT (assignments (6 -1 -2 -3 -4 -5)))
