@@ -128,8 +128,100 @@ module Conflict_analysis_state = struct
   ;;
 end
 
+module Stats = struct
+  module Profile = struct
+    module Bucket = struct
+      type t =
+        { count : int
+        ; elapsed_ns : float
+        }
+      [@@deriving sexp]
+    end
+
+    type t =
+      { update_watched_clauses : Bucket.t
+      ; restart : Bucket.t
+      ; restart_clause_rescan : Bucket.t
+      ; analyze_conflict : Bucket.t
+      ; simplify_clauses : Bucket.t
+      ; simplify_learned_clause : Bucket.t
+      ; clause_lbd : Bucket.t
+      }
+    [@@deriving sexp]
+  end
+
+  type t =
+    { iterations : int
+    ; decisions : int
+    ; propagations : int
+    ; conflicts : int
+    ; learned_clauses : int
+    ; learned_clause_literals : int
+    ; max_decision_level : int
+    ; profile : Profile.t option
+    }
+  [@@deriving sexp]
+end
+
+module Profile_state = struct
+  type bucket =
+    { mutable count : int
+    ; mutable elapsed_ns : float
+    }
+
+  type t =
+    { update_watched_clauses : bucket
+    ; restart : bucket
+    ; restart_clause_rescan : bucket
+    ; analyze_conflict : bucket
+    ; simplify_clauses : bucket
+    ; simplify_learned_clause : bucket
+    ; clause_lbd : bucket
+    }
+
+  let bucket () = { count = 0; elapsed_ns = 0. }
+
+  let create () =
+    { update_watched_clauses = bucket ()
+    ; restart = bucket ()
+    ; restart_clause_rescan = bucket ()
+    ; analyze_conflict = bucket ()
+    ; simplify_clauses = bucket ()
+    ; simplify_learned_clause = bucket ()
+    ; clause_lbd = bucket ()
+    }
+  ;;
+
+  let record bucket ~start =
+    match start with
+    | None -> ()
+    | Some start ->
+      bucket.count <- bucket.count + 1;
+      bucket.elapsed_ns
+      <- bucket.elapsed_ns
+         +. (Time_ns.diff (Time_ns.now ()) start |> Time_ns.Span.to_ns)
+  ;;
+
+  let snapshot_bucket ({ count; elapsed_ns } : bucket) =
+    Stats.Profile.Bucket.{ count; elapsed_ns }
+  ;;
+
+  let snapshot (t : t) =
+    Stats.Profile.
+      { update_watched_clauses = snapshot_bucket t.update_watched_clauses
+      ; restart = snapshot_bucket t.restart
+      ; restart_clause_rescan = snapshot_bucket t.restart_clause_rescan
+      ; analyze_conflict = snapshot_bucket t.analyze_conflict
+      ; simplify_clauses = snapshot_bucket t.simplify_clauses
+      ; simplify_learned_clause = snapshot_bucket t.simplify_learned_clause
+      ; clause_lbd = snapshot_bucket t.clause_lbd
+      }
+  ;;
+end
+
 type t =
   { debug : bool
+  ; profile : Profile_state.t option
   ; mutable has_empty_clause : bool
   ; mutable decision_level : int64#
   ; mutable decision_level_of_last_assumption : int64#
@@ -159,19 +251,6 @@ type t =
   ; mutable conflicts : int64#
   }
 
-module Stats = struct
-  type t =
-    { iterations : int
-    ; decisions : int
-    ; propagations : int
-    ; conflicts : int
-    ; learned_clauses : int
-    ; learned_clause_literals : int
-    ; max_decision_level : int
-    }
-  [@@deriving sexp]
-end
-
 let stats t : Stats.t =
   { iterations = t.iterations
   ; decisions = t.decisions
@@ -180,6 +259,7 @@ let stats t : Stats.t =
   ; learned_clauses = t.learned_clauses
   ; learned_clause_literals = t.learned_clause_literals
   ; max_decision_level = t.max_decision_level
+  ; profile = Option.map t.profile ~f:Profile_state.snapshot
   }
 ;;
 
@@ -191,6 +271,14 @@ let reset_stats t =
   t.learned_clauses <- 0;
   t.learned_clause_literals <- 0;
   t.max_decision_level <- 0
+;;
+
+let profile_start t = Option.map t.profile ~f:(fun _ -> Time_ns.now ())
+
+let profile_record t start ~f =
+  match t.profile with
+  | None -> ()
+  | Some profile -> Profile_state.record (f profile) ~start
 ;;
 
 let assignment t ~var = exclave_
@@ -242,6 +330,7 @@ let decay_clause_activities t =
 ;;
 
 let simplify_learned_clause ~clause ~uip_literal t =
+  let profile = profile_start t in
   (* just don't add redundant literals
 
      redundant if the learned clause is implied by the literals we've already seen *)
@@ -291,11 +380,16 @@ let simplify_learned_clause ~clause ~uip_literal t =
         go (i + 1))
   in
   go 1;
-  #( ~learned_clause:(Clause.of_int_array (Vec.Value.to_array learned_clause))
-   , ~backjump_level:(I64.of_int !backjump_level) )
+  let result =
+    #( ~learned_clause:(Clause.of_int_array (Vec.Value.to_array learned_clause))
+     , ~backjump_level:(I64.of_int !backjump_level) )
+  in
+  profile_record t profile ~f:(fun p -> p.simplify_learned_clause);
+  result
 ;;
 
 let analyze_conflict ~failed_clause t =
+  let profile = profile_start t in
   let state = t.conflict_analysis_state in
   Conflict_analysis_state.reset state;
   let path_count = ref 0 in
@@ -370,7 +464,9 @@ let analyze_conflict ~failed_clause t =
   else (
     Vec.Value.push state.learned (Vec.Value.get state.learned 0);
     Vec.Value.set state.learned 0 uip_literal);
-  simplify_learned_clause ~clause:state.learned ~uip_literal t
+  let result = simplify_learned_clause ~clause:state.learned ~uip_literal t in
+  profile_record t profile ~f:(fun p -> p.analyze_conflict);
+  result
 ;;
 
 (** can be called multiple times for the same var *)
@@ -402,6 +498,7 @@ let on_new_var
   ; conflict_analysis_state = _
   ; luby = _
   ; conflicts = _
+  ; profile = _
   }
   ~var
   =
@@ -507,6 +604,7 @@ let remove_clause_watches t clause =
 
 (* return is [This clause_idx] for unsat [clause_idx] *)
 let%template update_watched_clauses t ~set_literal =
+  let profile = profile_start t in
   let literal = Literal.negate set_literal in
   let watched_clauses = get_by_literal t.watched_clauses_by_literal literal in
   let rec process idx =
@@ -554,7 +652,9 @@ let%template update_watched_clauses t ~set_literal =
           process (idx + 1)
         | Conflict -> This watched_clause.clause_idx))
   in
-  process 0 [@nontail]
+  let result = process 0 [@nontail] in
+  profile_record t profile ~f:(fun p -> p.update_watched_clauses);
+  result
 ;;
 
 let populate_watched_literals_for_new_clause
@@ -585,6 +685,7 @@ let populate_watched_literals_for_new_clause
    ; conflict_analysis_state = _
    ; luby = _
    ; conflicts = _
+   ; profile = _
    } as t)
   ~ptr
   =
@@ -669,6 +770,7 @@ let push_clause
    ; conflict_analysis_state = _
    ; luby = _
    ; conflicts = _
+   ; profile = _
    } as t)
   ~clause
   =
@@ -714,6 +816,7 @@ let free_clause
    ; conflict_analysis_state = _
    ; luby = _
    ; conflicts = _
+   ; profile = _
    } as t)
   ptr
   =
@@ -811,6 +914,7 @@ let next_lbd_stamp t =
 ;;
 
 let clause_lbd t ~clause =
+  let profile = profile_start t in
   let stamp = next_lbd_stamp t in
   let distinct = ref 0 in
   for i = 0 to Clause.length clause - 1 do
@@ -834,7 +938,9 @@ let clause_lbd t ~clause =
         Vec.Value.set t.lbd_seen_at_level dl stamp;
         incr distinct)
   done;
-  !distinct
+  let result = !distinct in
+  profile_record t profile ~f:(fun p -> p.clause_lbd);
+  result
 ;;
 
 let backtrack t ~failed_clause =
@@ -918,6 +1024,7 @@ let%template can_trim_clause t ~clause_idx =
 ;;
 
 let simplify_clauses t =
+  let profile = profile_start t in
   Vec.Value.clear t.clause_sorting_buckets;
   Clause.Pool.iter t.clauses ~f:(fun ptr ->
     let clause_idx = Ptr.to_int ptr in
@@ -944,7 +1051,8 @@ let simplify_clauses t =
             (clause_idx : int)
             ~clause:(Clause.to_int_array clause : int array)]);
     free_clause t (Ptr.of_int clause_idx)
-  done
+  done;
+  profile_record t profile ~f:(fun p -> p.simplify_clauses)
 ;;
 
 let rec try_unit_propagate t = exclave_
@@ -991,6 +1099,7 @@ let rec try_unit_propagate t = exclave_
 ;;
 
 let restart t = exclave_
+  let profile = profile_start t in
   t.conflicts <- #0L;
   t.decision_level <- #0L;
   clear_pending_units t;
@@ -1002,13 +1111,16 @@ let restart t = exclave_
   do
     undo_entry t ~trail_entry:(Trail_entry.Vec.pop_exn t.trail)
   done;
+  let rescan_profile = profile_start t in
   Clause.Pool.iter t.clauses ~f:(fun ptr ->
     let clause = Clause.Pool.get t.clauses ptr in
     match%optional_u
       (Clause.unit_literal clause ~assignments:t.assignments : Literal.Option.t)
     with
     | None -> ()
-    | Some literal -> queue_pending_unit t ~clause_idx:(Ptr.to_int ptr) ~literal)
+    | Some literal -> queue_pending_unit t ~clause_idx:(Ptr.to_int ptr) ~literal);
+  profile_record t rescan_profile ~f:(fun p -> p.restart_clause_rescan);
+  profile_record t profile ~f:(fun p -> p.restart)
 ;;
 
 let%template unsat t failed_clause_idx : Sat_result.t @ m =
@@ -1134,8 +1246,10 @@ let%template solve ?(local_ assumptions = [||]) t : Sat_result.t @ m =
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
-let create ?(debug = false) () =
-  { has_empty_clause = false
+let create ?(debug = false) ?(profile = false) () =
+  { debug
+  ; profile = (if profile then Some (Profile_state.create ()) else None)
+  ; has_empty_clause = false
   ; decision_level = #0L
   ; decision_level_of_last_assumption = #0L
   ; iterations = 0
@@ -1162,7 +1276,6 @@ let create ?(debug = false) () =
   ; conflict_analysis_state = Conflict_analysis_state.create ()
   ; luby = Luby.create ~unit_run:#32L
   ; conflicts = #0L
-  ; debug
   }
 ;;
 
@@ -1173,7 +1286,7 @@ let add_clause t ~clause =
 
 let add_clause' t ~clause = add_clause t ~clause:(Clause.of_int_array clause)
 
-let create_with_formula ?debug formula =
-  let t = create ?debug () in
+let create_with_formula ?debug ?profile formula =
+  let t = create ?debug ?profile () in
   Array.fold formula ~init:t ~f:(fun t clause -> add_clause' t ~clause)
 ;;

@@ -1,0 +1,25 @@
+$ dune exec ./bench/dimacs_debug.exe -- -solver feel -profile
+((instance.name SUBSETS_100) (solver_name feel) (result sat)
+ (elapsed 6.918267s))
+((iterations 127687) (decisions 96591) (propagations 2490544)
+ (conflicts 31095) (learned_clauses 31095) (learned_clause_literals 426221)
+ (max_decision_level 114)
+ (profile
+  (((update_watched_clauses ((count 2587135) (elapsed_ns 2784031000)))
+    (restart ((count 254) (elapsed_ns 433420000)))
+    (restart_clause_rescan ((count 254) (elapsed_ns 373728000)))
+    (analyze_conflict ((count 31095) (elapsed_ns 257198000)))
+    (simplify_clauses ((count 51) (elapsed_ns 94244000)))
+    (simplify_learned_clause ((count 31095) (elapsed_ns 63430000)))
+    (clause_lbd ((count 31095) (elapsed_ns 10948000)))))))
+
+$ dune exec ./bench/dimacs_debug.exe -- -solver simple -profile
+((instance.name SUBSETS_100) (solver_name simple) (result sat)
+ (elapsed 541.124ms))
+((decisions 89958) (conflicts 12506) (learned 12506)
+ (learned_clause_literals 160715) (assignments 1474404)
+ (profile
+  (((add_clause ((count 26686) (elapsed_ns 1526000)))
+    (select_literal ((count 89959) (elapsed_ns 13967000)))
+    (unit_propagate ((count 90572) (elapsed_ns 518728000)))
+    (backtrack ((count 12506) (elapsed_ns 45835000)))))))

@@ -1,6 +1,80 @@
 open! Core
 open! Ds
 
+module Stats = struct
+  module Profile = struct
+    module Bucket = struct
+      type t =
+        { count : int
+        ; elapsed_ns : float
+        }
+      [@@deriving sexp]
+    end
+
+    type t =
+      { add_clause : Bucket.t
+      ; select_literal : Bucket.t
+      ; unit_propagate : Bucket.t
+      ; backtrack : Bucket.t
+      }
+    [@@deriving sexp]
+  end
+
+  type t =
+    { decisions : int
+    ; conflicts : int
+    ; learned : int
+    ; learned_clause_literals : int
+    ; assignments : int
+    ; profile : Profile.t option
+    }
+  [@@deriving sexp]
+end
+
+module Profile_state = struct
+  type bucket =
+    { mutable count : int
+    ; mutable elapsed_ns : float
+    }
+
+  type t =
+    { add_clause : bucket
+    ; select_literal : bucket
+    ; unit_propagate : bucket
+    ; backtrack : bucket
+    }
+
+  let bucket () = { count = 0; elapsed_ns = 0. }
+
+  let create () =
+    { add_clause = bucket ()
+    ; select_literal = bucket ()
+    ; unit_propagate = bucket ()
+    ; backtrack = bucket ()
+    }
+  ;;
+
+  let record bucket start =
+    bucket.count <- bucket.count + 1;
+    bucket.elapsed_ns
+    <- bucket.elapsed_ns
+       +. (Time_ns.diff (Time_ns.now ()) start |> Time_ns.Span.to_ns)
+  ;;
+
+  let snapshot_bucket ({ count; elapsed_ns } : bucket) =
+    Stats.Profile.Bucket.{ count; elapsed_ns }
+  ;;
+
+  let snapshot (t : t) =
+    Stats.Profile.
+      { add_clause = snapshot_bucket t.add_clause
+      ; select_literal = snapshot_bucket t.select_literal
+      ; unit_propagate = snapshot_bucket t.unit_propagate
+      ; backtrack = snapshot_bucket t.backtrack
+      }
+  ;;
+end
+
 type clause = int array
 
 type variable =
@@ -19,7 +93,21 @@ type state =
   ; vars : variable array
   ; trail : int Vec.Value.t
   ; mutable dlevel : int
+  ; mutable decisions : int
+  ; mutable conflicts : int
+  ; mutable learned : int
+  ; mutable learned_clause_literals : int
+  ; mutable assignments : int
+  ; profile : Profile_state.t option
   }
+
+let profile_start state = Option.map state.profile ~f:(fun _ -> Time_ns.now ())
+
+let profile_record profile start ~f =
+  match profile, start with
+  | Some profile, Some start -> Profile_state.record (f profile) start
+  | _ -> ()
+;;
 
 let create_variable () =
   { set = false
@@ -59,10 +147,12 @@ let literal_set state literal reason =
   v.set <- true;
   v.dlevel <- state.dlevel;
   v.reason <- reason;
+  state.assignments <- state.assignments + 1;
   Vec.Value.push state.trail literal
 ;;
 
 let sat_add_clause state clause =
+  let profile = profile_start state in
   match Array.length clause with
   | 0 -> state.empty <- true
   | 1 ->
@@ -75,13 +165,17 @@ let sat_add_clause state clause =
       v.unit_sign <- sign)
   | _ ->
     literal_add_watch state clause.(0) clause;
-    literal_add_watch state clause.(1) clause
+    literal_add_watch state clause.(1) clause;
+    profile_record state.profile profile ~f:(fun p -> p.add_clause)
 ;;
 
 let sat_select_literal state =
+  let profile = profile_start state in
   let n = Array.length state.vars - 1 in
   if n <= 0
-  then 0
+  then (
+    profile_record state.profile profile ~f:(fun p -> p.select_literal);
+    0)
   else (
     let start = 1 + Stdlib.Random.int n in
     let i = ref start in
@@ -94,10 +188,15 @@ let sat_select_literal state =
         if !i >= Array.length state.vars then i := 1;
         if !i = start then found := Some 0)
     done;
-    match !found with
-    | Some 0 -> 0
-    | Some idx -> if Stdlib.Random.bool () then -idx else idx
-    | None -> assert false)
+    let result =
+      match !found with
+      | Some 0 -> 0
+      | Some idx -> if Stdlib.Random.bool () then -idx else idx
+      | None -> assert false
+    in
+    if result <> 0 then state.decisions <- state.decisions + 1;
+    profile_record state.profile profile ~f:(fun p -> p.select_literal);
+    result)
 ;;
 
 let remove_watch_at watch idx =
@@ -108,9 +207,13 @@ let remove_watch_at watch idx =
 ;;
 
 let rec sat_backtrack state reason =
+  let profile = profile_start state in
   if state.dlevel = 0
-  then None
+  then (
+    profile_record state.profile profile ~f:(fun p -> p.backtrack);
+    None)
   else (
+    state.conflicts <- state.conflicts + 1;
     let conflicts = Vec.Value.create () in
     let count = ref 0 in
     Array.iter reason ~f:(fun literal ->
@@ -204,11 +307,16 @@ let rec sat_backtrack state reason =
         let v = literal_get_var state conflict_literal in
         v.mark <- false);
       let nogood = Vec.Value.to_array nogood in
+      state.learned <- state.learned + 1;
+      state.learned_clause_literals
+      <- state.learned_clause_literals + Array.length nogood;
       sat_add_clause state nogood;
       state.dlevel <- !blevel;
+      profile_record state.profile profile ~f:(fun p -> p.backtrack);
       if state.empty then None else Some nogood))
 
 and sat_unit_propagate state literal reason =
+  let profile = profile_start state in
   let literal = ref literal in
   let reason = ref reason in
   let restart = ref false in
@@ -273,48 +381,72 @@ and sat_unit_propagate state literal reason =
     done;
     if not !restart then continue_outer := false
   done;
-  !result
+  let result = !result in
+  profile_record state.profile profile ~f:(fun p -> p.unit_propagate);
+  result
 ;;
 
-let solve ~size clauses =
+let stats (state : state) =
+  Stats.
+    { decisions = state.decisions
+    ; conflicts = state.conflicts
+    ; learned = state.learned
+    ; learned_clause_literals = state.learned_clause_literals
+    ; assignments = state.assignments
+    ; profile = Option.map state.profile ~f:Profile_state.snapshot
+    }
+;;
+
+let solve_with_stats ?(profile = false) ~size clauses =
   let state =
     { empty = false
     ; vars = Array.init (size + 1) ~f:(fun _ -> create_variable ())
     ; trail = Vec.Value.create ()
     ; dlevel = 0
+    ; decisions = 0
+    ; conflicts = 0
+    ; learned = 0
+    ; learned_clause_literals = 0
+    ; assignments = 0
+    ; profile = (if profile then Some (Profile_state.create ()) else None)
     }
   in
   Array.iter clauses ~f:(fun clause -> sat_add_clause state (Array.copy clause));
-  if state.empty
-  then false
-  else (
-    let solved = ref true in
-    let i = ref 1 in
-    while !solved && !i < Array.length state.vars do
-      let v = state.vars.(!i) in
-      if v.unit_
-      then (
-        let literal = if v.unit_sign then - !i else !i in
-        solved := sat_unit_propagate state literal None);
-      incr i
-    done;
-    if not !solved
+  let result =
+    if state.empty
     then false
     else (
-      let continue = ref true in
-      state.dlevel <- 1;
-      while !continue do
-        let literal = sat_select_literal state in
-        if literal = 0
-        then continue := false
-        else if not (sat_unit_propagate state literal None)
+      let solved = ref true in
+      let i = ref 1 in
+      while !solved && !i < Array.length state.vars do
+        let v = state.vars.(!i) in
+        if v.unit_
         then (
-          solved := false;
-          continue := false)
-        else state.dlevel <- state.dlevel + 1
+          let literal = if v.unit_sign then - !i else !i in
+          solved := sat_unit_propagate state literal None);
+        incr i
       done;
-      !solved))
+      if not !solved
+      then false
+      else (
+        let continue = ref true in
+        state.dlevel <- 1;
+        while !continue do
+          let literal = sat_select_literal state in
+          if literal = 0
+          then continue := false
+          else if not (sat_unit_propagate state literal None)
+          then (
+            solved := false;
+            continue := false)
+          else state.dlevel <- state.dlevel + 1
+        done;
+        !solved))
+  in
+  result, stats state
 ;;
+
+let solve ?profile ~size clauses = fst (solve_with_stats ?profile ~size clauses)
 
 let dimacs_size dimacs clauses =
   let parse_header line =
@@ -334,26 +466,32 @@ let dimacs_size dimacs clauses =
         Int.max acc (Int.abs literal)))
 ;;
 
-let solve_dimacs_string dimacs =
-  let clauses =
-    String.split_lines dimacs
-    |> List.filter_map ~f:(fun line ->
-      let line = String.strip line in
-      if String.is_empty line
-         || Char.equal line.[0] 'c'
-         || Char.equal line.[0] 'p'
-      then None
-      else (
-        let literals =
-          String.split ~on:' ' line
-          |> List.filter_map ~f:(fun token ->
-            match String.strip token with
-            | "" -> None
-            | token -> Int.of_string_opt token)
-          |> List.filter ~f:(fun literal -> literal <> 0)
-        in
-        if List.is_empty literals then None else Some (Array.of_list literals)))
-    |> Array.of_list
-  in
-  solve ~size:(dimacs_size dimacs clauses) clauses
+let dimacs_clauses dimacs =
+  String.split_lines dimacs
+  |> List.filter_map ~f:(fun line ->
+    let line = String.strip line in
+    if String.is_empty line
+       || Char.equal line.[0] 'c'
+       || Char.equal line.[0] 'p'
+    then None
+    else (
+      let literals =
+        String.split ~on:' ' line
+        |> List.filter_map ~f:(fun token ->
+          match String.strip token with
+          | "" -> None
+          | token -> Int.of_string_opt token)
+        |> List.filter ~f:(fun literal -> literal <> 0)
+      in
+      if List.is_empty literals then None else Some (Array.of_list literals)))
+  |> Array.of_list
+;;
+
+let solve_dimacs_string_with_stats ?profile dimacs =
+  let clauses = dimacs_clauses dimacs in
+  solve_with_stats ?profile ~size:(dimacs_size dimacs clauses) clauses
+;;
+
+let solve_dimacs_string ?profile dimacs =
+  fst (solve_dimacs_string_with_stats ?profile dimacs)
 ;;
