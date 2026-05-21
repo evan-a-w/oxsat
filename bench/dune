@@ -40,6 +40,13 @@
  (preprocess
   (pps ppx_jane)))
 
+(library
+ (name simple_sat_dimacs_bench)
+ (modules simple_sat_dimacs_bench)
+ (libraries core feel examples benchmark dimacs_bench)
+ (preprocess
+  (pps ppx_jane)))
+
 (executable
  (public_name feel_bench)
  (name feel_bench)
@@ -60,7 +67,8 @@
   map_bench
   sat_bench
   dimacs_bench
-  sat_js_dimacs_bench)
+  sat_js_dimacs_bench
+  simple_sat_dimacs_bench)
  (flags
   (:standard -extension-universe beta)))
 

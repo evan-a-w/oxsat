@@ -141,11 +141,6 @@ let contains t ~var =
   !seen [@nontail]
 ;;
 
-let sort_compare a b =
-  if Int.abs a = Int.abs b then Int.compare a b else Int.compare (Int.abs a) (Int.abs b)
-;;
-
-
 let unit_literal t ~assignments =
   let candidate = ref None in
   let satisfied = ref false in
