@@ -777,7 +777,7 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
    | T #(Decision, _, _) -> ()
    | T #(Clause_idx, clause_ptr, _) ->
      Int.H_set.remove t.clauses_with_active_unit clause_ptr);
-  Vsids.add_to_pool t.vsids ~var:(Literal.var trail_entry.#literal);
+  Vsids.add_to_pool t.vsids ~literal:trail_entry.#literal;
   Bitset.clear
     (Tf_pair.get t.assignments (Literal.value trail_entry.#literal))
     (Literal.var trail_entry.#literal);
