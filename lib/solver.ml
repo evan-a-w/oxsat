@@ -140,6 +140,11 @@ module Stats = struct
 
     type t =
       { update_watched_clauses : Bucket.t
+      ; update_watched_clauses_stale_cleanup : Bucket.t
+      ; update_watched_clauses_analyze_false_watch : Bucket.t
+      ; update_watched_clauses_move_watch : Bucket.t
+      ; update_watched_clauses_queue_unit : Bucket.t
+      ; update_watched_clauses_conflict : Bucket.t
       ; restart : Bucket.t
       ; restart_clause_rescan : Bucket.t
       ; analyze_conflict : Bucket.t
@@ -171,6 +176,11 @@ module Profile_state = struct
 
   type t =
     { update_watched_clauses : bucket
+    ; update_watched_clauses_stale_cleanup : bucket
+    ; update_watched_clauses_analyze_false_watch : bucket
+    ; update_watched_clauses_move_watch : bucket
+    ; update_watched_clauses_queue_unit : bucket
+    ; update_watched_clauses_conflict : bucket
     ; restart : bucket
     ; restart_clause_rescan : bucket
     ; analyze_conflict : bucket
@@ -183,6 +193,11 @@ module Profile_state = struct
 
   let create () =
     { update_watched_clauses = bucket ()
+    ; update_watched_clauses_stale_cleanup = bucket ()
+    ; update_watched_clauses_analyze_false_watch = bucket ()
+    ; update_watched_clauses_move_watch = bucket ()
+    ; update_watched_clauses_queue_unit = bucket ()
+    ; update_watched_clauses_conflict = bucket ()
     ; restart = bucket ()
     ; restart_clause_rescan = bucket ()
     ; analyze_conflict = bucket ()
@@ -209,6 +224,16 @@ module Profile_state = struct
   let snapshot (t : t) =
     Stats.Profile.
       { update_watched_clauses = snapshot_bucket t.update_watched_clauses
+      ; update_watched_clauses_stale_cleanup =
+          snapshot_bucket t.update_watched_clauses_stale_cleanup
+      ; update_watched_clauses_analyze_false_watch =
+          snapshot_bucket t.update_watched_clauses_analyze_false_watch
+      ; update_watched_clauses_move_watch =
+          snapshot_bucket t.update_watched_clauses_move_watch
+      ; update_watched_clauses_queue_unit =
+          snapshot_bucket t.update_watched_clauses_queue_unit
+      ; update_watched_clauses_conflict =
+          snapshot_bucket t.update_watched_clauses_conflict
       ; restart = snapshot_bucket t.restart
       ; restart_clause_rescan = snapshot_bucket t.restart_clause_rescan
       ; analyze_conflict = snapshot_bucket t.analyze_conflict
@@ -622,35 +647,53 @@ let%template update_watched_clauses t ~set_literal =
          || false_watch_pos < 0
          || Clause.get clause false_watch_pos <> Literal.to_int literal
       then (
+        let stale_cleanup_profile = profile_start t in
         remove_watcher_at t ~literal ~slot:idx;
+        profile_record t stale_cleanup_profile ~f:(fun p ->
+          p.update_watched_clauses_stale_cleanup);
         process idx)
       else (
         let other_watch_pos =
           Clause.watch_pos clause ~watch:(1 - watched_clause.watch_index)
         in
-        match
+        let analyze_false_watch_profile = profile_start t in
+        let watched_clause_update =
           Clause.analyze_false_watch
             clause
             ~assignments:t.assignments
             ~false_watch_pos
             ~other_watch_pos
-        with
+        in
+        profile_record t analyze_false_watch_profile ~f:(fun p ->
+          p.update_watched_clauses_analyze_false_watch);
+        match watched_clause_update with
         | Satisfied -> process (idx + 1)
         | Replacement replacement_pos ->
+          let move_watch_profile = profile_start t in
           remove_watcher_at t ~literal ~slot:idx;
           add_watcher
             t
             ~clause_idx:watched_clause.clause_idx
             ~watch:watched_clause.watch_index
             ~watch_pos:replacement_pos;
+          profile_record t move_watch_profile ~f:(fun p ->
+            p.update_watched_clauses_move_watch);
           process idx
         | Unit unit_literal ->
+          let queue_unit_profile = profile_start t in
           queue_pending_unit
             t
             ~clause_idx:watched_clause.clause_idx
             ~literal:unit_literal;
+          profile_record t queue_unit_profile ~f:(fun p ->
+            p.update_watched_clauses_queue_unit);
           process (idx + 1)
-        | Conflict -> This watched_clause.clause_idx))
+        | Conflict ->
+          let conflict_profile = profile_start t in
+          let result = This watched_clause.clause_idx in
+          profile_record t conflict_profile ~f:(fun p ->
+            p.update_watched_clauses_conflict);
+          result))
   in
   let result = process 0 [@nontail] in
   profile_record t profile ~f:(fun p -> p.update_watched_clauses);

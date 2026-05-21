@@ -22,6 +22,11 @@ module Stats : sig
 
     type t =
       { update_watched_clauses : Bucket.t
+      ; update_watched_clauses_stale_cleanup : Bucket.t
+      ; update_watched_clauses_analyze_false_watch : Bucket.t
+      ; update_watched_clauses_move_watch : Bucket.t
+      ; update_watched_clauses_queue_unit : Bucket.t
+      ; update_watched_clauses_conflict : Bucket.t
       ; restart : Bucket.t
       ; restart_clause_rescan : Bucket.t
       ; analyze_conflict : Bucket.t
