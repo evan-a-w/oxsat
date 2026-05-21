@@ -80,3 +80,12 @@
  (libraries core core_unix.command_unix examples feel dimacs_bench)
  (flags
   (:standard -extension-universe beta)))
+
+(executable
+ (name simple_sat_dimacs_debug)
+ (modules simple_sat_dimacs_debug)
+ (preprocess
+  (pps ppx_jane ppx_optional))
+ (libraries core core_unix.command_unix examples feel dimacs_bench)
+ (flags
+  (:standard -extension-universe beta)))
