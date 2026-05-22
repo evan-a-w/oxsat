@@ -76,10 +76,15 @@ module Watched_clause = struct
   type t =
     { clause_idx : int
     ; watch_index : int
+    ; mutable blocker : int
     }
   [@@deriving fields]
 
-  let create ~clause_idx ~watch_index = { clause_idx; watch_index }
+  let create ~clause_idx ~watch_index ~blocker =
+    { clause_idx; watch_index; blocker }
+  ;;
+
+  let set_blocker t blocker = t.blocker <- blocker
 end
 
 module Conflict_analysis_state = struct
@@ -199,6 +204,10 @@ let assignment t ~var = exclave_
   else if Bitset.get (Tf_pair.get t.assignments false) var
   then Some false
   else None
+;;
+
+let assignment_literal_is_true assignments literal =
+  Bitset.get (Tf_pair.get assignments (literal > 0)) (Int.abs literal)
 ;;
 
 let%template assignments_array t : _ @ m =
@@ -473,11 +482,33 @@ let add_watcher t ~clause_idx ~watch ~watch_pos =
   let literal = Literal.of_int (Clause.get clause watch_pos) in
   let watched_clauses = get_by_literal t.watched_clauses_by_literal literal in
   let slot = Vec.Value.length watched_clauses in
+  let blocker =
+    if Clause.watch_pos clause ~watch:(1 - watch) >= 0
+    then Clause.get clause (1 - watch)
+    else 0
+  in
   Vec.Value.push
     watched_clauses
-    (Watched_clause.create ~clause_idx ~watch_index:watch);
+    (Watched_clause.create ~clause_idx ~watch_index:watch ~blocker);
   Clause.set_watch_pos clause ~watch watch_pos;
   Clause.set_watch_slot clause ~watch slot
+;;
+
+let set_other_watch_blocker t clause ~clause_idx ~watch_index ~blocker =
+  let other_watch = 1 - watch_index in
+  if Clause.watch_pos clause ~watch:other_watch >= 0
+  then (
+    let other_literal = Literal.of_int (Clause.get clause other_watch) in
+    let other_slot = Clause.watch_slot clause ~watch:other_watch in
+    let watched_clauses =
+      get_by_literal t.watched_clauses_by_literal other_literal
+    in
+    if other_slot >= 0 && other_slot < Vec.Value.length watched_clauses
+    then (
+      let watched_clause = Vec.Value.get watched_clauses other_slot in
+      if watched_clause.clause_idx = clause_idx
+         && watched_clause.watch_index = other_watch
+      then Watched_clause.set_blocker watched_clause blocker))
 ;;
 
 let remove_clause_watches t clause =
@@ -531,29 +562,38 @@ let%template update_watched_clauses t ~set_literal =
         let other_watch_pos =
           Clause.watch_pos clause ~watch:(1 - watched_clause.watch_index)
         in
-        match
-          Clause.analyze_false_watch
-            clause
-            ~assignments:t.assignments
-            ~false_watch_pos
-            ~other_watch_pos
-        with
-        | Satisfied -> process (idx + 1)
-        | Replacement replacement_pos ->
-          remove_watcher_at t ~literal ~slot:idx;
-          add_watcher
-            t
-            ~clause_idx:watched_clause.clause_idx
-            ~watch:watched_clause.watch_index
-            ~watch_pos:replacement_pos;
-          process idx
-        | Unit unit_literal ->
-          queue_pending_unit
-            t
-            ~clause_idx:watched_clause.clause_idx
-            ~literal:unit_literal;
-          process (idx + 1)
-        | Conflict -> This watched_clause.clause_idx))
+        if assignment_literal_is_true t.assignments watched_clause.blocker
+        then process (idx + 1)
+        else (
+          match
+            Clause.analyze_false_watch
+              clause
+              ~assignments:t.assignments
+              ~false_watch_pos
+              ~other_watch_pos
+          with
+          | Satisfied -> process (idx + 1)
+          | Replacement replacement_pos ->
+            set_other_watch_blocker
+              t
+              clause
+              ~clause_idx:watched_clause.clause_idx
+              ~watch_index:watched_clause.watch_index
+              ~blocker:(Clause.get clause replacement_pos);
+            remove_watcher_at t ~literal ~slot:idx;
+            add_watcher
+              t
+              ~clause_idx:watched_clause.clause_idx
+              ~watch:watched_clause.watch_index
+              ~watch_pos:replacement_pos;
+            process idx
+          | Unit unit_literal ->
+            queue_pending_unit
+              t
+              ~clause_idx:watched_clause.clause_idx
+              ~literal:unit_literal;
+            process (idx + 1)
+          | Conflict -> This watched_clause.clause_idx)))
   in
   process 0 [@nontail]
 ;;

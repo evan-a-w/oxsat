@@ -672,5 +672,11 @@ let%expect_test "regalloc" =
   let res = Solver.solve ~assumptions solver in
   print_s [%message (res : Solver.Sat_result.t)];
   [%expect
-    {| (res (Unsat (unsat_core (-17 -69)))) |}]
+    {|
+    (res
+     (Unsat
+      (unsat_core
+       (181 -80 -81 -82 -83 -84 -86 -87 -88 -89 -91 -105 -106 -107 -108 -109 -110
+        -112 -113 -114 -115 -117 -79))))
+    |}]
 ;;

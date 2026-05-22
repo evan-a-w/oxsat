@@ -12,6 +12,7 @@ module type%template
       , bits64 & bits64 & bits64
       , bits64 & bits64 & immediate & immediate & bits64
       , bits64 & bits64 & value & value & bits64
+      , (value & value) & value & value
       , (value & value & bits64) & bits64 & bits64 )] Elt = sig
   type t : k mod external_
 
@@ -37,6 +38,7 @@ module type%template
       , float64
       , immediate & value & value
       , value & value
+      , (value & value) & value & value
       , value & value & value
       , bits64
       , bits64 & bits64
@@ -174,6 +176,7 @@ module type Vec = sig
       = ( value
         , float64
         , value & value
+        , (value & value) & value & value
         , bits64
         , bits64 & bits64
         , value & value & value

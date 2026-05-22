@@ -8,6 +8,7 @@ module type%template
     = ( value
       , float64
       , value & value
+      , (value & value) & value & value
       , value & value & value
       , bits64
       , bits64 & bits64
@@ -22,6 +23,7 @@ module%template
     k
     = ( value
       , value & value
+      , (value & value) & value & value
       , bits64
       , float64
       , immediate & value & value
@@ -52,7 +54,7 @@ module%template
   let singleton x = { arr = [| x |]; length = 1 }
   let length t = t.length
 
-  let rec push t v =
+  let push t v =
     if t.length = Array.length t.arr
     then (
       let new_len = 2 * (t.length + 1) in
@@ -60,11 +62,9 @@ module%template
       for i = 0 to t.length - 1 do
         new_.(i) <- t.arr.(i)
       done;
-      t.arr <- new_;
-      push t v)
-    else (
-      t.arr.(t.length) <- v;
-      t.length <- t.length + 1)
+      t.arr <- new_);
+    t.arr.(t.length) <- v;
+    t.length <- t.length + 1
   ;;
 
   let pop_exn t : Elt.t =
@@ -73,17 +73,8 @@ module%template
     t.arr.(t.length)
   ;;
 
-  let get t i : Elt.t =
-    if i < 0 || i >= t.length
-    then raise (Invalid_argument [%string "Index %{i#Int} out of bounds"]);
-    t.arr.(i)
-  ;;
-
-  let set t i v =
-    if i < 0 || i >= t.length
-    then raise (Invalid_argument "Index out of bounds");
-    t.arr.(i) <- v
-  ;;
+  let get t i : Elt.t = t.arr.(i)
+  let set t i v = t.arr.(i) <- v
 
   let iter t ~f =
     for i = 0 to t.length - 1 do
