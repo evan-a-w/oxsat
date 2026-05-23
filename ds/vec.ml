@@ -139,6 +139,13 @@ module%template
     t2.length <- length
   ;;
 
+  let swap t a b =
+    let arr = t.arr in
+    let tmp = arr.(a) in
+    arr.(a) <- arr.(b);
+    arr.(b) <- tmp
+  ;;
+
   let last_exn t = get t (length t - 1)
 
   let filter t ~f =
@@ -201,6 +208,13 @@ module Value = struct
 
   let singleton x = { arr = [| x |]; length = 1 }
   let length t = t.length
+
+  let swap t a b =
+    let arr = t.arr in
+    let tmp = arr.(a) in
+    arr.(a) <- arr.(b);
+    arr.(b) <- tmp
+  ;;
 
   let rec push t v =
     if t.length = Array.length t.arr

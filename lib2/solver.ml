@@ -41,9 +41,14 @@ let replace_watched_literal_for_non_binary_clause
     Vec.Value.set clause.clause 0 (Vec.Value.get clause.clause 1);
     Vec.Value.set clause.clause 1 nullified_literal);
   let other_literal = Vec.Value.get clause.clause 0 in
+  let other_var = literal_var t ~literal:other_literal in
   if is_satisfied t ~literal:other_literal
   then (* already satisfied, do nothing *)
-    `Not_replaced
+    `Already_satisfied
+  else if not (Or_null.is_null other_var.assignment)
+  then
+    (* other watched literal is already assigned, so there can't be a replacement, so this is a conflict *)
+    `No_replacement
   else (
     let rec go i = exclave_
       if i >= Vec.Value.length clause.clause
@@ -61,11 +66,11 @@ let replace_watched_literal_for_non_binary_clause
             `Replacement (~var:{ global = var }, ~literal, ~i)))
     in
     match go 2 with
-    | `Already_satisfied -> `Not_replaced
+    | `Already_satisfied -> `Already_satisfied
     | `No_candidate_replacement ->
       (* other watched literal is a unit *)
       push_unit_trail_entry t ~literal:other_literal ~clause_idx;
-      `Not_replaced
+      `Found_unit
     | `Replacement (~var:{ global = var }, ~literal, ~i) ->
       Vec.Value.set clause.clause i nullified_literal;
       Vec.Value.set clause.clause 1 literal;
@@ -94,6 +99,7 @@ let update_watches_after_assignment t ~(var : Var.t) ~literal =
         push_unit_trail_entry t ~literal:blocking_literal ~clause_idx;
         true)
       else (
+        (* TODO can have conflict here if no replacement and not unit/satisfied *)
         match
           replace_watched_literal_for_non_binary_clause
             t
@@ -130,6 +136,49 @@ let rec propagate t : int or_null =
        t.stats <- #{ t.stats with propagations = t.stats.#propagations + 1 };
        update_watches_after_assignment t ~var ~literal:trail_entry.#literal;
        propagate t)
+;;
+
+let register_watcher t ~literal ~clause_idx =
+  Watched_clause.Vec.push
+    (Tf_pair.get var.watched_clauses (literal > 0))
+    (Watched_clause.create
+       ~clause_idx
+       ~blocking_literal:other_literal
+       ~is_binary:false)
+;;
+
+let add_clause t ~literals =
+  let len = Vec.Value.length literals in
+  if len = 0 then t.has_empty_clause <- true;
+  let satisfied = stack_ (ref false) in
+  let num_unassigned = stack_ (ref 0) in
+  let rec go i =
+    if i >= Vec.Value.length literals
+    then ()
+    else (
+      let literal = Vec.Value.get literals i in
+      let var = literal_var t ~literal in
+      satisfied := is_satisfied t ~literal;
+      if !satisfied
+      then ()
+      else (
+        match var.assignment with
+        | This _ -> ()
+        | Null ->
+          if !num_unassigned < 2 then Vec.Value.swap literals !num_unassigned i;
+          incr num_unassigned))
+  in
+  go 0;
+  let clause : Clause.t = { clause = literals; has_unit = false } in
+  let clause_idx = Vec.Value.legnth t.clauses in
+  Vec.Value.push t.clauses clause;
+  if len >= 2
+  then register_watcher t ~literal:(Vec.Value.get literals 0) ~clause_idx;
+  if !satisfied
+  then `Satisfied
+  else if !num_unassigned = 1
+  then `Unit
+  else `Other
 ;;
 
 let%template rec solve' t : Sat_result.t @ m = failwith "TODO"

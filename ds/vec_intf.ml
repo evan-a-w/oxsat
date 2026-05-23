@@ -73,6 +73,7 @@ module type%template
   val fill_to_length : t -> length:int -> f:(int -> Elt.t) @ local -> unit
   val take : t -> other:t -> unit
   val switch : t -> t -> unit
+  val swap : t -> int -> int -> unit
   val last_exn : t -> Elt.t
   val filter : t -> f:(Elt.t -> bool) @ local -> t
   val filter_inplace : t -> f:(Elt.t -> bool) @ local -> unit
@@ -133,6 +134,7 @@ module type S_value = sig
   val mem : 'a t -> 'a -> compare:('a -> 'a -> int) -> bool
   val take : 'a t -> other:'a t -> unit
   val switch : 'a t -> 'a t -> unit
+  val swap : 'a t -> int -> int -> unit
   val last : 'a t -> 'a option
   val last_exn : 'a t -> 'a
   val filter : 'a t -> f:('a -> bool) @ local -> 'a t
