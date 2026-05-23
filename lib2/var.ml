@@ -15,9 +15,9 @@ let create_for_vec () =
    }
 ;;
 
-(* @ocamlformat-disable *)
-include
-  functor
-  Vecable.Make
-  [@kind value & (value & value) & value & (value & value) & value]
-(* @ocamlformat-enable *)
+module Vec =
+Vec.Make [@kind value & (value & value) & value & (value & value) & value] (struct
+    type nonrec t = t
+
+    let create_for_vec = create_for_vec
+  end)

@@ -1,6 +1,5 @@
 open! Core
 
-(* @ocamlformat-disable *)
 module%template
   [@kind
     k
@@ -19,7 +18,6 @@ module%template
       , (value & value & bits64) & bits64 & bits64 )] Make
     (Arg : Vec_intf.Elt
   [@kind k]) =
-(* @ocamlformat-enable *)
 struct
   module Vec = Vec.Make [@kind k] (Arg)
 end
