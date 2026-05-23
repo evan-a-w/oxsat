@@ -1,4 +1,4 @@
-Always run ocamlformat after you finish (eg. ocamlformat */*.ml; ocamlformat */*.mli).
+Always run ocamlformat after you finish (eg. ocamlformat --inplace */*.ml; ocamlformat */*.mli).
 
 Prefer to write tests in expect test style (let%expect_test ..., prefer printing sexps to demonstrate state rather than eg. asserting things are equal to some manually defined value, look at the output of dune build @runtest, and if diffs are acceptable run dune promote to accept the changes)
 

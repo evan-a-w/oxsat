@@ -7,6 +7,8 @@ type t =
   }
 [@@deriving sexp, fields]
 
+let create () = { stamp = 0; seen_by_var = Vec.Value.create () }
+
 let reset t =
   if t.stamp = Int.max_value
   then (

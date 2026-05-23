@@ -3,6 +3,7 @@ open! Import
 
 type t [@@deriving sexp]
 
+val create : unit -> t
 val reset : t -> unit
 val is_seen : t -> var:int -> bool
 val mark_seen : t -> var:int -> unit
