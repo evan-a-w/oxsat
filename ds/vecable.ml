@@ -5,6 +5,8 @@ module%template
     k
     = ( value
       , value & value
+      , value & value & value & (value & value) & value
+      , value & (value & value) & value & (value & value) & value
       , (value & value) & value & value
       , bits64
       , float64

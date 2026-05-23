@@ -13,6 +13,7 @@ include struct
   module Ptr = Ptr
   module Rb = Rb
   module Hash_table = Hash_table
+  module Option_u = Option_u
 end
 
 include struct

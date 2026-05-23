@@ -10,6 +10,8 @@ module type%template
       , value & value
       , (value & value) & value & value
       , value & value & value
+      , value & value & value & (value & value) & value
+      , value & (value & value) & value & (value & value) & value
       , bits64
       , bits64 & bits64
       , immediate & value & value
@@ -29,7 +31,9 @@ module%template
       , immediate & value & value
       , bits64 & bits64
       , value & value & value
+      , value & value & value & (value & value) & value
       , bits64 & bits64 & bits64
+      , value & (value & value) & value & (value & value) & value
       , bits64 & bits64 & immediate & immediate & bits64
       , bits64 & bits64 & value & value & bits64
       , (value & value & bits64) & bits64 & bits64 )] Make

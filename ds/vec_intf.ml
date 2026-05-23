@@ -13,7 +13,9 @@ module type%template
       , bits64 & bits64 & immediate & immediate & bits64
       , bits64 & bits64 & value & value & bits64
       , (value & value) & value & value
-      , (value & value & bits64) & bits64 & bits64 )] Elt = sig
+      , (value & value & bits64) & bits64 & bits64
+      , immediate & value & value & value & (value & value) & value
+      , value & (value & value) & value & (value & value) & value )] Elt = sig
   type t : k mod external_
 
   val create_for_vec : unit -> t
@@ -32,14 +34,23 @@ module type%template [@kind k = (value & value & value)] Elt = sig
 end
 
 module type%template
+  [@kind k = (value & value & value & (value & value) & value)] Elt = sig
+  type t : value & (value & value) & value
+
+  val create_for_vec : unit -> t
+end
+
+module type%template
   [@kind
     k
     = ( value
       , float64
       , immediate & value & value
       , value & value
+      , value & (value & value) & value & (value & value) & value
       , (value & value) & value & value
       , value & value & value
+      , value & value & value & (value & value) & value
       , bits64
       , bits64 & bits64
       , bits64 & bits64 & bits64
@@ -165,6 +176,8 @@ module type Vec = sig
         , bits64 & bits64
         , immediate & value & value
         , value & value & value
+        , value & value & value & (value & value) & value
+        , value & (value & value) & value & (value & value) & value
         , bits64 & bits64 & bits64
         , bits64 & bits64 & immediate & immediate & bits64
         , bits64 & bits64 & value & value & bits64
@@ -180,9 +193,11 @@ module type Vec = sig
         , bits64
         , bits64 & bits64
         , value & value & value
+        , value & value & value & (value & value) & value
         , immediate & value & value
         , bits64 & bits64 & bits64
         , bits64 & bits64 & immediate & immediate & bits64
+        , value & (value & value) & value & (value & value) & value
         , bits64 & bits64 & value & value & bits64
         , (value & value & bits64) & bits64 & bits64 )] Make
       (Arg : Elt
