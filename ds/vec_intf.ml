@@ -1,6 +1,7 @@
 open! Core
 open! Unboxed
 
+(* @ocamlformat-disable *)
 module type%template
   [@kind
     k
@@ -13,9 +14,8 @@ module type%template
       , bits64 & bits64 & immediate & immediate & bits64
       , bits64 & bits64 & value & value & bits64
       , (value & value) & value & value
-      , (value & value & bits64) & bits64 & bits64
-      , immediate & value & value & value & (value & value) & value
-      , value & (value & value) & value & (value & value) & value )] Elt = sig
+      , (value & value & bits64) & bits64 & bits64 )] Elt = sig
+  (* @ocamlformat-enable *)
   type t : k mod external_
 
   val create_for_vec : unit -> t
@@ -33,13 +33,16 @@ module type%template [@kind k = (value & value & value)] Elt = sig
   val create_for_vec : unit -> t
 end
 
+(* @ocamlformat-disable *)
 module type%template
-  [@kind k = (value & value & value & (value & value) & value)] Elt = sig
-  type t : value & (value & value) & value
+  [@kind k = (value & (value & value) & value & (value & value) & value)] Elt = sig
+  type t : value & (value & value) & (value & ((value & value) & value))
 
   val create_for_vec : unit -> t
 end
+(* @ocamlformat-enable *)
 
+(* @ocamlformat-disable *)
 module type%template
   [@kind
     k
@@ -50,13 +53,13 @@ module type%template
       , value & (value & value) & value & (value & value) & value
       , (value & value) & value & value
       , value & value & value
-      , value & value & value & (value & value) & value
       , bits64
       , bits64 & bits64
       , bits64 & bits64 & bits64
       , bits64 & bits64 & immediate & immediate & bits64
       , bits64 & bits64 & value & value & bits64
       , (value & value & bits64) & bits64 & bits64 )] S = sig
+  (* @ocamlformat-enable *)
   module Elt : Elt [@kind k]
 
   type t
@@ -166,6 +169,7 @@ module type S_value = sig
 end
 
 module type Vec = sig
+  (* @ocamlformat-disable *)
   module type%template
     [@kind
       k
@@ -176,7 +180,6 @@ module type Vec = sig
         , bits64 & bits64
         , immediate & value & value
         , value & value & value
-        , value & value & value & (value & value) & value
         , value & (value & value) & value & (value & value) & value
         , bits64 & bits64 & bits64
         , bits64 & bits64 & immediate & immediate & bits64
@@ -189,19 +192,19 @@ module type Vec = sig
       = ( value
         , float64
         , value & value
+        , value & (value & value) & value & (value & value) & value
         , (value & value) & value & value
         , bits64
         , bits64 & bits64
         , value & value & value
-        , value & value & value & (value & value) & value
         , immediate & value & value
         , bits64 & bits64 & bits64
         , bits64 & bits64 & immediate & immediate & bits64
-        , value & (value & value) & value & (value & value) & value
         , bits64 & bits64 & value & value & bits64
         , (value & value & bits64) & bits64 & bits64 )] Make
       (Arg : Elt
     [@kind k]) : S [@kind k] with module Elt = Arg
+  (* @ocamlformat-enable *)
 
   module Value : S_value
 end

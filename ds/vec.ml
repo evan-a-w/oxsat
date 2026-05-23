@@ -2,6 +2,7 @@ open! Core
 open! Unboxed
 open Vec_intf
 
+(* @ocamlformat-disable *)
 module type%template
   [@kind
     k
@@ -10,7 +11,6 @@ module type%template
       , value & value
       , (value & value) & value & value
       , value & value & value
-      , value & value & value & (value & value) & value
       , value & (value & value) & value & (value & value) & value
       , bits64
       , bits64 & bits64
@@ -19,7 +19,9 @@ module type%template
       , bits64 & bits64 & immediate & immediate & bits64
       , bits64 & bits64 & value & value & bits64
       , (value & value & bits64) & bits64 & bits64 )] S = S [@kind k]
+(* @ocamlformat-enable *)
 
+(* @ocamlformat-disable *)
 module%template
   [@kind
     k
@@ -31,14 +33,14 @@ module%template
       , immediate & value & value
       , bits64 & bits64
       , value & value & value
-      , value & value & value & (value & value) & value
-      , bits64 & bits64 & bits64
       , value & (value & value) & value & (value & value) & value
+      , bits64 & bits64 & bits64
       , bits64 & bits64 & immediate & immediate & bits64
       , bits64 & bits64 & value & value & bits64
       , (value & value & bits64) & bits64 & bits64 )] Make
     (Arg : Elt
   [@kind k]) : S [@kind k] with module Elt = Arg = struct
+  (* @ocamlformat-enable *)
   module Elt = Arg
 
   type t =

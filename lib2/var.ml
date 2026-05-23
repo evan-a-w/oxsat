@@ -15,7 +15,9 @@ let create_for_vec () =
    }
 ;;
 
+(* @ocamlformat-disable *)
 include
   functor
   Vecable.Make
   [@kind value & (value & value) & value & (value & value) & value]
+(* @ocamlformat-enable *)
