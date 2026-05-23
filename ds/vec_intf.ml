@@ -6,13 +6,14 @@ module type%template
     k
     = ( value
       , bits64
+      , (value & value) & value & value
       , float64
       , immediate & value & value
       , bits64 & bits64
       , bits64 & bits64 & bits64
       , bits64 & bits64 & immediate & immediate & bits64
       , bits64 & bits64 & value & value & bits64
-      , (value & value) & value & value
+      , value & value & value
       , (value & value & bits64) & bits64 & bits64 )] Elt = sig
   type t : k mod external_
 
@@ -21,12 +22,6 @@ end
 
 module type%template [@kind k = (value & value)] Elt = sig
   type t : k
-
-  val create_for_vec : unit -> t
-end
-
-module type%template [@kind k = (value & value & value)] Elt = sig
-  type t : value & (value & value)
 
   val create_for_vec : unit -> t
 end
@@ -50,18 +45,19 @@ module type%template
       , immediate & value & value
       , value & value
       , value & (value & value) & value & (value & value) & value
-      , (value & value) & value & value
       , value & value & value
       , bits64
       , bits64 & bits64
       , bits64 & bits64 & bits64
       , bits64 & bits64 & immediate & immediate & bits64
       , bits64 & bits64 & value & value & bits64
+      , (value & value) & value & value
       , (value & value & bits64) & bits64 & bits64 )] S = sig
   module Elt : Elt [@kind k]
 
   type t
 
+  val arr : t -> Elt.t array
   val create : ?capacity:local_ int -> unit -> t
   val length : t -> int
   val get : t -> int -> Elt.t
@@ -175,6 +171,7 @@ module type Vec = sig
         , value & value
         , bits64
         , bits64 & bits64
+        , (value & value) & value & value
         , immediate & value & value
         , value & value & value
         , value & (value & value) & value & (value & value) & value

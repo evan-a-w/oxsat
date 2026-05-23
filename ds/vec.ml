@@ -24,7 +24,6 @@ module%template
     k
     = ( value
       , value & value
-      , (value & value) & value & value
       , bits64
       , float64
       , immediate & value & value
@@ -34,6 +33,7 @@ module%template
       , bits64 & bits64 & bits64
       , bits64 & bits64 & immediate & immediate & bits64
       , bits64 & bits64 & value & value & bits64
+      , (value & value) & value & value
       , (value & value & bits64) & bits64 & bits64 )] Make
     (Arg : Elt
   [@kind k]) : S [@kind k] with module Elt = Arg = struct
@@ -53,6 +53,7 @@ module%template
     t.length <- 0
   ;;
 
+  let arr t = t.arr
   let singleton x = { arr = [| x |]; length = 1 }
   let length t = t.length
 

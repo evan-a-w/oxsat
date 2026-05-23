@@ -19,6 +19,7 @@ module type%template
       , (bits64 & float64) & bits64 & bits64
       , value & bits64 & float64
       , bits64 & bits64 & float64
+      , (value & value) & value & value
       , (value & value) & value )] S = S [@kind k]
 
 module%template
@@ -27,6 +28,7 @@ module%template
     = ( value
       , value & value
       , bits64
+      , (value & value) & value & value
       , bits64 & bits64
       , value & bits64
       , bits64 & value
@@ -87,6 +89,7 @@ module%template
     = ( value
       , value & value
       , bits64
+      , (value & value) & value & value
       , bits64 & bits64
       , value & bits64
       , bits64 & value

@@ -17,6 +17,7 @@ module type%template
       , (bits64 & float64) & bits64
       , (bits64 & float64) & bits64 & bits64
       , value & bits64 & float64
+      , (value & value) & value & value
       , (value & value) & value
       , bits64 & bits64 & float64 )] Elt = sig
   type t : k
@@ -29,6 +30,7 @@ module type%template
     k
     = ( value
       , value & value
+      , (value & value) & value & value
       , bits64
       , bits64 & bits64
       , value & bits64
@@ -83,6 +85,7 @@ module type Option_u = sig
         , (bits64 & float64) & bits64 & bits64
         , value & bits64 & float64
         , bits64 & bits64 & float64
+        , (value & value) & value & value
         , (value & value) & value )] S = S [@kind k]
 
   module%template
@@ -92,6 +95,7 @@ module type Option_u = sig
         , value & value
         , bits64
         , bits64 & bits64
+        , (value & value) & value & value
         , value & bits64
         , bits64 & value
         , value & bits64 & bits64
@@ -122,6 +126,7 @@ module type Option_u = sig
         , (bits64 & float64) & bits64
         , (bits64 & float64) & bits64 & bits64
         , value & bits64 & float64
+        , (value & value) & value & value
         , (value & value) & value
         , bits64 & bits64 & float64 )] Make'
       (Arg : Elt

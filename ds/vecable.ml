@@ -6,9 +6,9 @@ module%template
     = ( value
       , value & value
       , value & (value & value) & value & (value & value) & value
-      , (value & value) & value & value
       , bits64
       , float64
+      , (value & value) & value & value
       , immediate & value & value
       , bits64 & bits64
       , value & value & value
