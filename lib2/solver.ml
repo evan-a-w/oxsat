@@ -44,15 +44,15 @@ let replace_watched_literal_for_non_binary_clause
   let other_var = literal_var t ~literal:other_literal in
   if is_satisfied t ~literal:other_literal
   then (* already satisfied, do nothing *)
-    `Already_satisfied
+    `Not_replaced_not_conflict
   else if not (Or_null.is_null other_var.assignment)
   then
     (* other watched literal is already assigned, so there can't be a replacement, so this is a conflict *)
-    `No_replacement
+    `Not_replaced_conflict
   else (
     let rec go i = exclave_
       if i >= Vec.Value.length clause.clause
-      then `No_candidate_replacement
+      then `No_replacement_found
       else (
         let literal = Vec.Value.get clause.clause i in
         let var = literal_var t ~literal in
@@ -66,11 +66,11 @@ let replace_watched_literal_for_non_binary_clause
             `Replacement (~var:{ global = var }, ~literal, ~i)))
     in
     match go 2 with
-    | `Already_satisfied -> `Already_satisfied
-    | `No_candidate_replacement ->
+    | `Already_satisfied -> `Not_replaced_not_conflict
+    | `No_replacement_found ->
       (* other watched literal is a unit *)
       push_unit_trail_entry t ~literal:other_literal ~clause_idx;
-      `Found_unit
+      `Not_replaced_not_conflict
     | `Replacement (~var:{ global = var }, ~literal, ~i) ->
       Vec.Value.set clause.clause i nullified_literal;
       Vec.Value.set clause.clause 1 literal;
@@ -88,10 +88,14 @@ let update_watches_after_assignment t ~(var : Var.t) ~literal =
   let assignment = Or_null.get var.assignment in
   (* other assignment invalidated *)
   let watched_clauses = Tf_pair.get var.watched_clauses (not assignment) in
+  let found_conflict = stack_ (ref false) in
   Watched_clause.Vec.filter_inplace
     watched_clauses
     ~f:(fun #{ clause_idx; blocking_literal; is_binary } ->
-      if is_satisfied t ~literal:blocking_literal
+      if !found_conflict
+      then (* just do nothing if already conflict *)
+        true
+      else if is_satisfied t ~literal:blocking_literal
       then true (* already satisfied, do nothing *)
       else if is_binary
       then (
@@ -99,7 +103,6 @@ let update_watches_after_assignment t ~(var : Var.t) ~literal =
         push_unit_trail_entry t ~literal:blocking_literal ~clause_idx;
         true)
       else (
-        (* TODO can have conflict here if no replacement and not unit/satisfied *)
         match
           replace_watched_literal_for_non_binary_clause
             t
@@ -107,8 +110,13 @@ let update_watches_after_assignment t ~(var : Var.t) ~literal =
             ~nullified_literal:literal
         with
         | `Replaced -> false
-        | `Not_replaced -> true))
-  [@nontail]
+        | `Not_replaced_not_conflict -> true
+        | `Not_replaced_conflict ->
+          found_conflict := true;
+          true));
+  match !found_conflict with
+  | true -> `Conflict
+  | false -> `No_conflict
 ;;
 
 let rec propagate t : int or_null =
@@ -119,32 +127,43 @@ let rec propagate t : int or_null =
     t.trail_processed_till <- t.trail_processed_till + 1;
     let value = trail_entry.#literal > 0 in
     let var = Vec.Value.get t.vars (Int.abs trail_entry.#literal) in
+    let local_ report_conflict () : int or_null =
+      match trail_entry.#reason with
+      | T #(Decision, ()) ->
+        failwith "propagate: BUG conflicting assignment from decision"
+      | T #(Clause_idx, clause_idx) -> This clause_idx
+    in
     (match var.assignment with
      | This value' when Bool.equal value value' -> propagate t
-     | This _ ->
-       (match trail_entry.#reason with
-        | T #(Decision, ()) ->
-          failwith "propagate: BUG conflicting assignment from decision"
-        | T #(Clause_idx, clause_idx) -> This clause_idx)
+     | This _ -> report_conflict () [@nontail]
      | Null ->
-       var.assignment <- This value;
-       var.trail_entry <- Trail_entry.Option_u.some trail_entry;
-       (match trail_entry.#reason with
-        | T #(Decision, ()) -> ()
-        | T #(Clause_idx, clause_idx) ->
-          (Vec.Value.get t.clauses clause_idx).has_unit <- true);
-       t.stats <- #{ t.stats with propagations = t.stats.#propagations + 1 };
-       update_watches_after_assignment t ~var ~literal:trail_entry.#literal;
-       propagate t)
+       (match
+          update_watches_after_assignment t ~var ~literal:trail_entry.#literal
+        with
+        | `Conflict -> report_conflict () [@nontail]
+        | `No_conflict ->
+          var.assignment <- This value;
+          var.trail_entry <- Trail_entry.Option_u.some trail_entry;
+          (match trail_entry.#reason with
+           | T #(Decision, ()) -> ()
+           | T #(Clause_idx, clause_idx) ->
+             (Vec.Value.get t.clauses clause_idx).has_unit <- true);
+          t.stats <- #{ t.stats with propagations = t.stats.#propagations + 1 };
+          propagate t))
 ;;
 
-let register_watcher t ~literal ~clause_idx =
+let register_watcher t ~literal ~clause_idx ~blocking_literal =
+  let var = literal_var t ~literal in
   Watched_clause.Vec.push
     (Tf_pair.get var.watched_clauses (literal > 0))
-    (Watched_clause.create
-       ~clause_idx
-       ~blocking_literal:other_literal
-       ~is_binary:false)
+    (Watched_clause.create ~clause_idx ~blocking_literal ~is_binary:false)
+;;
+
+let register_watchers_for_trinary_clause t ~literals ~clause_idx =
+  let lit1 = Vec.Value.get literals 0 in
+  let lit2 = Vec.Value.get literals 1 in
+  register_watcher t ~literal:lit1 ~clause_idx ~blocking_literal:lit2;
+  register_watcher t ~literal:lit2 ~clause_idx ~blocking_literal:lit1
 ;;
 
 let add_clause t ~literals =
@@ -162,18 +181,18 @@ let add_clause t ~literals =
       if !satisfied
       then ()
       else (
-        match var.assignment with
-        | This _ -> ()
-        | Null ->
-          if !num_unassigned < 2 then Vec.Value.swap literals !num_unassigned i;
-          incr num_unassigned))
+        (match var.assignment with
+         | This _ -> ()
+         | Null ->
+           if !num_unassigned < 2 then Vec.Value.swap literals !num_unassigned i;
+           incr num_unassigned);
+        go (i + 1)))
   in
   go 0;
   let clause : Clause.t = { clause = literals; has_unit = false } in
-  let clause_idx = Vec.Value.legnth t.clauses in
+  let clause_idx = Vec.Value.length t.clauses in
   Vec.Value.push t.clauses clause;
-  if len >= 2
-  then register_watcher t ~literal:(Vec.Value.get literals 0) ~clause_idx;
+  if len >= 2 then register_watchers_for_trinary_clause t ~literals ~clause_idx;
   if !satisfied
   then `Satisfied
   else if !num_unassigned = 1
