@@ -76,8 +76,19 @@ module%template
     t.arr.(t.length)
   ;;
 
-  let get t i : Elt.t = t.arr.(i)
-  let set t i v = t.arr.(i) <- v
+  let get t i : Elt.t =
+    try t.arr.(i) with
+    | _ ->
+      let _ =
+        raise (Invalid_argument [%string "Index %{i#Int} out of bounds"])
+      in
+      t.arr.(i)
+  ;;
+
+  let set t i v =
+    try t.arr.(i) <- v with
+    | _ -> raise (Invalid_argument [%string "Index %{i#Int} out of bounds"])
+  ;;
 
   let iter t ~f =
     for i = 0 to t.length - 1 do
@@ -238,17 +249,17 @@ module Value = struct
   ;;
 
   let get t i =
-    if i < 0 || i >= t.length
-    then raise (Invalid_argument [%string "Index %{i#Int} out of bounds"])
-    else t.arr.(i)
+    try t.arr.(i) with
+    | _ ->
+      raise (Invalid_argument [%string "get: Index %{i#Int} out of bounds"])
   ;;
 
   let get_opt t i = if i < 0 || i >= t.length then None else Some t.arr.(i)
 
   let set t i v =
-    if i < 0 || i >= t.length
-    then raise (Invalid_argument "Index out of bounds")
-    else t.arr.(i) <- v
+    try t.arr.(i) <- v with
+    | _ ->
+      raise (Invalid_argument [%string "set: Index %{i#Int} out of bounds"])
   ;;
 
   let iter t ~f =

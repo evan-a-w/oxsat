@@ -53,11 +53,11 @@ let insert t ~literal =
   let loc_vec = Tf_pair.get t.location_by_literal (literal > 0) in
   Vec.Value.fill_to_length
     loc_vec
-    ~length:(Int.abs literal)
+    ~length:(Int.abs literal + 1)
     ~f:(fun (_ : int) -> -1);
   Vec.Value.set loc_vec (Int.abs literal) (Vec.Value.length t.present - 1);
   let random_pos =
-    Random.State.int t.random_state literal mod Vec.Value.length t.present
+    Random.State.int t.random_state (Vec.Value.length t.present)
   in
   swap t (Vec.Value.length t.present - 1) random_pos
 ;;

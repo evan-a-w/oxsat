@@ -91,10 +91,9 @@ let replace_watched_literal_for_non_binary_clause
       `Replaced)
 ;;
 
-let update_watches_after_assignment t ~(var : Var.t) ~literal =
-  let assignment = Or_null.get var.assignment in
+let update_watches_for_assignment t ~(var : Var.t) ~literal =
   (* other assignment invalidated *)
-  let watched_clauses = Tf_pair.get var.watched_clauses (not assignment) in
+  let watched_clauses = Tf_pair.get var.watched_clauses (not (literal > 0)) in
   let found_conflict = stack_ (ref false) in
   Watched_clause.Vec.filter_inplace
     watched_clauses
@@ -141,7 +140,7 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
 
 let rec remove_greater_than_decision_level t ~decision_level =
   let rec undo_while_unprocessed () =
-    if Trail_entry.Vec.length t.trail >= t.trail_processed_till
+    if t.trail_processed_till >= Trail_entry.Vec.length t.trail
     then ()
     else (
       ignore (Trail_entry.Vec.pop_exn t.trail : Trail_entry.t);
@@ -164,9 +163,9 @@ let rec remove_greater_than_decision_level t ~decision_level =
 ;;
 
 let rec propagate t : int or_null =
-  match t.trail_processed_till >= Trail_entry.Vec.length t.trail with
-  | true -> Null
-  | false ->
+  match t.trail_processed_till < Trail_entry.Vec.length t.trail with
+  | false -> Null
+  | true ->
     let trail_entry = Trail_entry.Vec.get t.trail t.trail_processed_till in
     t.trail_processed_till <- t.trail_processed_till + 1;
     let value = trail_entry.#literal > 0 in
@@ -182,7 +181,7 @@ let rec propagate t : int or_null =
      | This _ -> report_conflict () [@nontail]
      | Null ->
        (match
-          update_watches_after_assignment t ~var ~literal:trail_entry.#literal
+          update_watches_for_assignment t ~var ~literal:trail_entry.#literal
         with
         | `Conflict -> report_conflict () [@nontail]
         | `No_conflict ->
@@ -214,6 +213,23 @@ let register_watchers_for_trinary_clause t ~literals ~clause_idx =
   register_watcher t ~literal:lit2 ~clause_idx ~blocking_literal:lit1
 ;;
 
+let ensure_literal t ~literal =
+  while Vec.Value.length t.vars <= Int.abs literal do
+    Vec.Value.push
+      t.vars
+      { assignment = Null
+      ; trail_entry = Trail_entry.Option_u.none ()
+      ; watched_clauses = Tf_pair.create (fun _ -> Watched_clause.Vec.create ())
+      ; exists = false
+      }
+  done;
+  let var = literal_var t ~literal in
+  if not var.exists
+  then (
+    Literal_set.insert t.unassigned_literals ~literal;
+    Literal_set.insert t.unassigned_literals ~literal:(-literal))
+;;
+
 let add_clause t ~literals ~learned =
   let len = Vec.Value.length literals in
   if len = 0 then t.has_empty_clause <- true;
@@ -224,6 +240,7 @@ let add_clause t ~literals ~learned =
     then ()
     else (
       let literal = Vec.Value.get literals i in
+      ensure_literal t ~literal;
       let var = literal_var t ~literal in
       satisfied := is_satisfied t ~literal;
       if !satisfied
@@ -473,7 +490,7 @@ and learn_from_failure t ~failed_clause_idx : Sat_result.t @ m =
 let restart t = exclave_
   t.stats <- #{ t.stats with conflicts = 0 };
   t.decision_level <- 0;
-  while Trail_entry.Vec.length t.trail > t.trail_processed_till do
+  while t.trail_processed_till < Trail_entry.Vec.length t.trail do
     ignore (Trail_entry.Vec.pop_exn t.trail : Trail_entry.t)
   done;
   while
