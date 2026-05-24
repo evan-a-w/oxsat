@@ -4,4 +4,5 @@ open! Import
 type t =
   { clause : int Vec.Value.t
   ; mutable has_unit : bool
+  ; mutable learned : bool
   }

@@ -17,17 +17,22 @@ module Solver = struct
 
   let create = Feel2.Solver.create
   let create_with_formula = Feel2.Solver.create_with_formula
-  let add_clause = Feel2.Solver.add_clause
-  let add_clause' = Feel2.Solver.add_clause'
+
+  let add_clause' t ~clause =
+    Feel2.Solver.add_clause t ~clause;
+    t
+  ;;
+
+  let add_clause t ~clause = Feel2.Solver.add_clause t ~clause
   let stats = Feel2.Solver.stats
 
   let assignment_clause assignments =
     let literals = ref [] in
     for var = 1 to Array.length assignments - 1 do
       match assignments.(var) with
-      | Null -> ()
-      | This true -> literals := var :: !literals
-      | This false -> literals := -var :: !literals
+      | None -> ()
+      | Some true -> literals := var :: !literals
+      | Some false -> literals := -var :: !literals
     done;
     Clause.of_int_array (Array.of_list_rev !literals)
   ;;
