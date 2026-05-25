@@ -23,13 +23,10 @@ include struct
     include I64
 
     module Option = struct
-      module Base = Option
-      include Base
-
-      let none () = Base.none
+      include Option
 
       module%template Vec = Vec.Make [@kind bits64] (struct
-          include Base
+          include Option
 
           let create_for_vec () = none
         end)
@@ -46,13 +43,10 @@ include struct
     include F64
 
     module Option = struct
-      module Base = Option
-      include Base
-
-      let none () = Base.none
+      include Option
 
       module%template Vec = Vec.Make [@kind float64] (struct
-          include Base
+          include Option
 
           let create_for_vec () = none
         end)

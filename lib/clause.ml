@@ -158,10 +158,10 @@ let unit_literal t ~assignments =
     incr i
   done;
   if !satisfied || !many_unset
-  then Literal.Option.none ()
+  then Literal.Option.none
   else (
     match !candidate with
-    | None -> Literal.Option.none ()
+    | None -> Literal.Option.none
     | Some literal -> Literal.Option.some (Literal.of_int literal))
 ;;
 

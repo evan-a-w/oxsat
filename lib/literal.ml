@@ -12,8 +12,4 @@ let to_int t = I64.to_int_trunc t
 let of_int i = I64.of_int i
 let negate t = I64.neg t
 
-module Option = struct
-  include I64.Option
-
-  let none () = I64.Option.none
-end
+module Option = I64.Option

@@ -182,7 +182,7 @@ let add_to_pool t ~literal =
 let choose_literal t =
   let rec go () =
     match Heap.peek_var t.heap with
-    | None -> Literal.Option.none ()
+    | None -> Literal.Option.none
     | Some var ->
       Heap.remove_at t.heap 0;
       Bitset.clear t.in_heap var;
