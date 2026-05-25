@@ -3,7 +3,7 @@ open! Unboxed
 
 type t = I64.t [@@deriving sexp]
 
-let null () = I64.max_value ()
+let null () = I64.max_value
 let is_null t = I64.equal t (null ())
 let of_int = I64.of_int
 let to_int = I64.to_int_trunc
@@ -27,4 +27,8 @@ module Private = struct
   ;;
 end
 
-module Option = I64.Option
+module Option = struct
+  include I64.Option
+
+  let none () = I64.Option.none
+end
