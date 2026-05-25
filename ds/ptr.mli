@@ -13,7 +13,7 @@ module Option : sig
   type value = t
   type t : bits64 mod everything
 
-  val none : unit -> t [@@zero_alloc]
+  val none : t
   val some : value -> t [@@zero_alloc]
   val unchecked_some : value -> t [@@zero_alloc]
   val some_is_representable : value -> bool [@@zero_alloc]

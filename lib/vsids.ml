@@ -109,7 +109,7 @@ let on_new_var t ~var =
     F64.Option.Vec.fill_to_length
       score_by_var
       ~length:(var + 1)
-      ~f:(fun (_ : int) -> F64.Option.none ());
+      ~f:(fun (_ : int) -> F64.Option.none);
     match%optional_u (F64.Option.Vec.get score_by_var var : F64.Option.t) with
     | Some _ -> ()
     | None ->
@@ -184,7 +184,7 @@ let add_to_pool t ~var =
 let choose_literal t =
   let rec go () =
     match Heap.peek_literal t.heap with
-    | None -> Literal.Option.none ()
+    | None -> Literal.Option.none
     | Some literal_int ->
       let score = Heap.peek_score t.heap in
       let literal = Literal.of_int literal_int in

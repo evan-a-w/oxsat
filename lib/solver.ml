@@ -16,9 +16,11 @@ module Reason : sig
   type t : (value & value & bits64) mod external_ = private
     | T : #(('a, 'b) tag * 'a * 'b) -> t
   [@@unboxed]
-  (* Safe as long as noone puts non external_ values in the slot used for [Clause_idx].
+  (* Safe as long as noone puts non external_ values in the slot used for
+     [Clause_idx].
 
-     This is enforced in the interface, because [t] can't be constructed outside of the given constructors.
+     This is enforced in the interface, because [t] can't be constructed outside
+     of the given constructors.
   *)
   [@@unsafe_allow_any_mode_crossing]
 
@@ -244,7 +246,8 @@ let decay_clause_activities t =
 let simplify_learned_clause ~clause ~uip_literal t =
   (* just don't add redundant literals
 
-     redundant if the learned clause is implied by the literals we've already seen *)
+     redundant if the learned clause is implied by the literals we've already
+     seen *)
   let backjump_level = ref 0 in
   let learned_clause = Vec.Value.of_array_taking_ownership [| uip_literal |] in
   let rec go i =
@@ -408,7 +411,7 @@ let on_new_var
   Vsids.on_new_var vsids ~var;
   I64.Option.Vec.fill_to_length
     trail_entry_idx_by_var
-    ~f:(fun (_ : int) -> I64.Option.none ())
+    ~f:(fun (_ : int) -> I64.Option.none)
     ~length:(var + 1);
   let fill tf with_ = exclave_
     Tf_pair.iter
@@ -784,7 +787,7 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
   I64.Option.Vec.set
     t.trail_entry_idx_by_var
     (Literal.var trail_entry.#literal)
-    (I64.Option.none ())
+    I64.Option.none
 ;;
 
 let rec remove_greater_than_decision_level t ~decision_level =
@@ -851,7 +854,9 @@ let backtrack t ~failed_clause =
   Clause.iter_literals learned_clause ~f:(fun literal ->
     Vsids.add_activity t.vsids ~literal);
   Vsids.decay t.vsids;
-  (* This is correct because we backtrack to the previous decision level, where all unit clauses had been applied. Learned clause is set to unit after adding here. *)
+  (* This is correct because we backtrack to the previous decision level, where
+     all unit clauses had been applied. Learned clause is set to unit after
+     adding here. *)
   clear_pending_units t;
   remove_greater_than_decision_level t ~decision_level:backjump_level;
   Clause.set_learnt learned_clause true;

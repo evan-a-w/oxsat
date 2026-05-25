@@ -27,8 +27,4 @@ module Private = struct
   ;;
 end
 
-module Option = struct
-  include I64.Option
-
-  let none () = I64.Option.none
-end
+module Option = I64.Option
