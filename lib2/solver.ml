@@ -14,10 +14,21 @@ type t =
   ; mutable stats : Stats.t
   ; analyze_conflict_stamp_set : Stamp_set.t
   ; analyze_conflict_scratch_literals : int Vec.Value.t
+  ; timeout : Time_ns.Span.t
+  ; mutable timeout_deadline : Time_ns.t
+  ; mutable timeout_check_counter : int
   ; debug : bool
   }
 
+let timeout_check_frequency = 1024
 let stats t = t.stats
+
+let check_timeout t =
+  t.timeout_check_counter <- t.timeout_check_counter + 1;
+  if t.timeout_check_counter % timeout_check_frequency = 0
+     && Time_ns.compare (Time_ns.now ()) t.timeout_deadline > 0
+  then failwith "solver timeout"
+;;
 
 let push_unit_trail_entry t ~literal ~clause_idx =
   Trail_entry.Vec.push
@@ -52,79 +63,151 @@ let replace_watched_literal_for_non_binary_clause
   if is_satisfied t ~literal:other_literal
   then (* already satisfied, do nothing *)
     `Not_replaced_not_conflict
-  else if not (Or_null.is_null other_var.assignment)
-  then
-    (* other watched literal is already assigned, so there can't be a
-       replacement, so this is a conflict *)
-    `Not_replaced_conflict
   else (
-    let rec go i = exclave_
-      if i >= Vec.Value.length clause.clause
-      then `No_replacement_found
-      else (
-        let literal = Vec.Value.get clause.clause i in
-        let var = literal_var t ~literal in
-        if is_satisfied t ~literal
-        then `Already_satisfied
-        else (
-          match var.assignment with
-          | This _ -> go (i + 1)
-          | Null ->
-            (* found a replacement *)
-            `Replacement (~var:{ global = var }, ~literal, ~i)))
+    let unassigned_count = ref 0 in
+    let first_unassigned_literal = ref 0 in
+    let first_unassigned_idx = ref (-1) in
+    let first_unassigned_var = ref other_var in
+    let record_unassigned ~literal ~i ~var =
+      incr unassigned_count;
+      if !first_unassigned_idx < 0
+      then (
+        first_unassigned_literal := literal;
+        first_unassigned_idx := i;
+        first_unassigned_var := var)
     in
-    match go 2 with
-    | `Already_satisfied -> `Not_replaced_not_conflict
-    | `No_replacement_found ->
-      (* other watched literal is a unit *)
-      push_unit_trail_entry t ~literal:other_literal ~clause_idx;
-      `Not_replaced_not_conflict
-    | `Replacement (~var:{ global = var }, ~literal, ~i) ->
-      Vec.Value.set clause.clause i nullified_literal;
-      Vec.Value.set clause.clause 1 literal;
-      (* guaranteed non binary *)
+    if Or_null.is_null other_var.assignment
+    then record_unassigned ~literal:other_literal ~i:0 ~var:other_var;
+    let satisfied = ref false in
+    let satisfied_literal = ref 0 in
+    let satisfied_idx = ref (-1) in
+    let satisfied_var = ref other_var in
+    let i = ref 2 in
+    while !i < Vec.Value.length clause.clause && not !satisfied do
+      let literal = Vec.Value.get clause.clause !i in
+      let var = literal_var t ~literal in
+      if is_satisfied t ~literal
+      then (
+        satisfied := true;
+        satisfied_literal := literal;
+        satisfied_idx := !i;
+        satisfied_var := var)
+      else (
+        match var.assignment with
+        | This _ -> ()
+        | Null -> record_unassigned ~literal ~i:!i ~var);
+      incr i
+    done;
+    if !satisfied
+    then (
+      Vec.Value.set clause.clause !satisfied_idx nullified_literal;
+      Vec.Value.set clause.clause 1 !satisfied_literal;
       Watched_clause.Vec.push
-        (Tf_pair.get var.watched_clauses (literal > 0))
+        (Tf_pair.get !satisfied_var.watched_clauses (!satisfied_literal > 0))
         (Watched_clause.create
            ~clause_idx
            ~blocking_literal:other_literal
            ~is_binary:false);
       `Replaced)
+    else if !unassigned_count = 0
+    then `Not_replaced_conflict
+    else if !unassigned_count = 1
+    then (
+      if !first_unassigned_idx > 1
+      then (
+        Vec.Value.set clause.clause !first_unassigned_idx nullified_literal;
+        Vec.Value.set clause.clause 1 !first_unassigned_literal;
+        Watched_clause.Vec.push
+          (Tf_pair.get
+             !first_unassigned_var.watched_clauses
+             (!first_unassigned_literal > 0))
+          (Watched_clause.create
+             ~clause_idx
+             ~blocking_literal:other_literal
+             ~is_binary:false));
+      push_unit_trail_entry t ~literal:!first_unassigned_literal ~clause_idx;
+      if !first_unassigned_idx > 1
+      then `Replaced
+      else `Not_replaced_not_conflict)
+    else (
+      if !first_unassigned_idx = 0
+      then (
+        let replacement_idx = ref (-1) in
+        let replacement_literal = ref 0 in
+        let replacement_var = ref other_var in
+        let i = ref 2 in
+        while !replacement_idx < 0 && !i < Vec.Value.length clause.clause do
+          let literal = Vec.Value.get clause.clause !i in
+          let var = literal_var t ~literal in
+          if Or_null.is_null var.assignment
+          then (
+            replacement_idx := !i;
+            replacement_literal := literal;
+            replacement_var := var);
+          incr i
+        done;
+        Vec.Value.set clause.clause !replacement_idx nullified_literal;
+        Vec.Value.set clause.clause 1 !replacement_literal;
+        Watched_clause.Vec.push
+          (Tf_pair.get
+             !replacement_var.watched_clauses
+             (!replacement_literal > 0))
+          (Watched_clause.create
+             ~clause_idx
+             ~blocking_literal:other_literal
+             ~is_binary:false))
+      else (
+        Vec.Value.set clause.clause !first_unassigned_idx nullified_literal;
+        Vec.Value.set clause.clause 1 !first_unassigned_literal;
+        Watched_clause.Vec.push
+          (Tf_pair.get
+             !first_unassigned_var.watched_clauses
+             (!first_unassigned_literal > 0))
+          (Watched_clause.create
+             ~clause_idx
+             ~blocking_literal:other_literal
+             ~is_binary:false));
+      `Replaced))
 ;;
 
 let update_watches_for_assignment t ~(var : Var.t) ~literal =
   (* other assignment invalidated *)
   let watched_clauses = Tf_pair.get var.watched_clauses (not (literal > 0)) in
-  let found_conflict = stack_ (ref false) in
+  let conflict_clause_idx = stack_ (ref Null) in
   Watched_clause.Vec.filter_inplace
     watched_clauses
     ~f:(fun #{ clause_idx; blocking_literal; is_binary } ->
-      if !found_conflict
+      if not (Or_null.is_null !conflict_clause_idx)
       then (* just do nothing if already conflict *)
         true
       else if is_satisfied t ~literal:blocking_literal
       then true (* already satisfied, do nothing *)
       else if is_binary
       then (
-        (* immediately add unit literal, because binary and this literal isn't
-           satisfied *)
-        push_unit_trail_entry t ~literal:blocking_literal ~clause_idx;
-        true)
+        match (literal_var t ~literal:blocking_literal).assignment with
+        | This _ ->
+          conflict_clause_idx := This clause_idx;
+          true
+        | Null ->
+          (* immediately add unit literal, because binary and this literal isn't
+             satisfied *)
+          push_unit_trail_entry t ~literal:blocking_literal ~clause_idx;
+          true)
       else (
         match
           replace_watched_literal_for_non_binary_clause
             t
             ~clause_idx
-            ~nullified_literal:literal
+            ~nullified_literal:(-literal)
         with
         | `Replaced -> false
         | `Not_replaced_not_conflict -> true
         | `Not_replaced_conflict ->
-          found_conflict := true;
+          conflict_clause_idx := This clause_idx;
           true));
-  match !found_conflict with
-  | true -> `Conflict
-  | false -> `No_conflict
+  match !conflict_clause_idx with
+  | This clause_idx -> `Conflict clause_idx
+  | Null -> `No_conflict
 ;;
 
 let undo_entry t ~(trail_entry : Trail_entry.t) =
@@ -168,6 +251,7 @@ let rec propagate t : int or_null =
   match t.trail_processed_till < Trail_entry.Vec.length t.trail with
   | false -> Null
   | true ->
+    check_timeout t;
     let trail_entry = Trail_entry.Vec.get t.trail t.trail_processed_till in
     t.trail_processed_till <- t.trail_processed_till + 1;
     let value = trail_entry.#literal > 0 in
@@ -186,37 +270,35 @@ let rec propagate t : int or_null =
      | This value' when Bool.equal value value' -> propagate t
      | This _ -> report_conflict () [@nontail]
      | Null ->
+       Literal_set.remove t.unassigned_literals ~literal:trail_entry.#literal;
+       Literal_set.remove t.unassigned_literals ~literal:(-trail_entry.#literal);
+       var.assignment <- This value;
+       var.trail_entry <- Trail_entry.Option_u.some trail_entry;
+       (match trail_entry.#reason with
+        | T #(Decision, ()) -> ()
+        | T #(Clause_idx, clause_idx) ->
+          (Vec.Value.get t.clauses clause_idx).has_unit <- true);
+       t.stats <- #{ t.stats with propagations = t.stats.#propagations + 1 };
        (match
           update_watches_for_assignment t ~var ~literal:trail_entry.#literal
         with
-        | `Conflict -> report_conflict () [@nontail]
-        | `No_conflict ->
-          Literal_set.remove t.unassigned_literals ~literal:trail_entry.#literal;
-          Literal_set.remove
-            t.unassigned_literals
-            ~literal:(-trail_entry.#literal);
-          var.assignment <- This value;
-          var.trail_entry <- Trail_entry.Option_u.some trail_entry;
-          (match trail_entry.#reason with
-           | T #(Decision, ()) -> ()
-           | T #(Clause_idx, clause_idx) ->
-             (Vec.Value.get t.clauses clause_idx).has_unit <- true);
-          t.stats <- #{ t.stats with propagations = t.stats.#propagations + 1 };
-          propagate t))
+        | `Conflict clause_idx -> This clause_idx
+        | `No_conflict -> propagate t))
 ;;
 
-let register_watcher t ~literal ~clause_idx ~blocking_literal =
+let register_watcher t ~literal ~clause_idx ~blocking_literal ~is_binary =
   let var = literal_var t ~literal in
   Watched_clause.Vec.push
     (Tf_pair.get var.watched_clauses (literal > 0))
-    (Watched_clause.create ~clause_idx ~blocking_literal ~is_binary:false)
+    (Watched_clause.create ~clause_idx ~blocking_literal ~is_binary)
 ;;
 
-let register_watchers_for_trinary_clause t ~literals ~clause_idx =
+let register_watchers_for_clause t ~literals ~clause_idx =
   let lit1 = Vec.Value.get literals 0 in
   let lit2 = Vec.Value.get literals 1 in
-  register_watcher t ~literal:lit1 ~clause_idx ~blocking_literal:lit2;
-  register_watcher t ~literal:lit2 ~clause_idx ~blocking_literal:lit1
+  let is_binary = Vec.Value.length literals = 2 in
+  register_watcher t ~literal:lit1 ~clause_idx ~blocking_literal:lit2 ~is_binary;
+  register_watcher t ~literal:lit2 ~clause_idx ~blocking_literal:lit1 ~is_binary
 ;;
 
 let ensure_literal t ~literal =
@@ -233,45 +315,65 @@ let ensure_literal t ~literal =
   if not var.exists
   then (
     Literal_set.insert t.unassigned_literals ~literal;
-    Literal_set.insert t.unassigned_literals ~literal:(-literal))
+    Literal_set.insert t.unassigned_literals ~literal:(-literal);
+    var.exists <- true)
+;;
+
+let normalize_clause literals =
+  let by_var = Hashtbl.Poly.create () in
+  let normalized = Vec.Value.create () in
+  let tautological = ref false in
+  Vec.Value.iter literals ~f:(fun literal ->
+    let var = Int.abs literal in
+    match Hashtbl.find by_var var with
+    | Some existing ->
+      if Bool.( <> ) (existing > 0) (literal > 0) then tautological := true
+    | None ->
+      Hashtbl.set by_var ~key:var ~data:literal;
+      Vec.Value.push normalized literal);
+  if !tautological then `Tautological else `Clause normalized
 ;;
 
 let add_clause t ~literals ~learned =
-  let len = Vec.Value.length literals in
-  if len = 0 then t.has_empty_clause <- true;
-  let satisfied = stack_ (ref false) in
-  let num_unassigned = stack_ (ref 0) in
-  let rec go i =
-    if i >= Vec.Value.length literals
-    then ()
-    else (
-      let literal = Vec.Value.get literals i in
-      ensure_literal t ~literal;
-      let var = literal_var t ~literal in
-      satisfied := is_satisfied t ~literal;
-      if !satisfied
+  match normalize_clause literals with
+  | `Tautological -> `Satisfied
+  | `Clause literals ->
+    let len = Vec.Value.length literals in
+    if len = 0 then t.has_empty_clause <- true;
+    let satisfied = stack_ (ref false) in
+    let num_unassigned = stack_ (ref 0) in
+    let rec go i =
+      if i >= Vec.Value.length literals
       then ()
       else (
-        (match var.assignment with
-         | This _ -> ()
-         | Null ->
-           if !num_unassigned < 2 then Vec.Value.swap literals !num_unassigned i;
-           incr num_unassigned);
-        go (i + 1)))
-  in
-  go 0;
-  (* has unit is populated when the trail entry is seen *)
-  let clause : Clause.t = { clause = literals; has_unit = false; learned } in
-  let clause_idx = Vec.Value.length t.clauses in
-  Vec.Value.push t.clauses clause;
-  if len >= 2 then register_watchers_for_trinary_clause t ~literals ~clause_idx;
-  if !satisfied
-  then `Satisfied
-  else if !num_unassigned = 1
-  then (
-    push_unit_trail_entry t ~literal:(Vec.Value.get literals 0) ~clause_idx;
-    `Unit)
-  else `Other
+        let literal = Vec.Value.get literals i in
+        ensure_literal t ~literal;
+        let var = literal_var t ~literal in
+        satisfied := !satisfied || is_satisfied t ~literal;
+        if !satisfied
+        then ()
+        else (
+          (match var.assignment with
+           | This _ -> ()
+           | Null ->
+             if !num_unassigned < 2
+             then Vec.Value.swap literals !num_unassigned i;
+             incr num_unassigned);
+          go (i + 1)))
+    in
+    go 0;
+    (* has unit is populated when the trail entry is seen *)
+    let clause : Clause.t = { clause = literals; has_unit = false; learned } in
+    let clause_idx = Vec.Value.length t.clauses in
+    Vec.Value.push t.clauses clause;
+    if len >= 2 then register_watchers_for_clause t ~literals ~clause_idx;
+    if !satisfied
+    then `Satisfied
+    else if !num_unassigned = 1
+    then (
+      push_unit_trail_entry t ~literal:(Vec.Value.get literals 0) ~clause_idx;
+      `Unit)
+    else `Other
 ;;
 
 let mark_literal t ~seen ~literal ~(local_ path_count) ~learned_literals =
@@ -284,8 +386,9 @@ let mark_literal t ~seen ~literal ~(local_ path_count) ~learned_literals =
     | None -> ()
     | Some trail_entry ->
       let dl = trail_entry.#decision_level in
-      (* if dl = 0 then () else *)
-      if dl = t.decision_level
+      if dl = 0
+      then ()
+      else if dl = t.decision_level
       then incr path_count
       else Vec.Value.push learned_literals literal)
 ;;
@@ -395,18 +498,26 @@ let backtrack t ~failed_clause =
           Vec.Value.length learned_literals + t.stats.#learned_clause_literals
       };
   remove_greater_than_decision_level t ~decision_level:backjump_level;
+  let learned_literals =
+    Vec.Value.of_array_taking_ownership (Vec.Value.to_array learned_literals)
+  in
   ignore
     (add_clause t ~literals:learned_literals ~learned:true
      : [ `Other | `Satisfied | `Unit ])
 ;;
 
 let%template unsat t failed_clause_idx : Sat_result.t @ m =
-  (let failed_clause = Vec.Value.get t.clauses failed_clause_idx in
-   let #(~learned_literals, ~backjump_level:_) =
-     analyze_conflict t ~failed_clause
-   in
-   Vec.Value.map_inplace learned_literals ~f:(fun x -> -x);
-   Unsat { unsat_core = Vec.Value.to_array learned_literals })
+  (if t.decision_level = 0
+   then (
+     let failed_clause = Vec.Value.get t.clauses failed_clause_idx in
+     Unsat { unsat_core = Vec.Value.to_array failed_clause.clause })
+   else (
+     let failed_clause = Vec.Value.get t.clauses failed_clause_idx in
+     let #(~learned_literals, ~backjump_level:_) =
+       analyze_conflict t ~failed_clause
+     in
+     Vec.Value.map_inplace learned_literals ~f:(fun x -> -x);
+     Unsat { unsat_core = Vec.Value.to_array learned_literals }))
   [@exclave_if_stack a]
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
@@ -467,6 +578,7 @@ let%template check_sat_result t ~(sat_result : _ @ m) : _ @ m =
 
 let%template rec solve' t : Sat_result.t @ m =
   (t.stats <- #{ t.stats with iterations = t.stats.#iterations + 1 };
+   check_timeout t;
    match propagate t with
    | This failed_clause_idx -> learn_from_failure t ~failed_clause_idx
    | Null ->
@@ -512,6 +624,7 @@ let add_assumptions ~(local_ assumptions) t = exclave_
     if i = Array.length assumptions
     then Null
     else (
+      check_timeout t;
       t.stats <- #{ t.stats with iterations = t.stats.#iterations + 1 };
       let literal = assumptions.(i) in
       let var = literal_var t ~literal in
@@ -538,6 +651,8 @@ let%template solve ?(local_ assumptions = [||]) t : Sat_result.t @ m =
   t.decision_level_of_last_assumption <- 0;
   let has_run_before = t.stats.#iterations > 0 in
   t.stats <- Stats.empty ();
+  t.timeout_deadline <- Time_ns.add (Time_ns.now ()) t.timeout;
+  t.timeout_check_counter <- 0;
   if has_run_before then restart t;
   if t.has_empty_clause
   then Unsat { unsat_core = [||] }
@@ -548,7 +663,7 @@ let%template solve ?(local_ assumptions = [||]) t : Sat_result.t @ m =
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
-let create ?(debug = false) () =
+let create ?(debug = false) ?(timeout = Time_ns.Span.of_sec 1.) () =
   { trail = Trail_entry.Vec.create ()
   ; trail_processed_till = 0
   ; decision_level = 0
@@ -560,6 +675,9 @@ let create ?(debug = false) () =
   ; stats = Stats.empty ()
   ; analyze_conflict_stamp_set = Stamp_set.create ()
   ; analyze_conflict_scratch_literals = Vec.Value.create ()
+  ; timeout
+  ; timeout_deadline = Time_ns.now ()
+  ; timeout_check_counter = 0
   ; debug
   }
 ;;
@@ -573,8 +691,8 @@ let add_clause t ~clause =
      : [ `Other | `Satisfied | `Unit ])
 ;;
 
-let create_with_formula ?(local_ debug) formula =
-  let t = create ?debug () in
+let create_with_formula ?(local_ debug) ?timeout formula =
+  let t = create ?debug ?timeout () in
   Array.iter formula ~f:(fun clause -> add_clause t ~clause);
   t
 ;;

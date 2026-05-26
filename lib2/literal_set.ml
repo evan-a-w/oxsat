@@ -4,7 +4,8 @@ open! Import
 type t =
   { present : int Vec.Value.t
   ; location_by_literal :
-      (* -1 is none because or null is annoying and cbf to make an optional int thing *)
+      (* -1 is none because or null is annoying and cbf to make an optional int
+         thing *)
       int Vec.Value.t Tf_pair.t
   ; random_state : Random.State.t
   }
@@ -12,18 +13,19 @@ type t =
 let create () =
   { present = Vec.Value.create ()
   ; location_by_literal = Tf_pair.create (fun _ -> Vec.Value.create ())
-  ; random_state = Random.State.default
+  ; random_state = Random.State.make [| 0x5A17 |]
   }
 ;;
 
 let location t ~literal =
-  match
-    Vec.Value.get
-      (Tf_pair.get t.location_by_literal (literal > 0))
-      (Int.abs literal)
-  with
-  | -1 -> Null
-  | i -> This i
+  let locations = Tf_pair.get t.location_by_literal (literal > 0) in
+  let var = Int.abs literal in
+  if Vec.Value.length locations <= var
+  then Null
+  else (
+    match Vec.Value.get locations var with
+    | -1 -> Null
+    | i -> This i)
 ;;
 
 let set_location t ~literal ~location =
@@ -49,17 +51,20 @@ let swap t idx1 idx2 =
 ;;
 
 let insert t ~literal =
-  Vec.Value.push t.present literal;
-  let loc_vec = Tf_pair.get t.location_by_literal (literal > 0) in
-  Vec.Value.fill_to_length
-    loc_vec
-    ~length:(Int.abs literal + 1)
-    ~f:(fun (_ : int) -> -1);
-  Vec.Value.set loc_vec (Int.abs literal) (Vec.Value.length t.present - 1);
-  let random_pos =
-    Random.State.int t.random_state (Vec.Value.length t.present)
-  in
-  swap t (Vec.Value.length t.present - 1) random_pos
+  match location t ~literal with
+  | This _ -> ()
+  | Null ->
+    Vec.Value.push t.present literal;
+    let loc_vec = Tf_pair.get t.location_by_literal (literal > 0) in
+    Vec.Value.fill_to_length
+      loc_vec
+      ~length:(Int.abs literal + 1)
+      ~f:(fun (_ : int) -> -1);
+    Vec.Value.set loc_vec (Int.abs literal) (Vec.Value.length t.present - 1);
+    let random_pos =
+      Random.State.int t.random_state (Vec.Value.length t.present)
+    in
+    swap t (Vec.Value.length t.present - 1) random_pos
 ;;
 
 let remove t ~literal =
@@ -67,11 +72,12 @@ let remove t ~literal =
   | Null -> ()
   | This i ->
     set_location t ~literal ~location:Null;
-    if Vec.Value.length t.present > 1
+    let last_idx = Vec.Value.length t.present - 1 in
+    if i <> last_idx
     then (
       let to_swap = Vec.Value.last_exn t.present in
       set_location t ~literal:to_swap ~location:(This i);
-      Vec.Value.swap t.present i (Vec.Value.length t.present - 1));
+      Vec.Value.swap t.present i last_idx);
     ignore (Vec.Value.pop_exn t.present : int)
 ;;
 
