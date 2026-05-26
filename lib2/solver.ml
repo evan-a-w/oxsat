@@ -54,7 +54,8 @@ let replace_watched_literal_for_non_binary_clause
     `Not_replaced_not_conflict
   else if not (Or_null.is_null other_var.assignment)
   then
-    (* other watched literal is already assigned, so there can't be a replacement, so this is a conflict *)
+    (* other watched literal is already assigned, so there can't be a
+       replacement, so this is a conflict *)
     `Not_replaced_conflict
   else (
     let rec go i = exclave_
@@ -105,7 +106,8 @@ let update_watches_for_assignment t ~(var : Var.t) ~literal =
       then true (* already satisfied, do nothing *)
       else if is_binary
       then (
-        (* immediately add unit literal, because binary and this literal isn't satisfied *)
+        (* immediately add unit literal, because binary and this literal isn't
+           satisfied *)
         push_unit_trail_entry t ~literal:blocking_literal ~clause_idx;
         true)
       else (
@@ -172,9 +174,13 @@ let rec propagate t : int or_null =
     let var = Vec.Value.get t.vars (Int.abs trail_entry.#literal) in
     let local_ report_conflict () : int or_null =
       match trail_entry.#reason with
-      | T #(Decision, ()) ->
-        failwith "propagate: BUG conflicting assignment from decision"
       | T #(Clause_idx, clause_idx) -> This clause_idx
+      | T #(Decision, ()) ->
+        (match var.trail_entry with
+         | T #(None, _) | T #(Some, #{ reason = T #(Decision, ()); _ }) ->
+           failwith "propagate: BUG conflicting assignment from decision"
+         | T #(Some, #{ reason = T #(Clause_idx, clause_idx); _ }) ->
+           This clause_idx)
     in
     (match var.assignment with
      | This value' when Bool.equal value value' -> propagate t
@@ -278,9 +284,7 @@ let mark_literal t ~seen ~literal ~(local_ path_count) ~learned_literals =
     | None -> ()
     | Some trail_entry ->
       let dl = trail_entry.#decision_level in
-      (* if dl = 0
-      then ()
-      else *)
+      (* if dl = 0 then () else *)
       if dl = t.decision_level
       then incr path_count
       else Vec.Value.push learned_literals literal)
@@ -289,7 +293,8 @@ let mark_literal t ~seen ~literal ~(local_ path_count) ~learned_literals =
 let simplify_learned_clause t ~learned_literals ~uip_literal ~seen =
   (* just don't add redundant literals
 
-     redundant if the learned clause is implied by the literals we've already seen *)
+     redundant if the learned clause is implied by the literals we've already
+     seen *)
   let backjump_level = ref 0 in
   let new_learned_literals =
     Vec.Value.of_array_taking_ownership [| uip_literal |]
