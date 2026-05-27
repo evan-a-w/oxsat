@@ -341,7 +341,9 @@ let add_clause t ~literals ~learned =
     let len = Vec.Value.length literals in
     if len = 0 then t.has_empty_clause <- true;
     let satisfied = stack_ (ref false) in
-    let num_unassigned = stack_ (ref 0) in
+    let first_non_false = stack_ (ref (-1)) in
+    let second_non_false = stack_ (ref (-1)) in
+    let first_fallback = stack_ (ref (-1)) in
     let rec go i =
       if i >= Vec.Value.length literals
       then ()
@@ -349,31 +351,62 @@ let add_clause t ~literals ~learned =
         let literal = Vec.Value.get literals i in
         ensure_literal t ~literal;
         let var = literal_var t ~literal in
-        satisfied := !satisfied || is_satisfied t ~literal;
-        if !satisfied
-        then ()
-        else (
-          (match var.assignment with
-           | This _ -> ()
-           | Null ->
-             if !num_unassigned < 2
-             then Vec.Value.swap literals !num_unassigned i;
-             incr num_unassigned);
-          go (i + 1)))
+        (match var.assignment with
+         | This value when Bool.equal value (literal > 0) ->
+           satisfied := true;
+           if !first_non_false < 0
+           then first_non_false := i
+           else if !second_non_false < 0
+           then second_non_false := i
+         | This _ -> if !first_fallback < 0 then first_fallback := i
+         | Null ->
+           if !first_non_false < 0
+           then first_non_false := i
+           else if !second_non_false < 0
+           then second_non_false := i);
+        go (i + 1))
     in
     go 0;
     (* has unit is populated when the trail entry is seen *)
     let clause : Clause.t = { clause = literals; has_unit = false; learned } in
     let clause_idx = Vec.Value.length t.clauses in
     Vec.Value.push t.clauses clause;
-    if len >= 2 then register_watchers_for_clause t ~literals ~clause_idx;
     if !satisfied
-    then `Satisfied
-    else if !num_unassigned = 1
     then (
+      if len >= 2
+      then (
+        let watch0 = if !first_non_false >= 0 then !first_non_false else 0 in
+        let watch1 =
+          if !second_non_false >= 0
+          then !second_non_false
+          else if !first_fallback >= 0 && !first_fallback <> watch0
+          then !first_fallback
+          else if watch0 = 0
+          then 1
+          else 0
+        in
+        if watch0 <> 0 then Vec.Value.swap literals 0 watch0;
+        let watch1 =
+          if watch1 = 0 then watch0 else if watch1 = watch0 then 0 else watch1
+        in
+        if watch1 <> 1 then Vec.Value.swap literals 1 watch1;
+        register_watchers_for_clause t ~literals ~clause_idx);
+      `Satisfied)
+    else if !first_non_false >= 0 && !second_non_false < 0
+    then (
+      if !first_non_false <> 0 then Vec.Value.swap literals 0 !first_non_false;
       push_unit_trail_entry t ~literal:(Vec.Value.get literals 0) ~clause_idx;
       `Unit)
-    else `Other
+    else (
+      if len >= 2 && !first_non_false >= 0 && !second_non_false >= 0
+      then (
+        if !first_non_false <> 0 then Vec.Value.swap literals 0 !first_non_false;
+        let second_non_false =
+          if !second_non_false = 0 then !first_non_false else !second_non_false
+        in
+        if second_non_false <> 1 then Vec.Value.swap literals 1 second_non_false;
+        register_watchers_for_clause t ~literals ~clause_idx);
+      `Other)
 ;;
 
 let mark_literal t ~seen ~literal ~(local_ path_count) ~learned_literals =
@@ -591,16 +624,19 @@ let%template rec solve' t : Sat_result.t @ m =
 [@@alloc a @ m = (stack_local, heap_global)]
 
 and learn_from_failure t ~failed_clause_idx : Sat_result.t @ m =
-  match[@exclave_if_stack a]
-    t.decision_level = 0
-    || t.decision_level < t.decision_level_of_last_assumption
-  with
+  match[@exclave_if_stack a] t.decision_level = 0 with
   | true -> (unsat [@alloc a]) t failed_clause_idx
   | false ->
     let failed_clause = Vec.Value.get t.clauses failed_clause_idx in
-    backtrack t ~failed_clause;
-    t.stats <- #{ t.stats with conflicts = t.stats.#conflicts + 1 };
-    (solve' [@alloc a]) t
+    let #(~learned_literals:_, ~backjump_level) =
+      analyze_conflict t ~failed_clause
+    in
+    if backjump_level < t.decision_level_of_last_assumption
+    then (unsat [@alloc a]) t failed_clause_idx
+    else (
+      backtrack t ~failed_clause;
+      t.stats <- #{ t.stats with conflicts = t.stats.#conflicts + 1 };
+      (solve' [@alloc a]) t)
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
@@ -616,7 +652,8 @@ let restart t = exclave_
        > t.decision_level_of_last_assumption
   do
     undo_entry t ~trail_entry:(Trail_entry.Vec.pop_exn t.trail)
-  done
+  done;
+  t.trail_processed_till <- Trail_entry.Vec.length t.trail
 ;;
 
 let add_assumptions ~(local_ assumptions) t = exclave_
@@ -663,7 +700,7 @@ let%template solve ?(local_ assumptions = [||]) t : Sat_result.t @ m =
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
-let create ?(debug = false) ?(timeout = Time_ns.Span.of_sec 1.) () =
+let create ?(debug = false) ?(timeout = Time_ns.Span.of_sec 10.) () =
   { trail = Trail_entry.Vec.create ()
   ; trail_processed_till = 0
   ; decision_level = 0
