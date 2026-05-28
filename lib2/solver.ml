@@ -18,18 +18,39 @@ type t =
   }
 
 let stats t = t.stats
+let literal_var t ~literal = Vec.Value.get t.vars (Int.abs literal)
 
-let push_unit_trail_entry t ~literal ~clause_idx =
-  Trail_entry.Vec.push
-    t.trail
-    (#{ decision_level = t.decision_level
-      ; literal
-      ; reason = Reason.clause_idx clause_idx
-      }
-     : Trail_entry.t)
+let pop_from_trail_exn t : Trail_entry.t =
+  let trail_entry = Trail_entry.Vec.pop_exn t.trail in
+  let literal = trail_entry.#literal in
+  let var = literal_var t ~literal in
+  Literal_set.insert t.unassigned_literals ~literal:trail_entry.#literal;
+  Literal_set.insert t.unassigned_literals ~literal:(-trail_entry.#literal);
+  var.in_trail <- false;
+  trail_entry
 ;;
 
-let literal_var t ~literal = Vec.Value.get t.vars (Int.abs literal)
+let push_trail_entry t ~(trail_entry : Trail_entry.t) =
+  let literal = trail_entry.#literal in
+  let var = literal_var t ~literal in
+  Literal_set.remove t.unassigned_literals ~literal:trail_entry.#literal;
+  Literal_set.remove t.unassigned_literals ~literal:(-trail_entry.#literal);
+  if not var.in_trail
+  then (
+    var.in_trail <- true;
+    Trail_entry.Vec.push t.trail trail_entry)
+;;
+
+let push_unit_trail_entry t ~literal ~clause_idx =
+  push_trail_entry
+    t
+    ~trail_entry:
+      (#{ decision_level = t.decision_level
+        ; literal
+        ; reason = Reason.clause_idx clause_idx
+        }
+       : Trail_entry.t)
+;;
 
 let is_satisfied t ~literal =
   let var = literal_var t ~literal in
@@ -145,7 +166,7 @@ let rec remove_greater_than_decision_level t ~decision_level =
     if t.trail_processed_till >= Trail_entry.Vec.length t.trail
     then ()
     else (
-      ignore (Trail_entry.Vec.pop_exn t.trail : Trail_entry.t);
+      ignore (pop_from_trail_exn t);
       undo_while_unprocessed ())
   in
   undo_while_unprocessed ();
@@ -159,7 +180,7 @@ let rec remove_greater_than_decision_level t ~decision_level =
     t.decision_level <- remaining_level;
     t.trail_processed_till <- Trail_entry.Vec.length t.trail)
   else (
-    let trail_entry = Trail_entry.Vec.pop_exn t.trail in
+    let trail_entry = pop_from_trail_exn t in
     undo_entry t ~trail_entry;
     remove_greater_than_decision_level t ~decision_level)
 ;;
@@ -191,10 +212,6 @@ let rec propagate t : int or_null =
         with
         | `Conflict -> report_conflict () [@nontail]
         | `No_conflict ->
-          Literal_set.remove t.unassigned_literals ~literal:trail_entry.#literal;
-          Literal_set.remove
-            t.unassigned_literals
-            ~literal:(-trail_entry.#literal);
           var.assignment <- This value;
           var.trail_entry <- Trail_entry.Option_u.some trail_entry;
           (match trail_entry.#reason with
@@ -227,6 +244,7 @@ let ensure_literal t ~literal =
       ; trail_entry = Trail_entry.Option_u.none ()
       ; watched_clauses = Tf_pair.create (fun _ -> Watched_clause.Vec.create ())
       ; exists = false
+      ; in_trail = false
       }
   done;
   let var = literal_var t ~literal in
@@ -419,7 +437,9 @@ let make_decision' ~is_assumption t ~literal =
   let trail_entry : Trail_entry.t =
     #{ reason = Reason.decision (); literal; decision_level = t.decision_level }
   in
-  Trail_entry.Vec.push t.trail trail_entry;
+  let var = literal_var t ~literal in
+  assert (not var.in_trail);
+  push_trail_entry t ~trail_entry;
   propagate t
 ;;
 
