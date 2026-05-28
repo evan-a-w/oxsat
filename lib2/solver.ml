@@ -57,60 +57,58 @@ let is_satisfied t ~literal =
   [%equal: bool or_null] var.assignment (This (literal > 0))
 ;;
 
-let replace_watched_literal_for_non_binary_clause
-  t
-  ~clause_idx
-  ~nullified_literal
-  =
+let replace_watched_literal t ~clause_idx ~nullified_literal =
   let clause = Vec.Value.get t.clauses clause_idx in
-  assert (Vec.Value.length clause.clause > 2);
-  if Vec.Value.get clause.clause 0 = nullified_literal
-  then (
-    Vec.Value.set clause.clause 0 (Vec.Value.get clause.clause 1);
-    Vec.Value.set clause.clause 1 nullified_literal);
-  let other_literal = Vec.Value.get clause.clause 0 in
-  let other_var = literal_var t ~literal:other_literal in
-  if is_satisfied t ~literal:other_literal
-  then (* already satisfied, do nothing *)
-    `Not_replaced_not_conflict
-  else if not (Or_null.is_null other_var.assignment)
-  then
-    (* other watched literal is already assigned, so there can't be a
-       replacement, so this is a conflict *)
-    `Not_replaced_conflict
+  if not (Vec.Value.length clause.clause > 2)
+  then `Clause_too_short
   else (
-    let rec go i = exclave_
-      if i >= Vec.Value.length clause.clause
-      then `No_replacement_found
-      else (
-        let literal = Vec.Value.get clause.clause i in
-        let var = literal_var t ~literal in
-        if is_satisfied t ~literal
-        then `Already_satisfied
-        else (
-          match var.assignment with
-          | This _ -> go (i + 1)
-          | Null ->
-            (* found a replacement *)
-            `Replacement (~var:{ global = var }, ~literal, ~i)))
-    in
-    match go 2 with
-    | `Already_satisfied -> `Not_replaced_not_conflict
-    | `No_replacement_found ->
-      (* other watched literal is a unit *)
-      push_unit_trail_entry t ~literal:other_literal ~clause_idx;
+    if Vec.Value.get clause.clause 0 = nullified_literal
+    then (
+      Vec.Value.set clause.clause 0 (Vec.Value.get clause.clause 1);
+      Vec.Value.set clause.clause 1 nullified_literal);
+    let other_literal = Vec.Value.get clause.clause 0 in
+    let other_var = literal_var t ~literal:other_literal in
+    if is_satisfied t ~literal:other_literal
+    then (* already satisfied, do nothing *)
       `Not_replaced_not_conflict
-    | `Replacement (~var:{ global = var }, ~literal, ~i) ->
-      Vec.Value.set clause.clause i nullified_literal;
-      Vec.Value.set clause.clause 1 literal;
-      (* guaranteed non binary *)
-      Watched_clause.Vec.push
-        (Tf_pair.get var.watched_clauses (literal > 0))
-        (Watched_clause.create
-           ~clause_idx
-           ~blocking_literal:other_literal
-           ~is_binary:false);
-      `Replaced)
+    else if not (Or_null.is_null other_var.assignment)
+    then
+      (* other watched literal is already assigned, so there can't be a
+       replacement, so this is a conflict *)
+      `Not_replaced_conflict
+    else (
+      let rec go i = exclave_
+        if i >= Vec.Value.length clause.clause
+        then `No_replacement_found
+        else (
+          let literal = Vec.Value.get clause.clause i in
+          let var = literal_var t ~literal in
+          if is_satisfied t ~literal
+          then `Already_satisfied
+          else (
+            match var.assignment with
+            | This _ -> go (i + 1)
+            | Null ->
+              (* found a replacement *)
+              `Replacement (~var:{ global = var }, ~literal, ~i)))
+      in
+      match go 2 with
+      | `Already_satisfied -> `Not_replaced_not_conflict
+      | `No_replacement_found ->
+        (* other watched literal is a unit *)
+        push_unit_trail_entry t ~literal:other_literal ~clause_idx;
+        `Not_replaced_not_conflict
+      | `Replacement (~var:{ global = var }, ~literal, ~i) ->
+        Vec.Value.set clause.clause i nullified_literal;
+        Vec.Value.set clause.clause 1 literal;
+        (* guaranteed non binary *)
+        Watched_clause.Vec.push
+          (Tf_pair.get var.watched_clauses (literal > 0))
+          (Watched_clause.create
+             ~clause_idx
+             ~blocking_literal:other_literal
+             ~is_binary:false);
+        `Replaced))
 ;;
 
 let update_watches_for_assignment t ~(var : Var.t) ~literal =
@@ -133,13 +131,10 @@ let update_watches_for_assignment t ~(var : Var.t) ~literal =
         true)
       else (
         match
-          replace_watched_literal_for_non_binary_clause
-            t
-            ~clause_idx
-            ~nullified_literal:literal
+          replace_watched_literal t ~clause_idx ~nullified_literal:literal
         with
         | `Replaced -> false
-        | `Not_replaced_not_conflict -> true
+        | `Not_replaced_not_conflict | `Clause_too_short -> true
         | `Not_replaced_conflict ->
           found_conflict := true;
           true));
