@@ -208,16 +208,19 @@ let%expect_test "remove updates moved literal location" =
 let%expect_test "pop_one returns each literal once and empties the set" =
   let t = create () in
   List.iter [ -10; 1; 4; -3; 8 ] ~f:(fun literal -> insert t ~literal);
+  let popped = drain_sorted t in
+  let remaining = sorted_literals t in
+  let pop_empty =
+    match pop_one t with
+    | Null -> true
+    | This _ -> false
+  in
   print_s
     [%message
       "drained"
-        ~popped:(drain_sorted t : int list)
-        ~remaining:(sorted_literals t : int list)
-        ~pop_empty:
-          ((match pop_one t with
-            | Null -> true
-            | This _ -> false)
-           : bool)
+        (popped : int list)
+        (remaining : int list)
+        (pop_empty : bool)
         ~invariant_holds:(invariant_holds t : bool)];
   [%expect
     {|
