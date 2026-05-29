@@ -74,7 +74,7 @@ let replace_watched_literal t ~clause_idx ~nullified_literal =
     else if not (Or_null.is_null other_var.assignment)
     then
       (* other watched literal is already assigned, so there can't be a
-       replacement, so this is a conflict *)
+         replacement, so this is a conflict *)
       `Not_replaced_conflict
     else (
       let rec go i = exclave_
@@ -246,7 +246,8 @@ let ensure_literal t ~literal =
   if not var.exists
   then (
     Literal_set.insert t.unassigned_literals ~literal;
-    Literal_set.insert t.unassigned_literals ~literal:(-literal))
+    Literal_set.insert t.unassigned_literals ~literal:(-literal);
+    var.exists <- true)
 ;;
 
 let add_clause t ~literals ~learned =
