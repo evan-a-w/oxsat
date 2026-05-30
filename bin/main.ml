@@ -34,11 +34,10 @@ open! Ds
 (*     print_s [%message "UNSAT" (Clause.to_int_array unsat_core : int array)] *)
 (* ;; *)
 
-let () =
-  let formula =
-    [%of_sexp: int array array]
-      (Sexp.of_string
-         {|
+let formula =
+  [%of_sexp: int array array]
+    (Sexp.of_string
+       {|
 ((313 314 315 316 317 318 319 320 321 322 323 324 325) (-313 -314)
      (-313 -315) (-313 -316) (-313 -317) (-313 -318) (-313 -319) (-313 -320)
      (-313 -321) (-313 -322) (-313 -323) (-313 -324) (-313 -325) (-314 -315)
@@ -689,16 +688,22 @@ let () =
      (-161 -317) (-162 -318) (-163 -319) (-164 -320) (-165 -321) (-166 -322)
      (-167 -323) (-168 -324) (-169 -325))
 |})
-  in
-  let assumptions =
-    [%of_sexp: int array]
-      (Sexp.of_string
-         {|
+;;
+
+let _assumptions =
+  [%of_sexp: int array]
+    (Sexp.of_string
+       {|
     (327 -313 -274 -248 -92 -209 -131 -235 -196 -183 -118 -40 -53 -1 -170 -222
      -27 -261 -300 -287 -157 -144 -79 -14 -105 -66)
 |})
-  in
+;;
+
+let () =
   let solver = Solver.create_with_formula ~debug:true formula in
-  let res = Solver.solve ~assumptions solver in
-  print_s [%message (res : Solver.Sat_result.t)]
+  let res = Solver.solve solver in
+  print_s [%message (res : Solver.Sat_result.t)];
+  let solver2 = Feel2.Solver.create_with_formula ~debug:true formula in
+  let res = Feel2.Solver.solve solver2 in
+  print_s [%message (res : Feel2.Sat_result.t)]
 ;;
