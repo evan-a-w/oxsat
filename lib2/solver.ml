@@ -178,19 +178,19 @@ let replace_watched_literal' t ~clause_idx ~nullified_literal = exclave_
 
 let replace_watched_literal t ~clause_idx ~nullified_literal = exclave_
   let res = replace_watched_literal' t ~clause_idx ~nullified_literal in
-  if t.debug
-  then (
-    let clause = Vec.Value.get t.clauses clause_idx in
-    print_s
-      [%message
-        "replaced_watched_literal"
-          (nullified_literal : int)
-          (clause_with_assignments t ~clause : (int * bool or_null) array)
-          (res
-           : [ `Not_replaced_not_conflict
-             | `Not_replaced_conflict of int
-             | `Replaced of int
-             ])]);
+  (* if t.debug *)
+  (* then ( *)
+  (*   let clause = Vec.Value.get t.clauses clause_idx in *)
+  (*   print_s *)
+  (*     [%message *)
+  (*       "replaced_watched_literal" *)
+  (*         (nullified_literal : int) *)
+  (*         (clause_with_assignments t ~clause : (int * bool or_null) array) *)
+  (*         (res *)
+  (*          : [ `Not_replaced_not_conflict *)
+  (*            | `Not_replaced_conflict of int *)
+  (*            | `Replaced of int *)
+  (*            ])]); *)
   res
 ;;
 
