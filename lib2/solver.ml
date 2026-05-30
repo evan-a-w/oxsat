@@ -324,7 +324,7 @@ let add_clause t ~literals ~learned =
       let literal = Vec.Value.get literals i in
       ensure_literal t ~literal;
       let var = literal_var t ~literal in
-      satisfied := is_satisfied t ~literal;
+      satisfied := !satisfied || is_satisfied t ~literal;
       if !satisfied
       then ()
       else (
@@ -516,11 +516,11 @@ let make_decision' ~is_assumption t ~literal =
   if t.debug then print_s [%message "make_decision" (literal : int)];
   if not is_assumption
   then t.stats <- #{ t.stats with decisions = t.stats.#decisions + 1 };
+  t.decision_level <- t.decision_level + 1;
   if is_assumption then t.decision_level_of_last_assumption <- t.decision_level;
   let trail_entry : Trail_entry.t =
     #{ reason = Reason.decision (); literal; decision_level = t.decision_level }
   in
-  t.decision_level <- t.decision_level + 1;
   let var = literal_var t ~literal in
   assert (not var.in_trail);
   push_trail_entry t ~trail_entry;
