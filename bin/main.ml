@@ -1376,21 +1376,30 @@ let formula =
 |})
 ;;
 
+let _assumptions : int array = [||]
+
+let assumptions =
+  [%of_sexp: int array]
+    (Sexp.of_string
+       {|
+    (327 -313 -274 -248 -92 -209 -131 -235 -196 -183 -118 -40 -53 -1 -170 -222
+     -27 -261 -300 -287 -157 -144 -79 -14 -105 -66)
+|})
+;;
+
 let solver1 = false
 
 let () =
   if solver1
   then (
     let solver = Solver.create_with_formula ~debug:true formula in
-    let res = Solver.solve solver in
+    let res = Solver.solve ~assumptions solver in
     print_s [%message (res : Solver.Sat_result.t)])
   else (
     let res =
       match Feel2.Solver.create_with_formula ~debug:true formula with
       | `Unsat unsat_core -> (Unsat { unsat_core } : Feel2.Sat_result.t)
-      | `Ok solver2 ->
-        let _res = Feel2.Solver.solve solver2 in
-        Feel2.Solver.solve solver2
+      | `Ok solver2 -> Feel2.Solver.solve ~assumptions solver2
     in
     print_s [%message (res : Feel2.Sat_result.t)])
 ;;
