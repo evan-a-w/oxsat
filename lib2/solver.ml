@@ -537,7 +537,7 @@ let analyze_conflict t ~(failed_clause : Clause.t) =
   simplify_learned_clause ~learned_literals ~uip_literal ~seen t
 ;;
 
-let rec backtrack t ~failed_clause =
+let backtrack t ~failed_clause =
   let #(~learned_literals, ~backjump_level) =
     analyze_conflict t ~failed_clause
   in
@@ -555,9 +555,8 @@ let rec backtrack t ~failed_clause =
           ~learned_clause:(Vec.Value.to_list learned_literals : int list)];
   remove_greater_than_decision_level t ~decision_level:backjump_level;
   match add_clause t ~literals:learned_literals ~learned:true with
-  | `Ok -> ()
-  | `Conflict failed_clause_idx ->
-    backtrack t ~failed_clause:(Vec.Value.get t.clauses failed_clause_idx)
+  | `Ok -> `Ok
+  | `Conflict failed_clause_idx -> `Conflict failed_clause_idx
 ;;
 
 let unsat_core t failed_clause_idx =
@@ -651,14 +650,16 @@ let%template rec solve' t ~timer : Sat_result.t @ m =
 and learn_from_failure t ~failed_clause_idx ~timer : Sat_result.t @ m =
   match[@exclave_if_stack a]
     t.decision_level = 0
-    || t.decision_level < t.decision_level_of_last_assumption
+    || t.decision_level <= t.decision_level_of_last_assumption
   with
   | true -> (unsat [@alloc a]) t failed_clause_idx
   | false ->
     let failed_clause = Vec.Value.get t.clauses failed_clause_idx in
-    backtrack t ~failed_clause;
     t.stats <- #{ t.stats with conflicts = t.stats.#conflicts + 1 };
-    (solve' [@alloc a]) t ~timer
+    (match backtrack t ~failed_clause with
+     | `Ok -> (solve' [@alloc a]) t ~timer
+     | `Conflict failed_clause_idx ->
+       (learn_from_failure [@alloc a]) t ~failed_clause_idx ~timer)
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 

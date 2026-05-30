@@ -1381,7 +1381,7 @@ let assumptions =
 |})
 ;;
 
-let solver1 = true
+let solver1 = false
 let debug = false
 
 let () =
