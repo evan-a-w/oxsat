@@ -143,7 +143,7 @@ let replace_watched_literal' t ~clause_idx ~nullified_literal = exclave_
           let literal = Vec.Value.get clause.clause i in
           let var = literal_var t ~literal in
           if is_satisfied t ~literal
-          then `Already_satisfied
+          then `Replacement (~var:{ global = var }, ~literal, ~i)
           else (
             match var.assignment with
             | This _ -> go (i + 1)
@@ -153,7 +153,6 @@ let replace_watched_literal' t ~clause_idx ~nullified_literal = exclave_
               `Replacement (~var:{ global = var }, ~literal, ~i)))
       in
       match go 2 with
-      | `Already_satisfied -> `Not_replaced_not_conflict
       | `No_replacement_found ->
         (match other_var.assignment with
          | Null ->
@@ -342,7 +341,7 @@ let add_clause t ~literals ~learned =
       (match var.assignment with
        | This _ -> ()
        | Null ->
-         if !num_unassigned <= 1 && not satisfied_by_this
+         if !num_unassigned <= 1 && not !satisfied
          then Vec.Value.swap literals !num_unassigned i;
          incr num_unassigned);
       go (i + 1))
@@ -353,17 +352,18 @@ let add_clause t ~literals ~learned =
   let clause_idx = Vec.Value.length t.clauses in
   Vec.Value.push t.clauses clause;
   if len >= 2 then register_watchers_for_new_clause t ~literals ~clause_idx;
-  match
-    (!num_unassigned = 1 || Vec.Value.length literals = 1) && not !satisfied
-  with
-  | false -> `Ok
-  | true ->
-    (* add unit *)
-    (match
-       push_unit_trail_entry t ~literal:(Vec.Value.get literals 0) ~clause_idx
-     with
-     | Null -> `Ok
-     | This _ -> `Conflict clause_idx)
+  if (not !satisfied) && !num_unassigned = 0 && len > 0
+  then `Conflict clause_idx
+  else (
+    match !num_unassigned = 1 && not !satisfied with
+    | false -> `Ok
+    | true ->
+      (* add unit *)
+      (match
+         push_unit_trail_entry t ~literal:(Vec.Value.get literals 0) ~clause_idx
+       with
+       | Null -> `Ok
+       | This _ -> `Conflict clause_idx))
 ;;
 
 let mark_literal t ~seen ~literal ~(local_ path_count) ~learned_literals =

@@ -278,9 +278,9 @@ let%expect_test "assumptions" =
     (SAT (assignments (1 -2 3 -4 -5 6)))
     (SAT (assignments (1 2 -3 4 -5 -6)))
     (UNSAT (unsat_core (5 2 1)))
-    (SAT (assignments (-1 -2 3 4 5 6)))
+    (SAT (assignments (-1 -2 3 -4 -5 6)))
     (UNSAT (unsat_core (2)))
-    (SAT (assignments (-1 -2 -3 -4 -5 -6)))
+    (SAT (assignments (-1 -2 -3 -4 -5 6)))
     (SAT (assignments (-1 -2 -3 -4 -5 6)))
     |}]
 ;;
