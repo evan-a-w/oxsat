@@ -324,6 +324,8 @@ let add_clause t ~literals ~learned =
   if len = 0 then t.has_empty_clause <- true;
   let satisfied = stack_ (ref false) in
   let num_unassigned = stack_ (ref 0) in
+  let satisfied_at_front = stack_ (ref 0) in
+  (* figure out if satisfied, and place unassigned variables at the front if not satisfied, and satisfied variables at the front if satisfied *)
   let rec go i =
     if i >= Vec.Value.length literals
     then ()
@@ -331,11 +333,17 @@ let add_clause t ~literals ~learned =
       let literal = Vec.Value.get literals i in
       ensure_literal t ~literal;
       let var = literal_var t ~literal in
-      satisfied := !satisfied || is_satisfied t ~literal;
+      let satisfied_by_this = is_satisfied t ~literal in
+      if satisfied_by_this && !satisfied_at_front <= 1
+      then (
+        Vec.Value.swap literals !satisfied_at_front i;
+        incr satisfied_at_front);
+      satisfied := !satisfied || satisfied_by_this;
       (match var.assignment with
        | This _ -> ()
        | Null ->
-         if !num_unassigned <= 1 then Vec.Value.swap literals !num_unassigned i;
+         if !num_unassigned <= 1 && not satisfied_by_this
+         then Vec.Value.swap literals !num_unassigned i;
          incr num_unassigned);
       go (i + 1))
   in
