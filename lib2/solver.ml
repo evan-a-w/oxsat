@@ -71,6 +71,20 @@ let assignments_array t : bool option array =
   |> Vec.Value.to_array
 ;;
 
+let assignments_array_pretty t =
+  Vec.Value.filter_mapi t.vars ~f:(fun i (var : Var.t) ->
+    if not var.exists
+    then None
+    else (
+      match var.assignment with
+      | Null -> None
+      | This true -> Some i
+      | This false -> Some (-i)))
+  |> Vec.Value.to_array
+;;
+
+let _ = assignments_array_pretty
+
 let undo_entry t ~(trail_entry : Trail_entry.t) =
   if t.debug
   then
@@ -726,7 +740,10 @@ let%template solve ?(time_bound = `Unlimited) ?(local_ assumptions = [||]) t
   then Unsat { unsat_core = [||] }
   else (
     match[@exclave_if_stack a] add_assumptions ~assumptions t ~timer with
-    | `Continue -> (solve' [@alloc a]) t ~timer
+    | `Continue ->
+      print_s [%message "ass" (assignments_array_pretty t : int array)];
+      let _ = failwith "stop here" in
+      (solve' [@alloc a]) t ~timer
     | `Failed_clause failed_clause_idx -> (unsat [@alloc a]) t failed_clause_idx
     | `Failed_assumptions (previous_assumption, assumption) ->
       Unsat { unsat_core = [| previous_assumption; assumption |] })

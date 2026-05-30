@@ -1372,12 +1372,21 @@ let formula =
 
 let _assumptions : int array = [||]
 
-let assumptions =
+let _assumptions =
   [%of_sexp: int array]
     (Sexp.of_string
        {|
     (327 -313 -274 -248 -92 -209 -131 -235 -196 -183 -118 -40 -53 -1 -170 -222
      -27 -261 -300 -287 -157 -144 -79 -14 -105 -66)
+|})
+;;
+
+let assumptions =
+  [%of_sexp: int array]
+    (Sexp.of_string
+       {|
+    (327 -313 -274 -248 -92 -209 -131 -235 -196 -183 -118 -40 -53 -1 -170 -222
+     -27 -261 -300 -287 -157 -144 -79 -14 -105)
 |})
 ;;
 
@@ -1401,7 +1410,7 @@ let () =
     | `Ok solver2 ->
       (try
          let res =
-           Feel2.Solver.solve ~time_bound:(`Bounded 20_000) ~assumptions solver2
+           Feel2.Solver.solve ~time_bound:(`Bounded 1_000) ~assumptions solver2
          in
          print_s
            [%message
