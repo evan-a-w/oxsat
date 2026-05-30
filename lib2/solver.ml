@@ -636,6 +636,7 @@ let add_assumptions ~(local_ assumptions) t = exclave_
     else (
       t.stats <- #{ t.stats with iterations = t.stats.#iterations + 1 };
       let literal = assumptions.(i) in
+      ensure_literal t ~literal;
       let var = literal_var t ~literal in
       match var.assignment with
       | Null ->
@@ -648,7 +649,9 @@ let add_assumptions ~(local_ assumptions) t = exclave_
         else (
           let trail_entry = Trail_entry.Option_u.value_exn var.trail_entry in
           match trail_entry.#reason with
-          | T #(Decision, ()) -> failwith "invalid assumptions"
+          | T #(Decision, ()) ->
+            (* TODO: give unsat core for the assumptions *)
+            failwith "invalid assumptions"
           | T #(Clause_idx, failed_clause_idx) -> This failed_clause_idx))
   in
   match go 0 with
