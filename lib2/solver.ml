@@ -72,15 +72,19 @@ let assignments_array t : bool option array =
 ;;
 
 let assignments_array_pretty t =
-  Vec.Value.filter_mapi t.vars ~f:(fun i (var : Var.t) ->
-    if not var.exists
-    then None
-    else (
-      match var.assignment with
-      | Null -> None
-      | This true -> Some i
-      | This false -> Some (-i)))
-  |> Vec.Value.to_array
+  let res =
+    Vec.Value.filter_mapi t.vars ~f:(fun i (var : Var.t) ->
+      if not var.exists
+      then None
+      else (
+        match var.assignment with
+        | Null -> None
+        | This true -> Some i
+        | This false -> Some (-i)))
+    |> Vec.Value.to_array
+  in
+  Array.sort res ~compare:Int.compare;
+  res
 ;;
 
 let _ = assignments_array_pretty
@@ -587,6 +591,7 @@ let%template unsat t failed_clause_idx : Sat_result.t @ m =
 let make_decision' ~is_assumption t ~literal =
   if t.debug
   then print_s [%message "make_decision" (is_assumption : bool) (literal : int)];
+  t.decision_level <- t.decision_level + 1;
   if not is_assumption
   then
     t.stats
@@ -594,8 +599,13 @@ let make_decision' ~is_assumption t ~literal =
           decisions = t.stats.#decisions + 1
         ; max_decision_level =
             Int.max t.decision_level t.stats.#max_decision_level
+        }
+  else
+    t.stats
+    <- #{ t.stats with
+          max_decision_level =
+            Int.max t.decision_level t.stats.#max_decision_level
         };
-  t.decision_level <- t.decision_level + 1;
   if is_assumption then t.decision_level_of_last_assumption <- t.decision_level;
   let trail_entry : Trail_entry.t =
     #{ reason = Reason.decision (); literal; decision_level = t.decision_level }
@@ -740,10 +750,7 @@ let%template solve ?(time_bound = `Unlimited) ?(local_ assumptions = [||]) t
   then Unsat { unsat_core = [||] }
   else (
     match[@exclave_if_stack a] add_assumptions ~assumptions t ~timer with
-    | `Continue ->
-      print_s [%message "ass" (assignments_array_pretty t : int array)];
-      let _ = failwith "stop here" in
-      (solve' [@alloc a]) t ~timer
+    | `Continue -> (solve' [@alloc a]) t ~timer
     | `Failed_clause failed_clause_idx -> (unsat [@alloc a]) t failed_clause_idx
     | `Failed_assumptions (previous_assumption, assumption) ->
       Unsat { unsat_core = [| previous_assumption; assumption |] })

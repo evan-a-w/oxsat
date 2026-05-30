@@ -1173,10 +1173,7 @@ let%template solve ?(local_ assumptions = [||]) t : Sat_result.t @ m =
   then Unsat { unsat_core = Clause.of_int_array [||] }
   else (
     match[@exclave_if_stack a] add_assumptions ~assumptions t with
-    | `Continue ->
-      print_s [%message "ass" (assignments_array t : int array)];
-      let _ = failwith "stop here" in
-      (solve' [@alloc a]) t
+    | `Continue -> (solve' [@alloc a]) t
     | `Failed_clause failed_clause_idx -> (unsat [@alloc a]) t failed_clause_idx)
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
