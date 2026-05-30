@@ -3,7 +3,18 @@ open! Import
 
 type t
 
-val%template solve : ?assumptions:int array @ local -> t -> Sat_result.t @ m
+type time_bound =
+  [ `Unlimited
+  | `Bounded of int
+  ]
+
+exception Timeout
+
+val%template solve
+  :  ?time_bound:time_bound
+  -> ?assumptions:int array @ local
+  -> t
+  -> Sat_result.t @ m
 [@@alloc a @ m = (heap_global, stack_local)]
 
 val create : ?random_state:Random.State.t -> ?debug:bool @ local -> unit -> t

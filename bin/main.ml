@@ -3,31 +3,25 @@ open! Feel
 open! Ds
 
 (* let () = *)
-(*   let solver = Solver.create ~debug:true () in *)
-(*   (\* Add clauses: x1 and x2 *\) *)
-(*   (\* let _ = *\) *)
-(*   (\*   solver *\) *)
-(*   (\*   |> Solver.add_clause' ~clause:[| 1; 2 |] *\) *)
-(*   (\*   |> Solver.add_clause' ~clause:[| 1; -2 |] *\) *)
-(*   (\*   |> Solver.add_clause' ~clause:[| -1; 3 |] *\) *)
-(*   (\*   |> Solver.add_clause' ~clause:[| -1; -3 |] *\) *)
-(*   (\* in *\) *)
-(*   (\* let formula = Large_problem.formula in *\) *)
-(*   let formula : int array array = *)
-(*     [%of_sexp: int array array] *)
-(*       (Sexp.of_string *)
-(*          {| *)
-(* ((-1 -4 -3) (-1 -5 2) (-8 1 -2) (-6 1 3) (-1 -4 -3) (1 -3 2) (-7 1 2) *)
-(*       (-1 4 -2) (1 -3 2) (1 3 2) (-1 3 5) (-1 -4 2) (-6 1 -2) (1 -4 3) *)
-(*       (8 -1 -4) (-1 4 -2) (8 1 2) (1 -4 -2) (-1 -4 3) (-1 -3 -2) (-1 3 -5) *)
-(*       (-1 3 -2) (1 -4 -2) (-1 -5 -2) (-1 -3 2) (1 3 2) (1 -4 -2) (-6 1 2) *)
-(*       (-1 -5 -2) (-1 3 2)) *)
-(* |}) *)
-(*   in *)
-(*   Array.iter formula ~f:(fun clause -> *)
-(*     ignore (Solver.add_clause' solver ~clause)); *)
-(*   let result = Solver.solve solver in *)
-(*   match result with *)
+(* let solver = Solver.create ~debug:true () in *)
+(* (\* Add clauses: x1 and x2 *\) *)
+(* (\* let _ = *\) *)
+(* (\* solver *\) *)
+(* (\* |> Solver.add_clause' ~clause:[| 1; 2 |] *\) *)
+(* (\* |> Solver.add_clause' ~clause:[| 1; -2 |] *\) *)
+(* (\* |> Solver.add_clause' ~clause:[| -1; 3 |] *\) *)
+(* (\* |> Solver.add_clause' ~clause:[| -1; -3 |] *\) *)
+(* (\* in *\) *)
+(* (\* let formula = Large_problem.formula in *\) *)
+(* let formula : int array array = *)
+(* [%of_sexp: int array array] *)
+(* (Sexp.of_string *)
+(* [{| *) (* ((-1 -4 -3) (-1 -5 2) (-8 1 -2) (-6 1 3) (-1 -4 -3) (1 -3 2) (-7 1 2) *) (*       (-1 4 -2) (1 -3 2) (1 3 2) (-1 3 5) (-1 -4 2) (-6 1 -2) (1 -4 3) *) (*       (8 -1 -4) (-1 4 -2) (8 1 2) (1 -4 -2) (-1 -4 3) (-1 -3 -2) (-1 3 -5) *) (*       (-1 3 -2) (1 -4 -2) (-1 -5 -2) (-1 -3 2) (1 3 2) (1 -4 -2) (-6 1 2) *) (*       (-1 -5 -2) (-1 3 2)) *) (* |}]) *)
+(* in *)
+(* Array.iter formula ~f:(fun clause -> *)
+(* ignore (Solver.add_clause' solver ~clause)); *)
+(* let result = Solver.solve solver in *)
+(* match result with *)
 (*   | Sat { assignments } -> *)
 (*     print_s [%message "SAT" (Clause.to_int_array assignments : int array)] *)
 (*   | Unsat { unsat_core } -> *)
@@ -1396,10 +1390,21 @@ let () =
     let res = Solver.solve ~assumptions solver in
     print_s [%message (res : Solver.Sat_result.t)])
   else (
-    let res =
-      match Feel2.Solver.create_with_formula ~debug:true formula with
-      | `Unsat unsat_core -> (Unsat { unsat_core } : Feel2.Sat_result.t)
-      | `Ok solver2 -> Feel2.Solver.solve ~assumptions solver2
-    in
-    print_s [%message (res : Feel2.Sat_result.t)])
+    match Feel2.Solver.create_with_formula ~debug:false formula with
+    | `Unsat unsat_core ->
+      print_s
+        [%message
+          ((Unsat { unsat_core } : Feel2.Sat_result.t) : Feel2.Sat_result.t)]
+    | `Ok solver2 ->
+      (try
+         let res =
+           Feel2.Solver.solve ~time_bound:(`Bounded 1_000) ~assumptions solver2
+         in
+         print_s [%message (res : Feel2.Sat_result.t)]
+       with
+       | Feel2.Solver.Timeout ->
+         print_s
+           [%message
+             "solver timed out"
+               ~stats:(Feel2.Solver.stats solver2 : Feel2.Stats.t)]))
 ;;

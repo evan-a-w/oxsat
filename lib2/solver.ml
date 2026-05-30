@@ -17,6 +17,43 @@ type t =
   ; debug : bool
   }
 
+type time_bound =
+  [ `Unlimited
+  | `Bounded of int
+  ]
+
+exception Timeout
+
+let timeout_check_every = 1024
+
+module Timer = struct
+  type t =
+    { deadline : Time_ns.t option
+    ; mutable iterations_until_check : int
+    }
+
+  let create = function
+    | `Unlimited ->
+      { deadline = None; iterations_until_check = Core.Int.max_value }
+    | `Bounded ms ->
+      let deadline =
+        Time_ns.add (Time_ns.now ()) (Time_ns.Span.of_ms (Float.of_int ms))
+      in
+      { deadline = Some deadline; iterations_until_check = 0 }
+  ;;
+
+  let check t =
+    match t.deadline with
+    | None -> ()
+    | Some deadline ->
+      if t.iterations_until_check > 0
+      then t.iterations_until_check <- t.iterations_until_check - 1
+      else (
+        t.iterations_until_check <- timeout_check_every;
+        if Time_ns.(now () >= deadline) then raise Timeout)
+  ;;
+end
+
 let stats t = t.stats
 let literal_var t ~literal = Vec.Value.get t.vars (Int.abs literal)
 let clause_to_array clause = Vec.Value.to_array clause.Clause.clause
@@ -591,20 +628,21 @@ let%template check_sat_result t ~(sat_result : _ @ m) : _ @ m =
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
-let%template rec solve' t : Sat_result.t @ m =
+let%template rec solve' t ~timer : Sat_result.t @ m =
   (t.stats <- #{ t.stats with iterations = t.stats.#iterations + 1 };
+   Timer.check timer;
    match propagate t with
-   | This failed_clause_idx -> learn_from_failure t ~failed_clause_idx
+   | This failed_clause_idx -> learn_from_failure t ~failed_clause_idx ~timer
    | Null ->
      (match (make_decision [@alloc a]) t with
-      | `Continue -> (solve' [@alloc a]) t
+      | `Continue -> (solve' [@alloc a]) t ~timer
       | `Failed_clause failed_clause_idx ->
-        (learn_from_failure [@alloc a]) t ~failed_clause_idx
+        (learn_from_failure [@alloc a]) t ~failed_clause_idx ~timer
       | `Done sat_result -> (check_sat_result [@alloc a]) t ~sat_result))
   [@exclave_if_stack a]
 [@@alloc a @ m = (stack_local, heap_global)]
 
-and learn_from_failure t ~failed_clause_idx : Sat_result.t @ m =
+and learn_from_failure t ~failed_clause_idx ~timer : Sat_result.t @ m =
   match[@exclave_if_stack a]
     t.decision_level = 0
     || t.decision_level < t.decision_level_of_last_assumption
@@ -614,7 +652,7 @@ and learn_from_failure t ~failed_clause_idx : Sat_result.t @ m =
     let failed_clause = Vec.Value.get t.clauses failed_clause_idx in
     backtrack t ~failed_clause;
     t.stats <- #{ t.stats with conflicts = t.stats.#conflicts + 1 };
-    (solve' [@alloc a]) t
+    (solve' [@alloc a]) t ~timer
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
@@ -631,12 +669,13 @@ let restart t = exclave_
   t.trail_processed_till <- Trail_entry.Vec.length t.trail
 ;;
 
-let add_assumptions ~(local_ assumptions) t = exclave_
+let add_assumptions ~(local_ assumptions) t ~timer = exclave_
   let rec go i = exclave_
     if i = Array.length assumptions
     then `Continue
     else (
       t.stats <- #{ t.stats with iterations = t.stats.#iterations + 1 };
+      Timer.check timer;
       let literal = assumptions.(i) in
       ensure_literal t ~literal;
       let var = literal_var t ~literal in
@@ -668,8 +707,11 @@ let maybe_clear_past_solve_state t =
     restart t)
 ;;
 
-let%template solve ?(local_ assumptions = [||]) t : Sat_result.t @ m =
+let%template solve ?(time_bound = `Unlimited) ?(local_ assumptions = [||]) t
+  : Sat_result.t @ m
+  =
   t.decision_level_of_last_assumption <- 0;
+  let timer = Timer.create time_bound in
   if t.debug
   then
     print_s
@@ -679,8 +721,8 @@ let%template solve ?(local_ assumptions = [||]) t : Sat_result.t @ m =
   if t.has_empty_clause
   then Unsat { unsat_core = [||] }
   else (
-    match[@exclave_if_stack a] add_assumptions ~assumptions t with
-    | `Continue -> (solve' [@alloc a]) t
+    match[@exclave_if_stack a] add_assumptions ~assumptions t ~timer with
+    | `Continue -> (solve' [@alloc a]) t ~timer
     | `Failed_clause failed_clause_idx -> (unsat [@alloc a]) t failed_clause_idx
     | `Failed_assumptions (previous_assumption, assumption) ->
       Unsat { unsat_core = [| previous_assumption; assumption |] })

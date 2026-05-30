@@ -18,6 +18,8 @@ module Solver = struct
 
   module Stats = Feel2.Stats
 
+  exception Timeout = Feel2.Solver.Timeout
+
   let create ?random_state ?debug () =
     { solver = Feel2.Solver.create ?random_state ?debug ()
     ; pending_unsat = None
@@ -33,7 +35,8 @@ module Solver = struct
   let add_clause t ~clause =
     match t.pending_unsat with
     | Some _ -> ()
-    | None -> stash_add_clause_result t (Feel2.Solver.add_clause t.solver ~clause)
+    | None ->
+      stash_add_clause_result t (Feel2.Solver.add_clause t.solver ~clause)
   ;;
 
   let add_clause' t ~clause =
@@ -60,11 +63,11 @@ module Solver = struct
     Clause.of_int_array (Array.of_list_rev !literals)
   ;;
 
-  let solve ?assumptions t =
+  let solve ?time_bound ?assumptions t =
     match t.pending_unsat with
     | Some unsat_core -> Sat_result.Unsat { unsat_core }
     | None ->
-      (match Feel2.Solver.solve ?assumptions t.solver with
+      (match Feel2.Solver.solve ?time_bound ?assumptions t.solver with
        | Feel2.Sat_result.Sat { assignments } ->
          Sat_result.Sat { assignments = assignment_clause assignments }
        | Unsat { unsat_core } ->
