@@ -46,7 +46,6 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
   Literal_set.insert t.unassigned_literals ~literal:(-trail_entry.#literal);
   var.assignment <- Null;
   var.trail_entry <- Trail_entry.Option_u.none ();
-  var.assignment_in_trail <- Null;
   match trail_entry.#reason with
   | T #(Decision, ()) -> ()
   | T #(Clause_idx, clause_idx) ->
@@ -61,7 +60,7 @@ let pop_from_trail_exn t =
 let push_trail_entry t ~(trail_entry : Trail_entry.t) =
   let literal = trail_entry.#literal in
   let var = literal_var t ~literal in
-  match var.assignment_in_trail with
+  match var.assignment with
   | This b when Bool.equal b (literal > 0) -> `Duplicate_in_trail
   | This _ -> `Conflict_in_trail
   | Null ->
@@ -73,11 +72,15 @@ let push_trail_entry t ~(trail_entry : Trail_entry.t) =
             (trail_entry.#literal : int)
             (trail_entry.#decision_level : int)
             (t.decision_level : int)];
-    var.assignment_in_trail <- This (trail_entry.#literal > 0);
+    var.assignment <- This (trail_entry.#literal > 0);
     var.trail_entry <- Trail_entry.Option_u.some trail_entry;
     Trail_entry.Vec.push t.trail trail_entry;
     Literal_set.remove t.unassigned_literals ~literal:trail_entry.#literal;
     Literal_set.remove t.unassigned_literals ~literal:(-trail_entry.#literal);
+    (match trail_entry.#reason with
+     | T #(Decision, ()) -> ()
+     | T #(Clause_idx, clause_idx) ->
+       (Vec.Value.get t.clauses clause_idx).has_unit <- true);
     `Added_to_trail
 ;;
 
@@ -270,29 +273,18 @@ let rec propagate t : int or_null =
   | true ->
     let trail_entry = Trail_entry.Vec.get t.trail t.trail_processed_till in
     t.trail_processed_till <- t.trail_processed_till + 1;
-    let value = trail_entry.#literal > 0 in
     let var = Vec.Value.get t.vars (Int.abs trail_entry.#literal) in
-    (match var.assignment with
-     | This value' when Bool.equal value value' -> propagate t
-     | This _ -> Error.raise_s [%message "impossible"] [@nontail]
-     | Null ->
-       if t.debug
-       then
-         print_s
-           [%message
-             "propagate: trying assignment" (trail_entry.#literal : int)];
-       var.assignment <- This value;
-       (match trail_entry.#reason with
-        | T #(Decision, ()) -> ()
-        | T #(Clause_idx, clause_idx) ->
-          (Vec.Value.get t.clauses clause_idx).has_unit <- true);
-       (match
-          update_watches_for_assignment t ~var ~literal:trail_entry.#literal
-        with
-        | `Conflict clause_idx -> This clause_idx
-        | `No_conflict ->
-          t.stats <- #{ t.stats with propagations = t.stats.#propagations + 1 };
-          propagate t))
+    if t.debug
+    then
+      print_s
+        [%message "propagate: trying assignment" (trail_entry.#literal : int)];
+    (match
+       update_watches_for_assignment t ~var ~literal:trail_entry.#literal
+     with
+     | `Conflict clause_idx -> This clause_idx
+     | `No_conflict ->
+       t.stats <- #{ t.stats with propagations = t.stats.#propagations + 1 };
+       propagate t)
 ;;
 
 let register_watcher t ~literal ~clause_idx ~blocking_literal =
@@ -302,7 +294,7 @@ let register_watcher t ~literal ~clause_idx ~blocking_literal =
     (Watched_clause.create ~clause_idx ~blocking_literal ~is_binary:false)
 ;;
 
-let register_watchers_for_trinary_clause t ~literals ~clause_idx =
+let register_watchers_for_new_clause t ~literals ~clause_idx =
   let lit1 = Vec.Value.get literals 0 in
   let lit2 = Vec.Value.get literals 1 in
   register_watcher t ~literal:lit1 ~clause_idx ~blocking_literal:lit2;
@@ -317,7 +309,6 @@ let ensure_literal t ~literal =
       ; trail_entry = Trail_entry.Option_u.none ()
       ; watched_clauses = Tf_pair.create (fun _ -> Watched_clause.Vec.create ())
       ; exists = false
-      ; assignment_in_trail = Null
       }
   done;
   let var = literal_var t ~literal in
@@ -341,32 +332,30 @@ let add_clause t ~literals ~learned =
       ensure_literal t ~literal;
       let var = literal_var t ~literal in
       satisfied := !satisfied || is_satisfied t ~literal;
-      if !satisfied
-      then ()
-      else (
-        (match var.assignment with
-         | This _ -> ()
-         | Null ->
-           if !num_unassigned < 2 then Vec.Value.swap literals !num_unassigned i;
-           incr num_unassigned);
-        go (i + 1)))
+      (match var.assignment with
+       | This _ -> ()
+       | Null ->
+         if !num_unassigned <= 1 then Vec.Value.swap literals !num_unassigned i;
+         incr num_unassigned);
+      go (i + 1))
   in
   go 0;
   (* has unit is populated when the trail entry is seen *)
   let clause : Clause.t = { clause = literals; has_unit = false; learned } in
   let clause_idx = Vec.Value.length t.clauses in
   Vec.Value.push t.clauses clause;
-  if len >= 2 then register_watchers_for_trinary_clause t ~literals ~clause_idx;
-  if !satisfied
-  then `Satisfied
-  else if !num_unassigned = 1
-  then (
-    match
-      push_unit_trail_entry t ~literal:(Vec.Value.get literals 0) ~clause_idx
-    with
-    | Null -> `Unit
-    | This _ -> `Conflict clause_idx)
-  else `Other
+  if len >= 2 then register_watchers_for_new_clause t ~literals ~clause_idx;
+  match
+    (!num_unassigned = 1 || Vec.Value.length literals = 1) && not !satisfied
+  with
+  | false -> `Ok
+  | true ->
+    (* add unit *)
+    (match
+       push_unit_trail_entry t ~literal:(Vec.Value.get literals 0) ~clause_idx
+     with
+     | Null -> `Ok
+     | This _ -> `Conflict clause_idx)
 ;;
 
 let mark_literal t ~seen ~literal ~(local_ path_count) ~learned_literals =
@@ -519,7 +508,7 @@ let rec backtrack t ~failed_clause =
           ~learned_clause:(Vec.Value.to_list learned_literals : int list)];
   remove_greater_than_decision_level t ~decision_level:backjump_level;
   match add_clause t ~literals:learned_literals ~learned:true with
-  | `Other | `Satisfied | `Unit -> ()
+  | `Ok -> ()
   | `Conflict failed_clause_idx ->
     backtrack t ~failed_clause:(Vec.Value.get t.clauses failed_clause_idx)
 ;;
@@ -549,7 +538,7 @@ let make_decision' ~is_assumption t ~literal =
     #{ reason = Reason.decision (); literal; decision_level = t.decision_level }
   in
   let var = literal_var t ~literal in
-  assert (Or_null.is_null var.assignment_in_trail);
+  assert (Or_null.is_null var.assignment);
   match push_trail_entry t ~trail_entry with
   | `Conflict_in_trail | `Duplicate_in_trail ->
     Error.raise_s [%message "[make_decision'] conflicting with trail"]
@@ -705,7 +694,7 @@ let add_clause t ~clause =
       ~literals:(Vec.Value.of_array_taking_ownership clause)
       ~learned:false
   with
-  | `Other | `Satisfied | `Unit -> `Ok
+  | `Ok -> `Ok
   | `Conflict failed_clause_idx -> `Unsat (unsat_core t failed_clause_idx)
 ;;
 
