@@ -703,9 +703,9 @@ let formula =
   [%of_sexp: int array array]
     (Sexp.of_string
        {|
-       ((3 -4 8) (1 -7 6) (-2 7 4) (-5 -7 2) (-4 -6 5) (6 -2 -1) (3 -7 -4)
-      (-3 -2 5) (-5 -8 -6) (-3 -7 6) (-4 7 2) (1 8 -5) (6 4 5) (-6 -5 1)
-      (1 -3 -4) (-5 -7 2) (-7 -1 -8) (4 -8 -5) (8 -6 2) (-1 -3 -4))
+       ((-1 5) (3) (5 -7) (-10 -5) (-3) (-1 -6 9 7) (2 9 7 5) (1 8 3) (9 -8)
+      (-2) (-5 2 3) (-4 6 -8 2) (1 5 -3) (6) (1 -7 -4 -5) (-7 3 -2 -5) 
+      (-2) (1 -2) (-7) (8 -5 4) (5 2) (10 1 -8 -2) (2 3 10) (-6) (-5 7 -10))
 
 |})
 ;;
@@ -719,8 +719,12 @@ let () =
     let res = Solver.solve solver in
     print_s [%message (res : Solver.Sat_result.t)])
   else (
-    let solver2 = Feel2.Solver.create_with_formula ~debug:true formula in
-    let _res = Feel2.Solver.solve solver2 in
-    let res = Feel2.Solver.solve solver2 in
+    let res =
+      match Feel2.Solver.create_with_formula ~debug:true formula with
+      | `Unsat unsat_core -> (Unsat { unsat_core } : Feel2.Sat_result.t)
+      | `Ok solver2 ->
+        let _res = Feel2.Solver.solve solver2 in
+        Feel2.Solver.solve solver2
+    in
     print_s [%message (res : Feel2.Sat_result.t)])
 ;;
