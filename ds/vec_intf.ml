@@ -112,6 +112,7 @@ module type S_value = sig
   val pop_exn : 'a t -> 'a
   val fill_to_length : 'a t -> length:int -> f:(int -> 'a) @ local -> unit
   val map : 'a t -> f:('a -> 'b) -> 'b t
+  val mapi : 'a t -> f:(int -> 'a -> 'b) -> 'b t
   val sort : 'a t -> compare:('a -> 'a -> int) @ local -> unit
 
   (** if the vec is currently [ a ; b ] where both [a] and [b] are sorted, sort
@@ -139,6 +140,7 @@ module type S_value = sig
   val last_exn : 'a t -> 'a
   val filter : 'a t -> f:('a -> bool) @ local -> 'a t
   val filter_map : 'a t -> f:('a -> 'b option) @ local -> 'b t
+  val filter_mapi : 'a t -> f:(int -> 'a -> 'b option) @ local -> 'b t
   val filter_inplace : 'a t -> f:('a -> bool) @ local -> unit
   val filter_map_inplace : 'a t -> f:('a -> 'a option) @ local -> unit
   val findi : 'a t -> f:(int -> 'a -> 'b option) @ local -> 'b option

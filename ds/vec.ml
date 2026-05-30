@@ -325,6 +325,14 @@ module Value = struct
     new_
   ;;
 
+  let mapi t ~f =
+    let new_ = create ~capacity:t.length () in
+    for i = 0 to t.length - 1 do
+      push new_ (f i t.arr.(i))
+    done;
+    new_
+  ;;
+
   let fold_map t ~init ~f =
     let acc = ref init in
     let new_ = create ~capacity:t.length () in
@@ -416,6 +424,16 @@ module Value = struct
     let new_ = create () in
     for i = 0 to t.length - 1 do
       match f t.arr.(i) with
+      | Some x -> push new_ x
+      | None -> ()
+    done;
+    new_
+  ;;
+
+  let filter_mapi t ~f =
+    let new_ = create () in
+    for i = 0 to t.length - 1 do
+      match f i t.arr.(i) with
       | Some x -> push new_ x
       | None -> ()
     done;

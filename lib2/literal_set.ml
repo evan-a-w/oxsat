@@ -9,10 +9,10 @@ type t =
   ; random_state : Random.State.t
   }
 
-let create () =
+let create ~random_state =
   { present = Vec.Value.create ()
   ; location_by_literal = Tf_pair.create (fun _ -> Vec.Value.create ())
-  ; random_state = Random.State.default
+  ; random_state
   }
 ;;
 
@@ -135,7 +135,7 @@ let location_round_trips t literals =
 ;;
 
 let%expect_test "insert tracks literals and reverse locations" =
-  let t = create () in
+  let t = create ~random_state:(Random.State.make [| 1; 2; 3 |]) in
   List.iter [ 3; -2; 7; -5 ] ~f:(fun literal -> insert t ~literal);
   print_s
     [%message
@@ -153,7 +153,7 @@ let%expect_test "insert tracks literals and reverse locations" =
 ;;
 
 let%expect_test "insert is idempotent and remove is tolerant" =
-  let t = create () in
+  let t = create ~random_state:(Random.State.make [| 1; 2; 3 |]) in
   List.iter [ 4; 4; -4; 4; -4 ] ~f:(fun literal -> insert t ~literal);
   print_s
     [%message
@@ -186,7 +186,7 @@ let%expect_test "insert is idempotent and remove is tolerant" =
 ;;
 
 let%expect_test "remove updates moved literal location" =
-  let t = create () in
+  let t = create ~random_state:(Random.State.make [| 1; 2; 3 |]) in
   List.iter [ 1; 2; 3; 4; 5; 6 ] ~f:(fun literal -> insert t ~literal);
   remove t ~literal:3;
   remove t ~literal:6;
@@ -206,7 +206,7 @@ let%expect_test "remove updates moved literal location" =
 ;;
 
 let%expect_test "pop_one returns each literal once and empties the set" =
-  let t = create () in
+  let t = create ~random_state:(Random.State.make [| 1; 2; 3 |]) in
   List.iter [ -10; 1; 4; -3; 8 ] ~f:(fun literal -> insert t ~literal);
   let popped = drain_sorted t in
   let remaining = sorted_literals t in

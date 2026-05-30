@@ -34,7 +34,7 @@ open! Ds
 (*     print_s [%message "UNSAT" (Clause.to_int_array unsat_core : int array)] *)
 (* ;; *)
 
-let formula =
+let _formula =
   [%of_sexp: int array array]
     (Sexp.of_string
        {|
@@ -699,11 +699,28 @@ let _assumptions =
 |})
 ;;
 
+let formula =
+  [%of_sexp: int array array]
+    (Sexp.of_string
+       {|
+       ((3 -4 8) (1 -7 6) (-2 7 4) (-5 -7 2) (-4 -6 5) (6 -2 -1) (3 -7 -4)
+      (-3 -2 5) (-5 -8 -6) (-3 -7 6) (-4 7 2) (1 8 -5) (6 4 5) (-6 -5 1)
+      (1 -3 -4) (-5 -7 2) (-7 -1 -8) (4 -8 -5) (8 -6 2) (-1 -3 -4))
+
+|})
+;;
+
+let solver1 = false
+
 let () =
-  let solver = Solver.create_with_formula ~debug:true formula in
-  let res = Solver.solve solver in
-  print_s [%message (res : Solver.Sat_result.t)];
-  let solver2 = Feel2.Solver.create_with_formula ~debug:true formula in
-  let res = Feel2.Solver.solve solver2 in
-  print_s [%message (res : Feel2.Sat_result.t)]
+  if solver1
+  then (
+    let solver = Solver.create_with_formula ~debug:true formula in
+    let res = Solver.solve solver in
+    print_s [%message (res : Solver.Sat_result.t)])
+  else (
+    let solver2 = Feel2.Solver.create_with_formula ~debug:true formula in
+    let _res = Feel2.Solver.solve solver2 in
+    let res = Feel2.Solver.solve solver2 in
+    print_s [%message (res : Feel2.Sat_result.t)])
 ;;
