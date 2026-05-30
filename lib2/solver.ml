@@ -561,7 +561,7 @@ let%template check_sat_result t ~(sat_result : _ @ m) : _ @ m =
   match (sat_result : Sat_result.t) with
   | Unsat _ -> sat_result
   | Sat { assignments } ->
-    if t.debug
+    if t.debug || true
     then
       Vec.Value.iter t.clauses ~f:(fun clause ->
         let is_satisfied = ref false in

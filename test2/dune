@@ -2,7 +2,7 @@
  (name nod_test2)
  (preprocess
   (pps ppx_jane))
- (inline_tests (flags -verbose -stop-on-error))
+ (inline_tests)
  (libraries core core_unix feel feel2 examples)
  (flags
   (:standard -extension-universe beta)))
