@@ -74,6 +74,7 @@ let push_trail_entry t ~(trail_entry : Trail_entry.t) =
             (trail_entry.#decision_level : int)
             (t.decision_level : int)];
     var.assignment_in_trail <- This (trail_entry.#literal > 0);
+    var.trail_entry <- Trail_entry.Option_u.some trail_entry;
     Trail_entry.Vec.push t.trail trail_entry;
     Literal_set.remove t.unassigned_literals ~literal:trail_entry.#literal;
     Literal_set.remove t.unassigned_literals ~literal:(-trail_entry.#literal);
@@ -281,7 +282,6 @@ let rec propagate t : int or_null =
            [%message
              "propagate: trying assignment" (trail_entry.#literal : int)];
        var.assignment <- This value;
-       var.trail_entry <- Trail_entry.Option_u.some trail_entry;
        (match trail_entry.#reason with
         | T #(Decision, ()) -> ()
         | T #(Clause_idx, clause_idx) ->
@@ -375,14 +375,17 @@ let mark_literal t ~seen ~literal ~(local_ path_count) ~learned_literals =
   then (
     Stamp_set.mark_seen seen ~var;
     let var = literal_var t ~literal in
-    match%optional_u (var.trail_entry : Trail_entry.Option_u.t) with
-    | None -> ()
-    | Some trail_entry ->
-      let dl = trail_entry.#decision_level in
-      (* if dl = 0 then () else *)
-      if dl = t.decision_level
-      then incr path_count
-      else Vec.Value.push learned_literals literal)
+    match var.assignment with
+    | Null -> ()
+    | This _ ->
+      (match%optional_u (var.trail_entry : Trail_entry.Option_u.t) with
+       | None -> ()
+       | Some trail_entry ->
+         let dl = trail_entry.#decision_level in
+         (* if dl = 0 then () else *)
+         if dl = t.decision_level
+         then incr path_count
+         else Vec.Value.push learned_literals literal))
 ;;
 
 let simplify_learned_clause t ~learned_literals ~uip_literal ~seen =
