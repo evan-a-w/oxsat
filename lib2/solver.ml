@@ -132,9 +132,9 @@ let replace_watched_literal' t ~clause_idx ~nullified_literal = exclave_
       `Not_replaced_not_conflict
         (* else if not (Or_null.is_null other_var.assignment) *)
         (* then *)
-        (*   (\* other watched literal is already assigned, so there can't be a *)
-        (*      replacement, so this is a conflict *\) *)
-        (*   `Not_replaced_conflict clause_idx *)
+        (* (\* other watched literal is already assigned, so there can't be a *)
+        (* replacement, so this is a conflict *\) *)
+        (* `Not_replaced_conflict clause_idx *)
     else (
       let rec go i = exclave_
         if i >= Vec.Value.length clause.clause
@@ -149,7 +149,8 @@ let replace_watched_literal' t ~clause_idx ~nullified_literal = exclave_
             | This _ -> go (i + 1)
             | Null ->
               (* found a replacement *)
-              (* TODO: this might already be in the trail, ideally we take ones that aren't in the trail *)
+              (* TODO: this might already be in the trail, ideally we take ones
+                 that aren't in the trail *)
               `Replacement (~var:{ global = var }, ~literal, ~i)))
       in
       match go 2 with
@@ -180,16 +181,16 @@ let replace_watched_literal t ~clause_idx ~nullified_literal = exclave_
   let res = replace_watched_literal' t ~clause_idx ~nullified_literal in
   (* if t.debug *)
   (* then ( *)
-  (*   let clause = Vec.Value.get t.clauses clause_idx in *)
-  (*   print_s *)
+  (* let clause = Vec.Value.get t.clauses clause_idx in *)
+  (* print_s *)
   (*     [%message *)
   (*       "replaced_watched_literal" *)
-  (*         (nullified_literal : int) *)
-  (*         (clause_with_assignments t ~clause : (int * bool or_null) array) *)
-  (*         (res *)
+  (* (nullified_literal : int) *)
+  (* (clause_with_assignments t ~clause : (int * bool or_null) array) *)
+  (* (res *)
   (*          : [ `Not_replaced_not_conflict *)
-  (*            | `Not_replaced_conflict of int *)
-  (*            | `Replaced of int *)
+  (* | `Not_replaced_conflict of int *)
+  (* | `Replaced of int *)
   (*            ])]); *)
   res
 ;;
@@ -324,7 +325,8 @@ let add_clause t ~literals ~learned =
   let satisfied = stack_ (ref false) in
   let num_unassigned = stack_ (ref 0) in
   let satisfied_at_front = stack_ (ref 0) in
-  (* figure out if satisfied, and place unassigned variables at the front if not satisfied, and satisfied variables at the front if satisfied *)
+  (* figure out if satisfied, and place unassigned variables at the front if not
+     satisfied, and satisfied variables at the front if satisfied *)
   let rec go i =
     if i >= Vec.Value.length literals
     then ()
@@ -651,9 +653,19 @@ let add_assumptions ~(local_ assumptions) t = exclave_
           match trail_entry.#reason with
           | T #(Decision, ()) ->
             `Failed_assumptions (trail_entry.#literal, literal)
-          | T #(Clause_idx, failed_clause_idx) -> `Failed_clause failed_clause_idx))
+          | T #(Clause_idx, failed_clause_idx) ->
+            `Failed_clause failed_clause_idx))
   in
   go 0
+;;
+
+let maybe_clear_past_solve_state t =
+  let has_run_before = t.stats.#iterations > 0 in
+  t.stats <- Stats.empty ();
+  if has_run_before
+  then (
+    if t.debug then print_endline "restarting";
+    restart t)
 ;;
 
 let%template solve ?(local_ assumptions = [||]) t : Sat_result.t @ m =
@@ -663,12 +675,7 @@ let%template solve ?(local_ assumptions = [||]) t : Sat_result.t @ m =
     print_s
       [%message
         "solve" ~assumptions:([%globalize: int array] assumptions : int array)];
-  let has_run_before = t.stats.#iterations > 0 in
-  t.stats <- Stats.empty ();
-  if has_run_before
-  then (
-    if t.debug then print_endline "restarting";
-    restart t);
+  maybe_clear_past_solve_state t;
   if t.has_empty_clause
   then Unsat { unsat_core = [||] }
   else (
@@ -698,8 +705,7 @@ let create ?(random_state = Random.State.make [| 1; 2; 3 |]) ?(debug = false) ()
 ;;
 
 let add_clause t ~clause =
-  t.decision_level_of_last_assumption <- 0;
-  remove_greater_than_decision_level t ~decision_level:0;
+  maybe_clear_past_solve_state t;
   match
     add_clause
       t
