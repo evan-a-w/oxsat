@@ -632,7 +632,7 @@ let restart t = exclave_
 let add_assumptions ~(local_ assumptions) t = exclave_
   let rec go i = exclave_
     if i = Array.length assumptions
-    then Null
+    then `Continue
     else (
       t.stats <- #{ t.stats with iterations = t.stats.#iterations + 1 };
       let literal = assumptions.(i) in
@@ -641,7 +641,7 @@ let add_assumptions ~(local_ assumptions) t = exclave_
       match var.assignment with
       | Null ->
         (match make_decision' ~is_assumption:true t ~literal with
-         | This _ as res -> res
+         | This failed_clause_idx -> `Failed_clause failed_clause_idx
          | Null -> go (i + 1))
       | This b ->
         if Bool.equal b (literal > 0)
@@ -650,13 +650,10 @@ let add_assumptions ~(local_ assumptions) t = exclave_
           let trail_entry = Trail_entry.Option_u.value_exn var.trail_entry in
           match trail_entry.#reason with
           | T #(Decision, ()) ->
-            (* TODO: give unsat core for the assumptions *)
-            failwith "invalid assumptions"
-          | T #(Clause_idx, failed_clause_idx) -> This failed_clause_idx))
+            `Failed_assumptions (trail_entry.#literal, literal)
+          | T #(Clause_idx, failed_clause_idx) -> `Failed_clause failed_clause_idx))
   in
-  match go 0 with
-  | Null -> `Continue
-  | This i -> `Failed_clause i
+  go 0
 ;;
 
 let%template solve ?(local_ assumptions = [||]) t : Sat_result.t @ m =
@@ -677,7 +674,9 @@ let%template solve ?(local_ assumptions = [||]) t : Sat_result.t @ m =
   else (
     match[@exclave_if_stack a] add_assumptions ~assumptions t with
     | `Continue -> (solve' [@alloc a]) t
-    | `Failed_clause failed_clause_idx -> (unsat [@alloc a]) t failed_clause_idx)
+    | `Failed_clause failed_clause_idx -> (unsat [@alloc a]) t failed_clause_idx
+    | `Failed_assumptions (previous_assumption, assumption) ->
+      Unsat { unsat_core = [| previous_assumption; assumption |] })
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
@@ -699,6 +698,8 @@ let create ?(random_state = Random.State.make [| 1; 2; 3 |]) ?(debug = false) ()
 ;;
 
 let add_clause t ~clause =
+  t.decision_level_of_last_assumption <- 0;
+  remove_greater_than_decision_level t ~decision_level:0;
   match
     add_clause
       t

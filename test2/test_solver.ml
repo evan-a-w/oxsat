@@ -73,6 +73,39 @@ let%expect_test "simple two-literal clause" =
   [%expect {| (SAT ("Clause.to_int_array assignments" (1 -2))) |}]
 ;;
 
+let%expect_test "contradictory assumptions are unsat" =
+  let solver = Solver.create () in
+  let result = Solver.solve solver ~assumptions:[| 1; -1 |] in
+  (match result with
+   | Sat { assignments } ->
+     print_s [%message "SAT" (Clause.to_int_array assignments : int array)]
+   | Unsat { unsat_core } ->
+     print_s [%message "UNSAT" (Clause.to_int_array unsat_core : int array)]);
+  [%expect {| (UNSAT ("Clause.to_int_array unsat_core" (1 -1))) |}]
+;;
+
+let%expect_test "adding clause after solve can change model" =
+  let solver = Solver.create () in
+  let _ = Solver.add_clause' solver ~clause:[| 1; 2 |] in
+  let result = Solver.solve solver in
+  (match result with
+   | Sat { assignments } ->
+     print_s [%message "before" (Clause.to_int_array assignments : int array)]
+   | Unsat _ -> print_endline "before UNSAT");
+  Solver.add_clause solver ~clause:[| -1 |];
+  let result = Solver.solve solver in
+  (match result with
+   | Sat { assignments } ->
+     print_s [%message "after" (Clause.to_int_array assignments : int array)]
+   | Unsat { unsat_core } ->
+     print_s [%message "after UNSAT" (Clause.to_int_array unsat_core : int array)]);
+  [%expect
+    {|
+    (before ("Clause.to_int_array assignments" (1 -2)))
+    (after ("Clause.to_int_array assignments" (-1 2)))
+    |}]
+;;
+
 let%expect_test "simple two-literal clause neg" =
   let solver = Solver.create () in
   (* Add clause: x1 or x2 *)
