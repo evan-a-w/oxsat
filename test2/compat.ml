@@ -19,7 +19,7 @@ module Solver = struct
   let create_with_formula = Feel2.Solver.create_with_formula
 
   let add_clause' t ~clause =
-    Feel2.Solver.add_clause t ~clause;
+    ignore (Feel2.Solver.add_clause t ~clause);
     t
   ;;
 
