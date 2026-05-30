@@ -237,12 +237,11 @@ let update_watches_for_assignment t ~(var : Var.t) ~literal = exclave_
   then print_s [%message "update_watches_for_assignment" (literal : int)];
   (* other assignment invalidated *)
   let watched_clauses = Tf_pair.get var.watched_clauses (not (literal > 0)) in
-  let found_conflict = stack_ (ref false) in
-  let conflict_clause = stack_ (ref (-1)) in
+  let conflict_clause = stack_ (ref Null) in
   Watched_clause.Vec.filter_inplace
     watched_clauses
     ~f:(fun #{ clause_idx; blocking_literal; is_binary } ->
-      if !found_conflict
+      if not (Or_null.is_null !conflict_clause)
       then (* just do nothing if already conflict *)
         true
       else if is_satisfied t ~literal:blocking_literal
@@ -259,12 +258,10 @@ let update_watches_for_assignment t ~(var : Var.t) ~literal = exclave_
            with
            | Null -> true
            | This clause_idx ->
-             found_conflict := true;
-             conflict_clause := clause_idx;
+             conflict_clause := This clause_idx;
              true)
         | This _ ->
-          found_conflict := true;
-          conflict_clause := clause_idx;
+          conflict_clause := This clause_idx;
           true)
       else (
         match
@@ -273,12 +270,11 @@ let update_watches_for_assignment t ~(var : Var.t) ~literal = exclave_
         | `Replaced _ -> false
         | `Not_replaced_not_conflict | `Clause_too_short -> true
         | `Not_replaced_conflict clause_idx ->
-          found_conflict := true;
-          conflict_clause := clause_idx;
+          conflict_clause := This clause_idx;
           true));
-  match !found_conflict with
-  | true -> `Conflict !conflict_clause
-  | false -> `No_conflict
+  match !conflict_clause with
+  | This conflict_clause -> `Conflict conflict_clause
+  | Null -> `No_conflict
 ;;
 
 let rec remove_greater_than_decision_level t ~decision_level =
@@ -575,7 +571,8 @@ let%template unsat t failed_clause_idx : Sat_result.t @ m =
 ;;
 
 let make_decision' ~is_assumption t ~literal =
-  if t.debug then print_s [%message "make_decision" (literal : int)];
+  if t.debug
+  then print_s [%message "make_decision" (is_assumption : bool) (literal : int)];
   if not is_assumption
   then
     t.stats

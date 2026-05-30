@@ -1382,7 +1382,7 @@ let assumptions =
 ;;
 
 let solver1 = false
-let debug = false
+let debug = true
 
 let () =
   if solver1
