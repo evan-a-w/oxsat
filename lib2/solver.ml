@@ -578,7 +578,13 @@ let%template unsat t failed_clause_idx : Sat_result.t @ m =
 let make_decision' ~is_assumption t ~literal =
   if t.debug then print_s [%message "make_decision" (literal : int)];
   if not is_assumption
-  then t.stats <- #{ t.stats with decisions = t.stats.#decisions + 1 };
+  then
+    t.stats
+    <- #{ t.stats with
+          decisions = t.stats.#decisions + 1
+        ; max_decision_level =
+            Int.max t.decision_level t.stats.#max_decision_level
+        };
   t.decision_level <- t.decision_level + 1;
   if is_assumption then t.decision_level_of_last_assumption <- t.decision_level;
   let trail_entry : Trail_entry.t =

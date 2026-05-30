@@ -1381,16 +1381,19 @@ let assumptions =
 |})
 ;;
 
-let solver1 = false
+let solver1 = true
+let debug = false
 
 let () =
   if solver1
   then (
-    let solver = Solver.create_with_formula ~debug:true formula in
+    let solver = Solver.create_with_formula ~debug formula in
     let res = Solver.solve ~assumptions solver in
-    print_s [%message (res : Solver.Sat_result.t)])
+    print_s
+      [%message
+        (res : Solver.Sat_result.t) (Solver.stats solver : Solver.Stats.t)])
   else (
-    match Feel2.Solver.create_with_formula ~debug:false formula with
+    match Feel2.Solver.create_with_formula ~debug formula with
     | `Unsat unsat_core ->
       print_s
         [%message
@@ -1398,9 +1401,12 @@ let () =
     | `Ok solver2 ->
       (try
          let res =
-           Feel2.Solver.solve ~time_bound:(`Bounded 1_000) ~assumptions solver2
+           Feel2.Solver.solve ~time_bound:(`Bounded 20_000) ~assumptions solver2
          in
-         print_s [%message (res : Feel2.Sat_result.t)]
+         print_s
+           [%message
+             (res : Feel2.Sat_result.t)
+               (Feel2.Solver.stats solver2 : Feel2.Stats.t)]
        with
        | Feel2.Solver.Timeout ->
          print_s
