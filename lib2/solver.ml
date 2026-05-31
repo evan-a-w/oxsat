@@ -694,7 +694,8 @@ let restart t = exclave_
   do
     pop_from_trail_exn t
   done;
-  t.trail_processed_till <- Trail_entry.Vec.length t.trail
+  t.trail_processed_till
+  <- Int.min t.trail_processed_till (Trail_entry.Vec.length t.trail)
 ;;
 
 let add_assumptions ~(local_ assumptions) t ~timer = exclave_
