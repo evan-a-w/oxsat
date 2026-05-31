@@ -1391,7 +1391,7 @@ let assumptions =
 ;;
 
 let solver1 = false
-let debug = true
+let debug = false
 
 let () =
   if solver1

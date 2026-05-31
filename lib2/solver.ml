@@ -338,6 +338,41 @@ let rec propagate t : int or_null =
        propagate t)
 ;;
 
+let trail_index_of_var_exn t ~var =
+  let rec go i =
+    if i < 0
+    then
+      Error.raise_s
+        [%message "BUG: assigned var missing from trail" (var : int)]
+    else if Int.abs (Trail_entry.Vec.get t.trail i).#literal = var
+    then i
+    else go (i - 1)
+  in
+  go (Trail_entry.Vec.length t.trail - 1)
+;;
+
+let conflict_keep_trail_len t ~failed_clause_idx =
+  let failed_clause = Vec.Value.get t.clauses failed_clause_idx in
+  let keep = ref t.trail_processed_till in
+  Vec.Value.iter failed_clause.clause ~f:(fun literal ->
+    let var = literal_var t ~literal in
+    match var.assignment with
+    | Null -> ()
+    | This _ ->
+      let trail_idx = trail_index_of_var_exn t ~var:(Int.abs literal) in
+      keep := Int.max !keep (trail_idx + 1));
+  !keep
+;;
+
+let pop_trail_after_conflict t ~failed_clause_idx =
+  let keep_trail_len = conflict_keep_trail_len t ~failed_clause_idx in
+  while Trail_entry.Vec.length t.trail > keep_trail_len do
+    pop_from_trail_exn t
+  done;
+  t.trail_processed_till
+  <- Int.min t.trail_processed_till (Trail_entry.Vec.length t.trail)
+;;
+
 let register_watcher t ~literal ~clause_idx ~blocking_literal =
   let var = literal_var t ~literal in
   Watched_clause.Vec.push
@@ -669,6 +704,7 @@ let%template rec solve' t ~timer : Sat_result.t @ m =
 [@@alloc a @ m = (stack_local, heap_global)]
 
 and learn_from_failure t ~failed_clause_idx ~timer : Sat_result.t @ m =
+  pop_trail_after_conflict t ~failed_clause_idx;
   match[@exclave_if_stack a]
     t.decision_level = 0
     || t.decision_level <= t.decision_level_of_last_assumption
@@ -752,7 +788,9 @@ let%template solve ?(time_bound = `Unlimited) ?(local_ assumptions = [||]) t
   else (
     match[@exclave_if_stack a] add_assumptions ~assumptions t ~timer with
     | `Continue -> (solve' [@alloc a]) t ~timer
-    | `Failed_clause failed_clause_idx -> (unsat [@alloc a]) t failed_clause_idx
+    | `Failed_clause failed_clause_idx ->
+      pop_trail_after_conflict t ~failed_clause_idx;
+      (unsat [@alloc a]) t failed_clause_idx
     | `Failed_assumptions (previous_assumption, assumption) ->
       Unsat { unsat_core = [| previous_assumption; assumption |] })
 [@@alloc a @ m = (stack_local, heap_global)]
