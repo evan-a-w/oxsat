@@ -87,7 +87,7 @@ let%expect_test "simple two-literal clause" =
    | Sat { assignments } ->
      print_s [%message "SAT" (Clause.to_int_array assignments : int array)]
    | Unsat _ -> print_endline "UNSAT");
-  [%expect {| (SAT ("Clause.to_int_array assignments" (1 -2))) |}]
+  [%expect {| (SAT ("Clause.to_int_array assignments" (1 2))) |}]
 ;;
 
 let%expect_test "contradictory assumptions are unsat" =
@@ -119,7 +119,7 @@ let%expect_test "adding clause after solve can change model" =
        [%message "after UNSAT" (Clause.to_int_array unsat_core : int array)]);
   [%expect
     {|
-    (before ("Clause.to_int_array assignments" (1 -2)))
+    (before ("Clause.to_int_array assignments" (1 2)))
     (after ("Clause.to_int_array assignments" (-1 2)))
     |}]
 ;;
@@ -146,7 +146,7 @@ let%expect_test "simple satisfiable formula" =
    | Sat { assignments } ->
      print_s [%message "SAT" (Clause.to_int_array assignments : int array)]
    | Unsat _ -> print_endline "UNSAT");
-  [%expect {| (SAT ("Clause.to_int_array assignments" (1 -2 3))) |}]
+  [%expect {| (SAT ("Clause.to_int_array assignments" (1 2 3))) |}]
 ;;
 
 let%expect_test "unit propagation leads to satisfaction" =
@@ -220,7 +220,7 @@ let%expect_test "clause with multiple literals satisfied by one assignment" =
    | Sat { assignments } ->
      print_s [%message "SAT" (Clause.to_int_array assignments : int array)]
    | Unsat _ -> print_endline "UNSAT");
-  [%expect {| (SAT ("Clause.to_int_array assignments" (1 -2 -3))) |}]
+  [%expect {| (SAT ("Clause.to_int_array assignments" (1 2 3))) |}]
 ;;
 
 let%expect_test "larger satisfiable formula requiring backtracking" =
@@ -278,7 +278,7 @@ let%expect_test "succ dimacs" =
 
 let%expect_test "fail dimacs" =
   run_dimacs Examples.Dimacs.fail_eg;
-  [%expect {| (UNSAT (unsat_core (29))) |}]
+  [%expect {| (UNSAT (unsat_core (-112))) |}]
 ;;
 
 let%expect_test "assumptions" =
@@ -319,13 +319,13 @@ let%expect_test "assumptions" =
   solve ~assumptions:[| -1; -2; -3; -4; -5; 6 |] ();
   [%expect
     {|
-    (SAT (assignments (-1 -2 3 -4 -5 -6)))
+    (SAT (assignments (1 -2 3 4 5 6)))
+    (SAT (assignments (1 -2 3 4 5 6)))
+    (SAT (assignments (1 2 3 4 -5 -6)))
+    (UNSAT (unsat_core (2 1)))
     (SAT (assignments (1 -2 3 -4 -5 6)))
-    (SAT (assignments (1 2 -3 4 -5 -6)))
-    (UNSAT (unsat_core (5 2 1)))
-    (SAT (assignments (-1 -2 3 -4 -5 6)))
     (UNSAT (unsat_core (2)))
-    (SAT (assignments (-1 -2 -3 -4 -5 6)))
+    (SAT (assignments (-1 -2 -3 -4 -5 -6)))
     (SAT (assignments (-1 -2 -3 -4 -5 6)))
     |}]
 ;;

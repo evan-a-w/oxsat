@@ -15,6 +15,7 @@ type t =
   ; analyze_conflict_stamp_set : Stamp_set.t
   ; analyze_conflict_scratch_literals : int Vec.Value.t
   ; debug : bool
+  ; vsids : Vsids.t
   }
 
 type time_bound =
@@ -99,6 +100,7 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
   let var = literal_var t ~literal in
   Literal_set.insert t.unassigned_literals ~literal:trail_entry.#literal;
   Literal_set.insert t.unassigned_literals ~literal:(-trail_entry.#literal);
+  Vsids.add_to_pool t.vsids ~literal:trail_entry.#literal;
   var.assignment <- Null;
   var.trail_entry <- Trail_entry.Option_u.none ();
   match trail_entry.#reason with
@@ -130,6 +132,7 @@ let push_trail_entry t ~(trail_entry : Trail_entry.t) =
     var.assignment <- This (trail_entry.#literal > 0);
     var.trail_entry <- Trail_entry.Option_u.some trail_entry;
     Trail_entry.Vec.push t.trail trail_entry;
+    Vsids.remove_from_pool t.vsids ~var:(Int.abs trail_entry.#literal);
     Literal_set.remove t.unassigned_literals ~literal:trail_entry.#literal;
     Literal_set.remove t.unassigned_literals ~literal:(-trail_entry.#literal);
     (match trail_entry.#reason with
@@ -402,6 +405,7 @@ let ensure_literal t ~literal =
   then (
     Literal_set.insert t.unassigned_literals ~literal;
     Literal_set.insert t.unassigned_literals ~literal:(-literal);
+    Vsids.on_new_var t.vsids ~var:(Int.abs literal);
     var.exists <- true)
 ;;
 
@@ -468,6 +472,7 @@ let mark_literal t ~seen ~literal ~(local_ path_count) ~learned_literals =
        | Some trail_entry ->
          let dl = trail_entry.#decision_level in
          (* if dl = 0 then () else *)
+         Vsids.add_activity t.vsids ~literal;
          if dl = t.decision_level
          then incr path_count
          else Vec.Value.push learned_literals literal))
@@ -602,6 +607,7 @@ let backtrack t ~failed_clause =
       [%message
         "backtrack"
           ~learned_clause:(Vec.Value.to_list learned_literals : int list)];
+  Vsids.decay t.vsids;
   remove_greater_than_decision_level t ~decision_level:backjump_level;
   match add_clause t ~literals:learned_literals ~learned:true with
   | `Ok -> `Ok
@@ -654,7 +660,7 @@ let make_decision' ~is_assumption t ~literal =
 ;;
 
 let%template make_decision t : _ @ m =
-  match Literal_set.pop_one t.unassigned_literals with
+  match Vsids.choose_literal t.vsids with
   | Null -> `Done (Sat_result.Sat { assignments = assignments_array t })
   | This literal ->
     (match[@exclave_if_stack a]
@@ -810,6 +816,7 @@ let create ?(random_state = Random.State.make [| 1; 2; 3 |]) ?(debug = false) ()
   ; analyze_conflict_stamp_set = Stamp_set.create ()
   ; analyze_conflict_scratch_literals = Vec.Value.create ()
   ; debug
+  ; vsids = Vsids.create ()
   }
 ;;
 
