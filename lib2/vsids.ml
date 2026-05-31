@@ -4,39 +4,40 @@ open! Import
 module Heap = struct
   type t =
     { vars : int Vec.Value.t
-    ; activity_by_var : F64.Vec.t
+    ; activity_by_var : float Vec.Value.t
     ; pos_by_var : int Vec.Value.t
     ; mutable length : int
     }
 
   let create () =
     { vars = Vec.Value.create ()
-    ; activity_by_var = F64.Vec.create ()
+    ; activity_by_var = Vec.Value.create ()
     ; pos_by_var = Vec.Value.create ()
     ; length = 0
     }
   ;;
 
   let ensure_var_capacity t ~var =
-    F64.Vec.fill_to_length t.activity_by_var ~length:(var + 1) ~f:(fun _ -> #0.);
+    Vec.Value.fill_to_length t.activity_by_var ~length:(var + 1) ~f:(fun _ ->
+      0.);
     Vec.Value.fill_to_length t.pos_by_var ~length:(var + 1) ~f:(fun _ -> -1)
   ;;
 
-  let[@inline] compare_at t i j =
+  let compare_at t i j =
     let var_i = Vec.Value.get t.vars i in
     let var_j = Vec.Value.get t.vars j in
     match
-      F64.compare
-        (F64.Vec.get t.activity_by_var var_i)
-        (F64.Vec.get t.activity_by_var var_j)
+      Float.compare
+        (Vec.Value.get t.activity_by_var var_i)
+        (Vec.Value.get t.activity_by_var var_j)
     with
     | 0 -> Int.compare var_i var_j
     | o -> o
   ;;
 
-  let[@inline] better_at t i j = compare_at t i j > 0
+  let better_at t i j = compare_at t i j > 0
 
-  let[@inline] swap t i j =
+  let swap t i j =
     let var_i = Vec.Value.get t.vars i in
     let var_j = Vec.Value.get t.vars j in
     Vec.Value.set t.vars i var_j;
@@ -97,22 +98,18 @@ module Heap = struct
 
   let bump_activity t ~var ~amount =
     ensure_var_capacity t ~var;
-    F64.Vec.set
+    Vec.Value.set
       t.activity_by_var
       var
-      F64.O.(F64.Vec.get t.activity_by_var var + amount)
+      (Vec.Value.get t.activity_by_var var +. amount)
   ;;
 
   let rescale_activities t ~scale =
-    for var = 0 to F64.Vec.length t.activity_by_var - 1 do
-      F64.Vec.set
-        t.activity_by_var
-        var
-        F64.O.(F64.Vec.get t.activity_by_var var / scale)
-    done
+    Vec.Value.map_inplace t.activity_by_var ~f:(fun activity ->
+      activity /. scale)
   ;;
 
-  let activity t var = F64.Vec.get t.activity_by_var var
+  let activity t var = Vec.Value.get t.activity_by_var var
 
   let fix_after_bump t ~var =
     let idx = Vec.Value.get t.pos_by_var var in
@@ -126,7 +123,7 @@ type t =
   ; in_pool : Bitset.t
   ; in_heap : Bitset.t
   ; preferred_true : Bitset.t
-  ; mutable adjusting_score : Adjusting_score.t
+  ; mutable activity_inc : float
   }
 
 let create () =
@@ -135,7 +132,7 @@ let create () =
   ; in_pool = Bitset.create ()
   ; in_heap = Bitset.create ()
   ; preferred_true = Bitset.create ()
-  ; adjusting_score = Adjusting_score.default ()
+  ; activity_inc = 1.
   }
 ;;
 
@@ -151,25 +148,23 @@ let on_new_var t ~var =
 ;;
 
 let rescale t =
-  Heap.rescale_activities t.heap ~scale:t.adjusting_score.#rescale;
-  t.adjusting_score <- Adjusting_score.rescale t.adjusting_score
+  Heap.rescale_activities t.heap ~scale:1e100;
+  t.activity_inc <- t.activity_inc /. 1e100
 ;;
 
 let add_activity t ~literal =
-  let var = Literal.var literal in
-  let amount = Adjusting_score.unit t.adjusting_score in
-  Heap.bump_activity t.heap ~var ~amount;
+  let var = Int.abs literal in
+  Heap.bump_activity t.heap ~var ~amount:t.activity_inc;
   if Bitset.get t.in_heap var then Heap.fix_after_bump t.heap ~var;
-  if F64.O.(Heap.activity t.heap var > t.adjusting_score.#rescale)
-  then rescale t
+  if Float.(Heap.activity t.heap var > 1e100) then rescale t
 ;;
 
-let decay t = t.adjusting_score <- Adjusting_score.decay t.adjusting_score
+let decay t = t.activity_inc <- t.activity_inc /. 0.95
 let remove_from_pool t ~var = Bitset.clear t.in_pool var
 
 let add_to_pool t ~literal =
-  let var = Literal.var literal in
-  if Literal.value literal
+  let var = Int.abs literal in
+  if literal > 0
   then Bitset.set t.preferred_true var
   else Bitset.clear t.preferred_true var;
   if not (Bitset.get t.in_pool var) then Bitset.set t.in_pool var;
@@ -182,15 +177,13 @@ let add_to_pool t ~literal =
 let choose_literal t =
   let rec go () =
     match Heap.peek_var t.heap with
-    | None -> Literal.Option.none
+    | None -> Null
     | Some var ->
       Heap.remove_at t.heap 0;
       Bitset.clear t.in_heap var;
       if not (Bitset.get t.in_pool var)
       then go ()
-      else
-        Literal.Option.some
-          (Literal.create ~var ~value:(Bitset.get t.preferred_true var))
+      else This (if Bitset.get t.preferred_true var then var else -var)
   in
   go ()
 ;;

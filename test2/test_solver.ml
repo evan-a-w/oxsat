@@ -1,8 +1,25 @@
 open! Core
-open! Feel
+open! Compat
 open! Ds
 
 [@@@warning "-69"]
+
+let%expect_test "solve times out when bounded timer is exhausted" =
+  let solver = Solver.create () in
+  (try
+     ignore (Solver.solve ~time_bound:(`Bounded 0) solver : Solver.Sat_result.t);
+     print_endline "finished"
+   with
+   | Solver.Timeout ->
+     print_s [%message "timeout" ~stats:(Solver.stats solver : Solver.Stats.t)]);
+  [%expect
+    {|
+    (timeout
+     (stats
+      ((iterations 1) (decisions 0) (propagations 0) (conflicts 0)
+       (learned_clauses 0) (learned_clause_literals 0) (max_decision_level 0))))
+    |}]
+;;
 
 let%expect_test "two compatible unit clauses" =
   let solver = Solver.create () in
@@ -73,6 +90,40 @@ let%expect_test "simple two-literal clause" =
   [%expect {| (SAT ("Clause.to_int_array assignments" (1 2))) |}]
 ;;
 
+let%expect_test "contradictory assumptions are unsat" =
+  let solver = Solver.create () in
+  let result = Solver.solve solver ~assumptions:[| 1; -1 |] in
+  (match result with
+   | Sat { assignments } ->
+     print_s [%message "SAT" (Clause.to_int_array assignments : int array)]
+   | Unsat { unsat_core } ->
+     print_s [%message "UNSAT" (Clause.to_int_array unsat_core : int array)]);
+  [%expect {| (UNSAT ("Clause.to_int_array unsat_core" (1 -1))) |}]
+;;
+
+let%expect_test "adding clause after solve can change model" =
+  let solver = Solver.create () in
+  let _ = Solver.add_clause' solver ~clause:[| 1; 2 |] in
+  let result = Solver.solve solver in
+  (match result with
+   | Sat { assignments } ->
+     print_s [%message "before" (Clause.to_int_array assignments : int array)]
+   | Unsat _ -> print_endline "before UNSAT");
+  Solver.add_clause solver ~clause:[| -1 |];
+  let result = Solver.solve solver in
+  (match result with
+   | Sat { assignments } ->
+     print_s [%message "after" (Clause.to_int_array assignments : int array)]
+   | Unsat { unsat_core } ->
+     print_s
+       [%message "after UNSAT" (Clause.to_int_array unsat_core : int array)]);
+  [%expect
+    {|
+    (before ("Clause.to_int_array assignments" (1 2)))
+    (after ("Clause.to_int_array assignments" (-1 2)))
+    |}]
+;;
+
 let%expect_test "simple two-literal clause neg" =
   let solver = Solver.create () in
   (* Add clause: x1 or x2 *)
@@ -82,7 +133,7 @@ let%expect_test "simple two-literal clause neg" =
    | Sat { assignments } ->
      print_s [%message "SAT" (Clause.to_int_array assignments : int array)]
    | Unsat _ -> print_endline "UNSAT");
-  [%expect {| (SAT ("Clause.to_int_array assignments" (2 -1))) |}]
+  [%expect {| (SAT ("Clause.to_int_array assignments" (-1 2))) |}]
 ;;
 
 let%expect_test "simple satisfiable formula" =
@@ -100,9 +151,7 @@ let%expect_test "simple satisfiable formula" =
 
 let%expect_test "unit propagation leads to satisfaction" =
   let solver = Solver.create () in
-  (* Add clauses that force assignments through unit propagation:
-     x1
-     (-x1 or x2)
+  (* Add clauses that force assignments through unit propagation: x1 (-x1 or x2)
      This should force x2 to be true *)
   let _ = Solver.add_clause' solver ~clause:[| 1 |] in
   let _ = Solver.add_clause' solver ~clause:[| -1; 2 |] in
@@ -116,10 +165,7 @@ let%expect_test "unit propagation leads to satisfaction" =
 
 let%expect_test "unit propagation leads to conflict" =
   let solver = Solver.create () in
-  (* Add clauses that lead to contradiction:
-     x1
-     (-x1 or x2)
-     -x2 *)
+  (* Add clauses that lead to contradiction: x1 (-x1 or x2) -x2 *)
   let _ = Solver.add_clause' solver ~clause:[| 1 |] in
   let _ = Solver.add_clause' solver ~clause:[| -1; 2 |] in
   let _ = Solver.add_clause' solver ~clause:[| -2 |] in
@@ -128,7 +174,7 @@ let%expect_test "unit propagation leads to conflict" =
    | Sat _ -> print_endline "SAT"
    | Unsat { unsat_core } ->
      print_s [%message "UNSAT" (Clause.to_int_array unsat_core : int array)]);
-  [%expect {| (UNSAT ("Clause.to_int_array unsat_core" (1))) |}]
+  [%expect {| (UNSAT ("Clause.to_int_array unsat_core" (2))) |}]
 ;;
 
 let%expect_test "three-variable satisfiable formula" =
@@ -142,14 +188,13 @@ let%expect_test "three-variable satisfiable formula" =
    | Sat { assignments } ->
      print_s [%message "SAT" (Clause.to_int_array assignments : int array)]
    | Unsat _ -> print_endline "UNSAT");
-  [%expect {| (SAT ("Clause.to_int_array assignments" (1 3 -2))) |}]
+  [%expect {| (SAT ("Clause.to_int_array assignments" (1 -2 3))) |}]
 ;;
 
 let%expect_test "pigeonhole principle - 2 pigeons, 1 hole (unsat)" =
   let solver = Solver.create () in
-  (* Variables: x_ij means pigeon i is in hole j
-     x_11 (var 1): pigeon 1 in hole 1
-     x_21 (var 2): pigeon 2 in hole 1
+  (* Variables: x_ij means pigeon i is in hole j x_11 (var 1): pigeon 1 in hole
+     1 x_21 (var 2): pigeon 2 in hole 1
 
      Clauses:
      - Each pigeon must be in some hole: x_11, x_21
@@ -189,7 +234,7 @@ let%expect_test "larger satisfiable formula requiring backtracking" =
    | Sat { assignments } ->
      print_s [%message "SAT" (Clause.to_int_array assignments : int array)]
    | Unsat _ -> print_endline "UNSAT");
-  [%expect {| (SAT ("Clause.to_int_array assignments" (2 3 -1))) |}]
+  [%expect {| (SAT ("Clause.to_int_array assignments" (-1 2 3))) |}]
 ;;
 
 let%expect_test "larger unsatisfiable formula requiring backtracking" =
@@ -233,7 +278,7 @@ let%expect_test "succ dimacs" =
 
 let%expect_test "fail dimacs" =
   run_dimacs Examples.Dimacs.fail_eg;
-  [%expect {| (UNSAT (unsat_core (103 110))) |}]
+  [%expect {| (UNSAT (unsat_core (-112))) |}]
 ;;
 
 let%expect_test "assumptions" =
@@ -274,13 +319,13 @@ let%expect_test "assumptions" =
   solve ~assumptions:[| -1; -2; -3; -4; -5; 6 |] ();
   [%expect
     {|
-    (SAT (assignments (1 3 4 5 6 -2)))
-    (SAT (assignments (1 3 4 5 6 -2)))
+    (SAT (assignments (1 -2 3 4 5 6)))
+    (SAT (assignments (1 -2 3 4 5 6)))
     (SAT (assignments (1 2 3 4 -5 -6)))
     (UNSAT (unsat_core (2 1)))
-    (SAT (assignments (1 3 6 -2 -4 -5)))
+    (SAT (assignments (1 -2 3 -4 -5 6)))
     (UNSAT (unsat_core (2)))
     (SAT (assignments (-1 -2 -3 -4 -5 -6)))
-    (SAT (assignments (6 -1 -2 -3 -4 -5)))
+    (SAT (assignments (-1 -2 -3 -4 -5 6)))
     |}]
 ;;

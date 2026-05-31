@@ -17,6 +17,8 @@ module type%template
       , (bits64 & float64) & bits64
       , (bits64 & float64) & bits64 & bits64
       , value & bits64 & float64
+      , (value & value) & value & value
+      , (value & value) & value
       , bits64 & bits64 & float64 )] Elt = sig
   type t : k
 
@@ -28,6 +30,7 @@ module type%template
     k
     = ( value
       , value & value
+      , (value & value) & value & value
       , bits64
       , bits64 & bits64
       , value & bits64
@@ -39,6 +42,7 @@ module type%template
       , (bits64 & float64) & bits64
       , (bits64 & float64) & bits64 & bits64
       , value & bits64 & float64
+      , (value & value) & value
       , bits64 & bits64 & float64 )] S = sig
   module Elt : Elt [@kind k]
 
@@ -80,7 +84,31 @@ module type Option_u = sig
         , (bits64 & float64) & bits64
         , (bits64 & float64) & bits64 & bits64
         , value & bits64 & float64
-        , bits64 & bits64 & float64 )] S = S [@kind k]
+        , bits64 & bits64 & float64
+        , (value & value) & value & value
+        , (value & value) & value )] S = S [@kind k]
+
+  module%template
+    [@kind
+      k
+      = ( value
+        , value & value
+        , bits64
+        , bits64 & bits64
+        , (value & value) & value & value
+        , value & bits64
+        , bits64 & value
+        , value & bits64 & bits64
+        , (bits64 & bits64) & value
+        , (bits64 & bits64) & bits64 & bits64
+        , (bits64 & float64) & value
+        , (bits64 & float64) & bits64
+        , (bits64 & float64) & bits64 & bits64
+        , value & bits64 & float64
+        , bits64 & bits64 & float64
+        , (value & value) & value )] Make
+      (Arg : Elt
+    [@kind k]) : S [@kind k] with module Elt = Arg
 
   module%template
     [@kind
@@ -98,7 +126,11 @@ module type Option_u = sig
         , (bits64 & float64) & bits64
         , (bits64 & float64) & bits64 & bits64
         , value & bits64 & float64
-        , bits64 & bits64 & float64 )] Make
+        , (value & value) & value & value
+        , (value & value) & value
+        , bits64 & bits64 & float64 )] Make'
       (Arg : Elt
-    [@kind k]) : S [@kind k] with module Elt = Arg
+    [@kind k]) : sig
+    module Option_u : S [@kind k] with module Elt = Arg
+  end
 end

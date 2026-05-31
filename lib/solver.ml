@@ -78,10 +78,15 @@ module Watched_clause = struct
   type t =
     { clause_idx : int
     ; watch_index : int
+    ; mutable blocker : int
     }
   [@@deriving fields]
 
-  let create ~clause_idx ~watch_index = { clause_idx; watch_index }
+  let create ~clause_idx ~watch_index ~blocker =
+    { clause_idx; watch_index; blocker }
+  ;;
+
+  let set_blocker t blocker = t.blocker <- blocker
 end
 
 module Conflict_analysis_state = struct
@@ -203,6 +208,10 @@ let assignment t ~var = exclave_
   else None
 ;;
 
+let assignment_literal_is_true assignments literal =
+  Bitset.get (Tf_pair.get assignments (literal > 0)) (Int.abs literal)
+;;
+
 let%template assignments_array t : _ @ m =
   (let open Local_ref.O in
    let f = Tf_pair.get t.assignments false in
@@ -317,9 +326,11 @@ let analyze_conflict ~failed_clause t =
         let dl = trail_entry.#decision_level in
         if I64.O.(dl = #0L)
         then ()
-        else if I64.O.(dl = t.decision_level)
-        then incr path_count
-        else Vec.Value.push state.learned (Literal.to_int literal))
+        else (
+          Vsids.add_activity t.vsids ~literal;
+          if I64.O.(dl = t.decision_level)
+          then incr path_count
+          else Vec.Value.push state.learned (Literal.to_int literal)))
   in
   Clause.iter_literals failed_clause ~f:mark_literal;
   if t.debug
@@ -348,7 +359,6 @@ let analyze_conflict ~failed_clause t =
         match trail_entry.#reason with
         | T #(Decision, _, _) -> failwith "found decision before reaching UIP"
         | T #(Clause_idx, clause_idx, _) ->
-          Vsids.add_activity t.vsids ~literal;
           Local_ref.O.(rescale := !rescale || add_clause_activity t ~clause_idx);
           let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
           if t.debug
@@ -475,11 +485,33 @@ let add_watcher t ~clause_idx ~watch ~watch_pos =
   let literal = Literal.of_int (Clause.get clause watch_pos) in
   let watched_clauses = get_by_literal t.watched_clauses_by_literal literal in
   let slot = Vec.Value.length watched_clauses in
+  let blocker =
+    if Clause.watch_pos clause ~watch:(1 - watch) >= 0
+    then Clause.get clause (1 - watch)
+    else 0
+  in
   Vec.Value.push
     watched_clauses
-    (Watched_clause.create ~clause_idx ~watch_index:watch);
+    (Watched_clause.create ~clause_idx ~watch_index:watch ~blocker);
   Clause.set_watch_pos clause ~watch watch_pos;
   Clause.set_watch_slot clause ~watch slot
+;;
+
+let set_other_watch_blocker t clause ~clause_idx ~watch_index ~blocker =
+  let other_watch = 1 - watch_index in
+  if Clause.watch_pos clause ~watch:other_watch >= 0
+  then (
+    let other_literal = Literal.of_int (Clause.get clause other_watch) in
+    let other_slot = Clause.watch_slot clause ~watch:other_watch in
+    let watched_clauses =
+      get_by_literal t.watched_clauses_by_literal other_literal
+    in
+    if other_slot >= 0 && other_slot < Vec.Value.length watched_clauses
+    then (
+      let watched_clause = Vec.Value.get watched_clauses other_slot in
+      if watched_clause.clause_idx = clause_idx
+         && watched_clause.watch_index = other_watch
+      then Watched_clause.set_blocker watched_clause blocker))
 ;;
 
 let remove_clause_watches t clause =
@@ -533,29 +565,38 @@ let%template update_watched_clauses t ~set_literal =
         let other_watch_pos =
           Clause.watch_pos clause ~watch:(1 - watched_clause.watch_index)
         in
-        match
-          Clause.analyze_false_watch
-            clause
-            ~assignments:t.assignments
-            ~false_watch_pos
-            ~other_watch_pos
-        with
-        | Satisfied -> process (idx + 1)
-        | Replacement replacement_pos ->
-          remove_watcher_at t ~literal ~slot:idx;
-          add_watcher
-            t
-            ~clause_idx:watched_clause.clause_idx
-            ~watch:watched_clause.watch_index
-            ~watch_pos:replacement_pos;
-          process idx
-        | Unit unit_literal ->
-          queue_pending_unit
-            t
-            ~clause_idx:watched_clause.clause_idx
-            ~literal:unit_literal;
-          process (idx + 1)
-        | Conflict -> This watched_clause.clause_idx))
+        if assignment_literal_is_true t.assignments watched_clause.blocker
+        then process (idx + 1)
+        else (
+          match
+            Clause.analyze_false_watch
+              clause
+              ~assignments:t.assignments
+              ~false_watch_pos
+              ~other_watch_pos
+          with
+          | Satisfied -> process (idx + 1)
+          | Replacement replacement_pos ->
+            set_other_watch_blocker
+              t
+              clause
+              ~clause_idx:watched_clause.clause_idx
+              ~watch_index:watched_clause.watch_index
+              ~blocker:(Clause.get clause replacement_pos);
+            remove_watcher_at t ~literal ~slot:idx;
+            add_watcher
+              t
+              ~clause_idx:watched_clause.clause_idx
+              ~watch:watched_clause.watch_index
+              ~watch_pos:replacement_pos;
+            process idx
+          | Unit unit_literal ->
+            queue_pending_unit
+              t
+              ~clause_idx:watched_clause.clause_idx
+              ~literal:unit_literal;
+            process (idx + 1)
+          | Conflict -> This watched_clause.clause_idx)))
   in
   process 0 [@nontail]
 ;;
@@ -780,7 +821,7 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
    | T #(Decision, _, _) -> ()
    | T #(Clause_idx, clause_ptr, _) ->
      Int.H_set.remove t.clauses_with_active_unit clause_ptr);
-  Vsids.add_to_pool t.vsids ~var:(Literal.var trail_entry.#literal);
+  Vsids.add_to_pool t.vsids ~literal:trail_entry.#literal;
   Bitset.clear
     (Tf_pair.get t.assignments (Literal.value trail_entry.#literal))
     (Literal.var trail_entry.#literal);
@@ -851,8 +892,6 @@ let backtrack t ~failed_clause =
       [%message
         "backtrack"
           ~learned_clause:(Clause.literals_list learned_clause : int list)];
-  Clause.iter_literals learned_clause ~f:(fun literal ->
-    Vsids.add_activity t.vsids ~literal);
   Vsids.decay t.vsids;
   (* This is correct because we backtrack to the previous decision level, where
      all unit clauses had been applied. Learned clause is set to unit after

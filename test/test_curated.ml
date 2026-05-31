@@ -4,6 +4,26 @@ open! Ds
 
 [@@@warning "-69"]
 
+let%expect_test "small assumptions" =
+  let solver =
+    Solver.create_with_formula [| [| 1; 2 |]; [| -1; 3 |]; [| -3 |] |]
+  in
+  let solve assumptions =
+    match Solver.solve ~assumptions solver with
+    | Sat { assignments } ->
+      print_s [%message "SAT" (Clause.to_int_array assignments : int array)]
+    | Unsat { unsat_core } ->
+      print_s [%message "UNSAT" (Clause.to_int_array unsat_core : int array)]
+  in
+  solve [| 2 |];
+  solve [| -2 |];
+  [%expect
+    {|
+    (SAT ("Clause.to_int_array assignments" (2 -1 -3)))
+    (UNSAT ("Clause.to_int_array unsat_core" (1 2)))
+    |}]
+;;
+
 let%expect_test "regalloc" =
   let formula =
     [%of_sexp: int array array]
@@ -672,5 +692,11 @@ let%expect_test "regalloc" =
   let res = Solver.solve ~assumptions solver in
   print_s [%message (res : Solver.Sat_result.t)];
   [%expect
-    {| (res (Unsat (unsat_core (-81 -107)))) |}]
+    {|
+    (res
+     (Unsat
+      (unsat_core
+       (181 -80 -81 -82 -83 -84 -86 -87 -88 -89 -91 -105 -106 -107 -108 -109 -110
+        -112 -113 -114 -115 -117 -79))))
+    |}]
 ;;

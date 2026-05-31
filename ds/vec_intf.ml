@@ -6,12 +6,14 @@ module type%template
     k
     = ( value
       , bits64
+      , (value & value) & value & value
       , float64
       , immediate & value & value
       , bits64 & bits64
       , bits64 & bits64 & bits64
       , bits64 & bits64 & immediate & immediate & bits64
       , bits64 & bits64 & value & value & bits64
+      , value & value & value
       , (value & value & bits64) & bits64 & bits64 )] Elt = sig
   type t : k mod external_
 
@@ -24,8 +26,13 @@ module type%template [@kind k = (value & value)] Elt = sig
   val create_for_vec : unit -> t
 end
 
-module type%template [@kind k = (value & value & value)] Elt = sig
-  type t : value & (value & value)
+(* ppx_template cannot spell right-nested products in [@kind ...], so types whose
+   concrete layout is nested must use the corresponding flattened surface
+   product here. Keep this case non-[external_] so concrete types like
+   [lib2/var.ml] can instantiate it directly. *)
+module type%template
+  [@kind k = (value & (value & value) & value & (value & value) & value)] Elt = sig
+  type t : value & (value & value) & (value & ((value & value) & value))
 
   val create_for_vec : unit -> t
 end
@@ -37,17 +44,20 @@ module type%template
       , float64
       , immediate & value & value
       , value & value
+      , value & (value & value) & value & (value & value) & value
       , value & value & value
       , bits64
       , bits64 & bits64
       , bits64 & bits64 & bits64
       , bits64 & bits64 & immediate & immediate & bits64
       , bits64 & bits64 & value & value & bits64
+      , (value & value) & value & value
       , (value & value & bits64) & bits64 & bits64 )] S = sig
   module Elt : Elt [@kind k]
 
   type t
 
+  val arr : t -> Elt.t array
   val create : ?capacity:local_ int -> unit -> t
   val length : t -> int
   val get : t -> int -> Elt.t
@@ -63,6 +73,7 @@ module type%template
   val fill_to_length : t -> length:int -> f:(int -> Elt.t) @ local -> unit
   val take : t -> other:t -> unit
   val switch : t -> t -> unit
+  val swap : t -> int -> int -> unit
   val last_exn : t -> Elt.t
   val filter : t -> f:(Elt.t -> bool) @ local -> t
   val filter_inplace : t -> f:(Elt.t -> bool) @ local -> unit
@@ -101,6 +112,7 @@ module type S_value = sig
   val pop_exn : 'a t -> 'a
   val fill_to_length : 'a t -> length:int -> f:(int -> 'a) @ local -> unit
   val map : 'a t -> f:('a -> 'b) -> 'b t
+  val mapi : 'a t -> f:(int -> 'a -> 'b) -> 'b t
   val sort : 'a t -> compare:('a -> 'a -> int) @ local -> unit
 
   (** if the vec is currently [ a ; b ] where both [a] and [b] are sorted, sort
@@ -123,10 +135,12 @@ module type S_value = sig
   val mem : 'a t -> 'a -> compare:('a -> 'a -> int) -> bool
   val take : 'a t -> other:'a t -> unit
   val switch : 'a t -> 'a t -> unit
+  val swap : 'a t -> int -> int -> unit
   val last : 'a t -> 'a option
   val last_exn : 'a t -> 'a
   val filter : 'a t -> f:('a -> bool) @ local -> 'a t
   val filter_map : 'a t -> f:('a -> 'b option) @ local -> 'b t
+  val filter_mapi : 'a t -> f:(int -> 'a -> 'b option) @ local -> 'b t
   val filter_inplace : 'a t -> f:('a -> bool) @ local -> unit
   val filter_map_inplace : 'a t -> f:('a -> 'a option) @ local -> unit
   val findi : 'a t -> f:(int -> 'a -> 'b option) @ local -> 'b option
@@ -161,8 +175,10 @@ module type Vec = sig
         , value & value
         , bits64
         , bits64 & bits64
+        , (value & value) & value & value
         , immediate & value & value
         , value & value & value
+        , value & (value & value) & value & (value & value) & value
         , bits64 & bits64 & bits64
         , bits64 & bits64 & immediate & immediate & bits64
         , bits64 & bits64 & value & value & bits64
@@ -174,6 +190,8 @@ module type Vec = sig
       = ( value
         , float64
         , value & value
+        , value & (value & value) & value & (value & value) & value
+        , (value & value) & value & value
         , bits64
         , bits64 & bits64
         , value & value & value

@@ -8,7 +8,9 @@ module type%template
     = ( value
       , float64
       , value & value
+      , (value & value) & value & value
       , value & value & value
+      , value & (value & value) & value & (value & value) & value
       , bits64
       , bits64 & bits64
       , immediate & value & value
@@ -27,9 +29,11 @@ module%template
       , immediate & value & value
       , bits64 & bits64
       , value & value & value
+      , value & (value & value) & value & (value & value) & value
       , bits64 & bits64 & bits64
       , bits64 & bits64 & immediate & immediate & bits64
       , bits64 & bits64 & value & value & bits64
+      , (value & value) & value & value
       , (value & value & bits64) & bits64 & bits64 )] Make
     (Arg : Elt
   [@kind k]) : S [@kind k] with module Elt = Arg = struct
@@ -49,10 +53,11 @@ module%template
     t.length <- 0
   ;;
 
+  let arr t = t.arr
   let singleton x = { arr = [| x |]; length = 1 }
   let length t = t.length
 
-  let rec push t v =
+  let push t v =
     if t.length = Array.length t.arr
     then (
       let new_len = 2 * (t.length + 1) in
@@ -60,11 +65,9 @@ module%template
       for i = 0 to t.length - 1 do
         new_.(i) <- t.arr.(i)
       done;
-      t.arr <- new_;
-      push t v)
-    else (
-      t.arr.(t.length) <- v;
-      t.length <- t.length + 1)
+      t.arr <- new_);
+    t.arr.(t.length) <- v;
+    t.length <- t.length + 1
   ;;
 
   let pop_exn t : Elt.t =
@@ -74,15 +77,17 @@ module%template
   ;;
 
   let get t i : Elt.t =
-    if i < 0 || i >= t.length
-    then raise (Invalid_argument [%string "Index %{i#Int} out of bounds"]);
-    t.arr.(i)
+    try t.arr.(i) with
+    | _ ->
+      let _ =
+        raise (Invalid_argument [%string "Index %{i#Int} out of bounds"])
+      in
+      t.arr.(i)
   ;;
 
   let set t i v =
-    if i < 0 || i >= t.length
-    then raise (Invalid_argument "Index out of bounds");
-    t.arr.(i) <- v
+    try t.arr.(i) <- v with
+    | _ -> raise (Invalid_argument [%string "Index %{i#Int} out of bounds"])
   ;;
 
   let iter t ~f =
@@ -143,6 +148,13 @@ module%template
     t1.length <- t2.length;
     t2.arr <- arr;
     t2.length <- length
+  ;;
+
+  let swap t a b =
+    let arr = t.arr in
+    let tmp = arr.(a) in
+    arr.(a) <- arr.(b);
+    arr.(b) <- tmp
   ;;
 
   let last_exn t = get t (length t - 1)
@@ -208,6 +220,13 @@ module Value = struct
   let singleton x = { arr = [| x |]; length = 1 }
   let length t = t.length
 
+  let swap t a b =
+    let arr = t.arr in
+    let tmp = arr.(a) in
+    arr.(a) <- arr.(b);
+    arr.(b) <- tmp
+  ;;
+
   let rec push t v =
     if t.length = Array.length t.arr
     then (
@@ -230,17 +249,17 @@ module Value = struct
   ;;
 
   let get t i =
-    if i < 0 || i >= t.length
-    then raise (Invalid_argument [%string "Index %{i#Int} out of bounds"])
-    else t.arr.(i)
+    try t.arr.(i) with
+    | _ ->
+      raise (Invalid_argument [%string "get: Index %{i#Int} out of bounds"])
   ;;
 
   let get_opt t i = if i < 0 || i >= t.length then None else Some t.arr.(i)
 
   let set t i v =
-    if i < 0 || i >= t.length
-    then raise (Invalid_argument "Index out of bounds")
-    else t.arr.(i) <- v
+    try t.arr.(i) <- v with
+    | _ ->
+      raise (Invalid_argument [%string "set: Index %{i#Int} out of bounds"])
   ;;
 
   let iter t ~f =
@@ -302,6 +321,14 @@ module Value = struct
     let new_ = create ~capacity:t.length () in
     for i = 0 to t.length - 1 do
       push new_ (f t.arr.(i))
+    done;
+    new_
+  ;;
+
+  let mapi t ~f =
+    let new_ = create ~capacity:t.length () in
+    for i = 0 to t.length - 1 do
+      push new_ (f i t.arr.(i))
     done;
     new_
   ;;
@@ -397,6 +424,16 @@ module Value = struct
     let new_ = create () in
     for i = 0 to t.length - 1 do
       match f t.arr.(i) with
+      | Some x -> push new_ x
+      | None -> ()
+    done;
+    new_
+  ;;
+
+  let filter_mapi t ~f =
+    let new_ = create () in
+    for i = 0 to t.length - 1 do
+      match f i t.arr.(i) with
       | Some x -> push new_ x
       | None -> ()
     done;
