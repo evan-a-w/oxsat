@@ -4,9 +4,11 @@ open! Import
 type t =
   #{ clause_idx : int
    ; blocking_literal : int
-       (* another literal in the clause, checked early to avoid updating watched literals *)
+       (* another literal in the clause, checked early to avoid updating watched
+          literals *)
    ; is_binary : bool
-   (* if the clause is binary, checked to quickly propagate units in the case one of the variables is unset *)
+   (* if the clause is binary, checked to quickly propagate units in the case
+      one of the variables is unset *)
    }
 [@@deriving fields]
 

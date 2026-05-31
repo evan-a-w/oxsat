@@ -79,23 +79,6 @@ let run_map ?min_iterations ?max_iterations ?sample_runs () =
   ()
 ;;
 
-let run_sat ?min_iterations ?max_iterations ?sample_runs ~max_num_vars () =
-  printf "SAT solver benchmarks up to n=%d variables\n" max_num_vars;
-  let benchmark_config =
-    Benchmark.Config.create
-      ?min_iterations
-      ?max_iterations
-      ~warmup_runs:1
-      ~sample_runs:(Option.value sample_runs ~default:5)
-      ~target_time_ns:1_000_000_000
-      ()
-  in
-  let (_ : Benchmark.Result.t list) =
-    Sat_bench.run_scaling_benchmark ~benchmark_config ~max_num_vars ()
-  in
-  ()
-;;
-
 let run_dimacs ?min_iterations ?max_iterations ?sample_runs () =
   print_endline "DIMACS example benchmarks:";
   let benchmark_config =
@@ -130,23 +113,6 @@ let run_dimacs_sat_js ?min_iterations ?max_iterations ?sample_runs () =
   ()
 ;;
 
-let run_dimacs_sat_js_ocaml ?min_iterations ?max_iterations ?sample_runs () =
-  print_endline "DIMACS example benchmarks with OCaml sat.js equivalent:";
-  let benchmark_config =
-    Benchmark.Config.create
-      ?min_iterations
-      ?max_iterations
-      ~warmup_runs:1
-      ~sample_runs:(Option.value sample_runs ~default:5)
-      ~target_time_ns:1_000_000_000
-      ()
-  in
-  let (_ : Benchmark.Result.t list) =
-    Simple_sat_dimacs_bench.run_dimacs_examples ~benchmark_config ()
-  in
-  ()
-;;
-
 let command =
   Command.basic
     ~summary:"Run benchmarks"
@@ -156,15 +122,8 @@ let command =
          "bench"
          (optional string)
          ~doc:
-           "BENCH Which benchmark to run (examples, rb, map, sat, dimacs, \
-            dimacs-sat-js, dimacs-sat-js-ocaml, or all). Default: all"
-     and sat_max_n =
-       flag
-         "sat-max-n"
-         (optional int)
-         ~doc:
-           "INT Maximum number of variables to use for SAT benchmarks \
-            (default: 400)"
+           "BENCH Which benchmark to run (examples, rb, map, dimacs, \
+            dimacs-sat-js, or all). Default: all"
      and min_iterations =
        flag
          "min-iterations"
@@ -182,7 +141,6 @@ let command =
          ~doc:"INT number of samples to collect for each test"
      in
      fun () ->
-       let sat_max_n = Option.value sat_max_n ~default:400 in
        match bench with
        | None | Some "all" ->
          run_examples ?min_iterations ?max_iterations ?sample_runs ();
@@ -191,36 +149,19 @@ let command =
          print_endline "\n";
          run_map ?min_iterations ?max_iterations ?sample_runs ();
          print_endline "\n";
-         run_sat
-           ?min_iterations
-           ?max_iterations
-           ?sample_runs
-           ~max_num_vars:sat_max_n
-           ();
-         print_endline "\n";
          run_dimacs ?min_iterations ?max_iterations ?sample_runs ()
        | Some "examples" ->
          run_examples ?min_iterations ?max_iterations ?sample_runs ()
        | Some "rb" -> run_rb ?min_iterations ?max_iterations ?sample_runs ()
        | Some "map" -> run_map ?min_iterations ?max_iterations ?sample_runs ()
-       | Some "sat" ->
-         run_sat
-           ?min_iterations
-           ?max_iterations
-           ?sample_runs
-           ~max_num_vars:sat_max_n
-           ()
        | Some "dimacs" ->
          run_dimacs ?min_iterations ?max_iterations ?sample_runs ()
        | Some "dimacs-sat-js" ->
          run_dimacs_sat_js ?min_iterations ?max_iterations ?sample_runs ()
-       | Some "dimacs-sat-js-ocaml" ->
-         run_dimacs_sat_js_ocaml ?min_iterations ?max_iterations ?sample_runs ()
        | Some other ->
          eprintf "Unknown benchmark: %s\n" other;
          eprintf
-           "Valid options: examples, rb, map, sat, dimacs, dimacs-sat-js, \
-            dimacs-sat-js-ocaml, all\n";
+           "Valid options: examples, rb, map, dimacs, dimacs-sat-js, all\n";
          exit 1)
 ;;
 

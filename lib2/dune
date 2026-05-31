@@ -1,8 +1,0 @@
-(library
- (name feel2)
- (preprocess
-  (pps ppx_jane ppx_optional))
- (inline_tests)
- (libraries core core_unix ds unboxed)
- (flags
-  (:standard -extension-universe beta)))

@@ -28,10 +28,18 @@ let command =
              ())
        in
        let solver = Feel.Solver.create () in
-       Array.iter instance.clauses ~f:(fun clause ->
-         ignore (Feel.Solver.add_clause' solver ~clause));
        let start = Time_ns.now () in
-       let result = Feel.Solver.solve solver in
+       let add_result =
+         Array.find_map instance.clauses ~f:(fun clause ->
+           match Feel.Solver.add_clause solver ~clause with
+           | `Ok -> None
+           | `Unsat unsat_core -> Some unsat_core)
+       in
+       let result =
+         match add_result with
+         | Some unsat_core -> Feel.Sat_result.Unsat { unsat_core }
+         | None -> Feel.Solver.solve solver
+       in
        let elapsed = Time_ns.diff (Time_ns.now ()) start in
        let result =
          match result with
@@ -44,7 +52,7 @@ let command =
              (instance.name : string)
              (result : string)
              (elapsed : Time_ns.Span.t)];
-       print_s [%sexp (Feel.Solver.stats solver : Feel.Solver.Stats.t)])
+       print_s [%sexp (Feel.Solver.stats solver : Feel.Stats.t)])
 ;;
 
 let () = Command_unix.run command

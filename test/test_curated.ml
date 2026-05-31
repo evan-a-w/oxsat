@@ -5,22 +5,22 @@ open! Ds
 [@@@warning "-69"]
 
 let%expect_test "small assumptions" =
-  let solver =
-    Solver.create_with_formula [| [| 1; 2 |]; [| -1; 3 |]; [| -3 |] |]
-  in
   let solve assumptions =
-    match Solver.solve ~assumptions solver with
+    match
+      Helpers.solve_formula ~assumptions [| [| 1; 2 |]; [| -1; 3 |]; [| -3 |] |]
+    with
     | Sat { assignments } ->
-      print_s [%message "SAT" (Clause.to_int_array assignments : int array)]
+      print_s
+        [%message "SAT" (Helpers.assignment_literals assignments : int array)]
     | Unsat { unsat_core } ->
-      print_s [%message "UNSAT" (Clause.to_int_array unsat_core : int array)]
+      print_s [%message "UNSAT" (unsat_core : int array)]
   in
   solve [| 2 |];
   solve [| -2 |];
   [%expect
     {|
-    (SAT ("Clause.to_int_array assignments" (2 -1 -3)))
-    (UNSAT ("Clause.to_int_array unsat_core" (1 2)))
+    (SAT ("assignments" (2 -1 -3)))
+    (UNSAT ("unsat_core" (1 2)))
     |}]
 ;;
 
@@ -688,9 +688,8 @@ let%expect_test "regalloc" =
      -27 -261 -300 -287 -157 -144 -79 -14 -105 -66)
 |})
   in
-  let solver = Solver.create_with_formula ~debug:false formula in
-  let res = Solver.solve ~assumptions solver in
-  print_s [%message (res : Solver.Sat_result.t)];
+  let res = Helpers.solve_formula ~debug:false ~assumptions formula in
+  print_s [%message (res : Sat_result.t)];
   [%expect
     {|
     (res

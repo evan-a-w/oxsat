@@ -11,10 +11,17 @@ end
 
 let solve_instance clauses =
   let solver = Solver.create () in
-  Array.iter clauses ~f:(fun clause ->
-    ignore (Solver.add_clause' solver ~clause : Solver.t));
-  match Solver.solve solver with
-  | Sat _ | Unsat _ -> ()
+  let unsat =
+    Array.find_map clauses ~f:(fun clause ->
+      match Solver.add_clause solver ~clause with
+      | `Ok -> None
+      | `Unsat unsat_core -> Some unsat_core)
+  in
+  match unsat with
+  | Some _ -> ()
+  | None ->
+    (match Solver.solve solver with
+     | Sat _ | Unsat _ -> ())
 ;;
 
 let benchmark_of_instance (instance : Instance.t) =
