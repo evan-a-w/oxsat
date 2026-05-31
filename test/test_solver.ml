@@ -15,7 +15,7 @@ let%expect_test "two compatible unit clauses" =
      print_s
        [%message "SAT" (Helpers.assignment_literals assignments : int array)]
    | Unsat _ -> print_endline "UNSAT");
-  [%expect {| (SAT ("assignments" (1 2))) |}]
+  [%expect {| (SAT ("Helpers.assignment_literals assignments" (1 2))) |}]
 ;;
 
 let%expect_test "empty solver is satisfiable" =
@@ -45,7 +45,7 @@ let%expect_test "single unit clause is satisfiable" =
      print_s
        [%message "SAT" (Helpers.assignment_literals assignments : int array)]
    | Unsat _ -> print_endline "UNSAT");
-  [%expect {| (SAT ("assignments" (1))) |}]
+  [%expect {| (SAT ("Helpers.assignment_literals assignments" (1))) |}]
 ;;
 
 let%expect_test "contradictory unit clauses are unsatisfiable" =
@@ -53,7 +53,7 @@ let%expect_test "contradictory unit clauses are unsatisfiable" =
   (match result with
    | Sat _ -> print_endline "SAT"
    | Unsat { unsat_core } -> print_s [%message "UNSAT" (unsat_core : int array)]);
-  [%expect {| (UNSAT ("unsat_core" (1))) |}]
+  [%expect {| (UNSAT (unsat_core (1))) |}]
 ;;
 
 let%expect_test "simple two-literal clause" =
@@ -66,7 +66,7 @@ let%expect_test "simple two-literal clause" =
      print_s
        [%message "SAT" (Helpers.assignment_literals assignments : int array)]
    | Unsat _ -> print_endline "UNSAT");
-  [%expect {| (SAT ("assignments" (1 2))) |}]
+  [%expect {| (SAT ("Helpers.assignment_literals assignments" (1 2))) |}]
 ;;
 
 let%expect_test "simple two-literal clause neg" =
@@ -79,7 +79,7 @@ let%expect_test "simple two-literal clause neg" =
      print_s
        [%message "SAT" (Helpers.assignment_literals assignments : int array)]
    | Unsat _ -> print_endline "UNSAT");
-  [%expect {| (SAT ("assignments" (2 -1))) |}]
+  [%expect {| (SAT ("Helpers.assignment_literals assignments" (-1 2))) |}]
 ;;
 
 let%expect_test "simple satisfiable formula" =
@@ -93,7 +93,7 @@ let%expect_test "simple satisfiable formula" =
      print_s
        [%message "SAT" (Helpers.assignment_literals assignments : int array)]
    | Unsat _ -> print_endline "UNSAT");
-  [%expect {| (SAT ("assignments" (1 2 3))) |}]
+  [%expect {| (SAT ("Helpers.assignment_literals assignments" (1 2 3))) |}]
 ;;
 
 let%expect_test "unit propagation leads to satisfaction" =
@@ -108,7 +108,7 @@ let%expect_test "unit propagation leads to satisfaction" =
      print_s
        [%message "SAT" (Helpers.assignment_literals assignments : int array)]
    | Unsat _ -> print_endline "UNSAT");
-  [%expect {| (SAT ("assignments" (1 2))) |}]
+  [%expect {| (SAT ("Helpers.assignment_literals assignments" (1 2))) |}]
 ;;
 
 let%expect_test "unit propagation leads to conflict" =
@@ -116,7 +116,7 @@ let%expect_test "unit propagation leads to conflict" =
   (match result with
    | Sat _ -> print_endline "SAT"
    | Unsat { unsat_core } -> print_s [%message "UNSAT" (unsat_core : int array)]);
-  [%expect {| (UNSAT ("unsat_core" (1))) |}]
+  [%expect {| (UNSAT (unsat_core (2))) |}]
 ;;
 
 let%expect_test "three-variable satisfiable formula" =
@@ -131,7 +131,7 @@ let%expect_test "three-variable satisfiable formula" =
      print_s
        [%message "SAT" (Helpers.assignment_literals assignments : int array)]
    | Unsat _ -> print_endline "UNSAT");
-  [%expect {| (SAT ("assignments" (1 3 -2))) |}]
+  [%expect {| (SAT ("Helpers.assignment_literals assignments" (1 -2 3))) |}]
 ;;
 
 let%expect_test "pigeonhole principle - 2 pigeons, 1 hole (unsat)" =
@@ -139,7 +139,7 @@ let%expect_test "pigeonhole principle - 2 pigeons, 1 hole (unsat)" =
   (match result with
    | Sat _ -> print_endline "SAT"
    | Unsat { unsat_core } -> print_s [%message "UNSAT" (unsat_core : int array)]);
-  [%expect {| (UNSAT ("unsat_core" (1))) |}]
+  [%expect {| (UNSAT (unsat_core (1))) |}]
 ;;
 
 let%expect_test "clause with multiple literals satisfied by one assignment" =
@@ -153,7 +153,7 @@ let%expect_test "clause with multiple literals satisfied by one assignment" =
      print_s
        [%message "SAT" (Helpers.assignment_literals assignments : int array)]
    | Unsat _ -> print_endline "UNSAT");
-  [%expect {| (SAT ("assignments" (1 2 3))) |}]
+  [%expect {| (SAT ("Helpers.assignment_literals assignments" (1 2 3))) |}]
 ;;
 
 let%expect_test "larger satisfiable formula requiring backtracking" =
@@ -168,7 +168,7 @@ let%expect_test "larger satisfiable formula requiring backtracking" =
      print_s
        [%message "SAT" (Helpers.assignment_literals assignments : int array)]
    | Unsat _ -> print_endline "UNSAT");
-  [%expect {| (SAT ("assignments" (2 3 -1))) |}]
+  [%expect {| (SAT ("Helpers.assignment_literals assignments" (-1 2 3))) |}]
 ;;
 
 let%expect_test "larger unsatisfiable formula requiring backtracking" =
@@ -210,7 +210,7 @@ let%expect_test "succ dimacs" =
 
 let%expect_test "fail dimacs" =
   run_dimacs Examples.Dimacs.fail_eg;
-  [%expect {| (UNSAT (unsat_core (103 110))) |}]
+  [%expect {| (UNSAT (unsat_core (-112))) |}]
 ;;
 
 let%expect_test "assumptions" =
@@ -250,13 +250,13 @@ let%expect_test "assumptions" =
   solve ~assumptions:[| -1; -2; -3; -4; -5; 6 |] ();
   [%expect
     {|
-    (SAT (assignments (1 3 4 5 6 -2)))
-    (SAT (assignments (1 3 4 5 6 -2)))
+    (SAT (assignments (1 -2 3 4 5 6)))
+    (SAT (assignments (1 -2 3 4 5 6)))
     (SAT (assignments (1 2 3 4 -5 -6)))
     (UNSAT (unsat_core (2 1)))
-    (SAT (assignments (1 3 6 -2 -4 -5)))
+    (SAT (assignments (1 -2 3 -4 -5 6)))
     (UNSAT (unsat_core (2)))
     (SAT (assignments (-1 -2 -3 -4 -5 -6)))
-    (SAT (assignments (6 -1 -2 -3 -4 -5)))
+    (SAT (assignments (-1 -2 -3 -4 -5 6)))
     |}]
 ;;

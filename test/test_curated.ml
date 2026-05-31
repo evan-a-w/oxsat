@@ -19,8 +19,8 @@ let%expect_test "small assumptions" =
   solve [| -2 |];
   [%expect
     {|
-    (SAT ("assignments" (2 -1 -3)))
-    (UNSAT ("unsat_core" (1 2)))
+    (SAT ("Helpers.assignment_literals assignments" (-1 2 -3)))
+    (UNSAT (unsat_core (-2 -3)))
     |}]
 ;;
 

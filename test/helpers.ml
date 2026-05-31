@@ -20,8 +20,8 @@ let add_clause_exn solver ~clause =
           (unsat_core : int array)]
 ;;
 
-let solve_formula ?debug ?time_bound ?assumptions formula =
+let solve_formula ?debug ?(time_bound = `Bounded 1_000) ?assumptions formula =
   match Solver.create_with_formula ?debug formula with
   | `Unsat unsat_core -> Sat_result.Unsat { unsat_core }
-  | `Ok solver -> Solver.solve ?time_bound ?assumptions solver
+  | `Ok solver -> Solver.solve ~time_bound ?assumptions solver
 ;;
