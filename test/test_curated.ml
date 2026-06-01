@@ -19,7 +19,7 @@ let run_dimacs s =
 
 let%expect_test "FAIL_EG" =
   run_dimacs Examples.Dimacs.fail_eg;
-  [%expect {| (UNSAT (unsat_core (-101 -87))) |}]
+  [%expect {| (UNSAT (unsat_core (91 90 85 -96 88 105))) |}]
 ;;
 
 let%expect_test "small assumptions" =
@@ -714,8 +714,8 @@ let%expect_test "regalloc" =
      This is strongly discouraged as backtraces are fragile.
      Please change this test to not include a backtrace. *)
   (Feel__Solver.Timeout)
-  Raised at Feel__Solver.Timer.check in file "lib/solver.ml", line 62, characters 45-58
-  Called from Feel__Solver.solve' in file "lib/solver.ml", line 808, characters 3-20
+  Raised at Feel__Solver.Timer.check in file "lib/solver.ml", line 71, characters 45-58
+  Called from Feel__Solver.solve' in file "lib/solver.ml", line 810, characters 3-20
   Called from Nod_test__Test_curated.(fun) in file "test/test_curated.ml", line 709, characters 12-67
   Called from Ppx_expect_runtime__Test_block.Configured.dump_backtrace in file "runtime/test_block.ml", line 359, characters 10-25
   |}]

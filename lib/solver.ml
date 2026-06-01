@@ -17,12 +17,11 @@ type t =
   ; lbd_stamp_set : Stamp_set.t
   ; debug : bool
   ; vsids : Vsids.t
-  (* Glucose-style restart: exponential moving averages of LBD *)
-  ; mutable lbd_ema_fast : float
-  ; mutable lbd_ema_slow : float
+  (* Luby restart: conflicts since last restart vs current Luby threshold *)
   ; mutable conflicts_since_restart : int
-  (* Clause deletion: conflict budget before next reduction *)
-  ; mutable conflicts_until_reduce : int
+  ; mutable luby_index : int
+  (* Clause deletion: every N iterations *)
+  ; mutable iterations_until_reduce : int
   ; mutable reduce_db_increment : int
   }
 
@@ -32,6 +31,16 @@ type time_bound =
   ]
 
 exception Timeout
+
+(* Luby sequence: 1,1,2,1,1,2,4,1,1,2,1,1,2,4,8,... *)
+let rec luby_value i =
+  let rec find_k k = if (1 lsl k) - 1 < i then find_k (k + 1) else k in
+  let k = find_k 1 in
+  if i = (1 lsl k) - 1
+  then 1 lsl (k - 1)
+  else (
+    let prev_block = (1 lsl (k - 1)) - 1 in
+    luby_value (i - prev_block))
 
 let timeout_check_every = 1024
 
@@ -448,10 +457,6 @@ let add_clause t ~literals ~learned ?(lbd = 0) () =
       go (i + 1))
   in
   go 0;
-  if not learned
-  then
-    Vec.Value.iter literals ~f:(fun literal ->
-      Vsids.add_activity t.vsids ~literal);
   (* has unit is populated when the trail entry is seen *)
   let clause : Clause.t =
     { clause = literals; has_unit = false; learned; lbd; deleted = false }
@@ -486,11 +491,12 @@ let mark_literal t ~seen ~literal ~(local_ path_count) ~learned_literals =
        | None -> ()
        | Some trail_entry ->
          let dl = trail_entry.#decision_level in
-         Vsids.add_activity t.vsids ~literal;
          if dl = 0
          then ()
          else if dl = t.decision_level
-         then incr path_count
+         then (
+           Vsids.add_activity t.vsids ~literal;
+           incr path_count)
          else Vec.Value.push learned_literals literal))
 ;;
 
@@ -624,25 +630,26 @@ let compute_lbd t ~literals =
   !lbd
 ;;
 
-(* Remove low-quality learned clauses. Keep:
-   - all original clauses (not learned)
-   - learned clauses with LBD <= 2 (glue clauses — highly predictive)
-   - the most active half of the remaining learned clauses by LBD
-   After deletion, rebuild all watch lists from scratch. *)
+(* Remove low-quality learned clauses. Matches main branch criteria:
+   - only consider learned clauses with LBD >= 4 and length > 3
+   - delete the lower-LBD half (worst by LBD, largest first as tiebreak)
+   - never delete a clause currently propagating a unit *)
 let reduce_db t =
-  (* Mark clauses to delete: learned, LBD > 2, and in the worse half by LBD *)
-  let learned_above_glue =
+  let candidates =
     Vec.Value.filter_mapi t.clauses ~f:(fun i clause ->
-      if clause.Clause.learned && clause.lbd > 2 && not clause.deleted
+      if clause.Clause.learned
+         && clause.lbd >= 4
+         && Vec.Value.length clause.clause > 3
+         && not clause.deleted
       then Some (i, clause.lbd)
       else None)
     |> Vec.Value.to_array
   in
-  (* Sort by LBD descending — worst clauses first *)
-  Array.sort learned_above_glue ~compare:(fun (_, a) (_, b) -> Int.compare b a);
-  let n_delete = Array.length learned_above_glue / 2 in
+  (* Sort by LBD descending — highest LBD (worst) first *)
+  Array.sort candidates ~compare:(fun (_, a) (_, b) -> Int.compare b a);
+  let n_delete = Array.length candidates / 2 in
   let deleted = ref 0 in
-  Array.iteri learned_above_glue ~f:(fun i (clause_idx, _) ->
+  Array.iteri candidates ~f:(fun i (clause_idx, _) ->
     if i < n_delete
     then (
       let clause = Vec.Value.get t.clauses clause_idx in
@@ -650,19 +657,20 @@ let reduce_db t =
       then (
         clause.deleted <- true;
         incr deleted)));
-  (* Rebuild all watch lists by scanning clauses *)
+  (* Eagerly purge deleted-clause watch entries so propagation stays fast *)
   Vec.Value.iter t.vars ~f:(fun (var : Var.t) ->
     if var.exists
     then (
-      Watched_clause.Vec.clear (Tf_pair.get var.watched_clauses true);
-      Watched_clause.Vec.clear (Tf_pair.get var.watched_clauses false)));
-  Vec.Value.iteri t.clauses ~f:(fun clause_idx clause ->
-    if (not clause.deleted) && Vec.Value.length clause.clause >= 2
-    then register_watchers_for_new_clause t ~literals:clause.clause ~clause_idx);
+      Watched_clause.Vec.filter_inplace
+        (Tf_pair.get var.watched_clauses true)
+        ~f:(fun #{ clause_idx; blocking_literal = _; is_binary = _ } ->
+          not (Vec.Value.get t.clauses clause_idx).deleted);
+      Watched_clause.Vec.filter_inplace
+        (Tf_pair.get var.watched_clauses false)
+        ~f:(fun #{ clause_idx; blocking_literal = _; is_binary = _ } ->
+          not (Vec.Value.get t.clauses clause_idx).deleted)));
   t.stats
-  <- #{ t.stats with deleted_clauses = t.stats.#deleted_clauses + !deleted };
-  t.conflicts_until_reduce <- t.conflicts_until_reduce + t.reduce_db_increment;
-  t.reduce_db_increment <- t.reduce_db_increment + 100
+  <- #{ t.stats with deleted_clauses = t.stats.#deleted_clauses + !deleted }
 ;;
 
 let backtrack t ~failed_clause =
@@ -670,14 +678,6 @@ let backtrack t ~failed_clause =
     analyze_conflict t ~failed_clause
   in
   let lbd = compute_lbd t ~literals:learned_literals in
-  (* Glucose-style EMAs: fast window ~32 conflicts, slow window ~4096 *)
-  let alpha_fast = 1. /. 32. in
-  let alpha_slow = 1. /. 4096. in
-  t.lbd_ema_fast
-  <- (t.lbd_ema_fast *. (1. -. alpha_fast)) +. (Float.of_int lbd *. alpha_fast);
-  t.lbd_ema_slow
-  <- (t.lbd_ema_slow *. (1. -. alpha_slow)) +. (Float.of_int lbd *. alpha_slow);
-  t.conflicts_since_restart <- t.conflicts_since_restart + 1;
   t.stats
   <- #{ t.stats with
         learned_clauses = t.stats.#learned_clauses + 1
@@ -691,6 +691,8 @@ let backtrack t ~failed_clause =
         "backtrack"
           ~learned_clause:(Vec.Value.to_list learned_literals : int list)
           (lbd : int)];
+  Vec.Value.iter learned_literals ~f:(fun literal ->
+    Vsids.add_activity t.vsids ~literal);
   Vsids.decay t.vsids;
   remove_greater_than_decision_level t ~decision_level:backjump_level;
   match add_clause t ~literals:learned_literals ~learned:true ~lbd () with
@@ -829,16 +831,22 @@ and learn_from_failure t ~failed_clause_idx ~timer : Sat_result.t @ m =
     t.stats <- #{ t.stats with conflicts = t.stats.#conflicts + 1 };
     (match backtrack t ~failed_clause with
      | `Ok ->
-       (* Clause database reduction: triggered on a conflict budget *)
-       if t.stats.#conflicts >= t.conflicts_until_reduce then reduce_db t;
-       (* Glucose-style restart: restart when fast LBD average is significantly
-          worse than the slow average, and we've had enough conflicts to warm up
-          the slow EMA (require at least 50 conflicts since last restart) *)
-       if t.conflicts_since_restart >= 50
-          && Float.(t.lbd_ema_fast > t.lbd_ema_slow *. 1.25)
+       t.conflicts_since_restart <- t.conflicts_since_restart + 1;
+       (* Clause database reduction: every reduce_db_increment iterations *)
+       t.iterations_until_reduce <- t.iterations_until_reduce - 1;
+       if t.iterations_until_reduce <= 0
+       then (
+         reduce_db t;
+         t.iterations_until_reduce <- t.reduce_db_increment;
+         t.reduce_db_increment <- t.reduce_db_increment + 100);
+       (* Luby restart: unit run of 32, so thresholds are 32,32,64,32,32,64,128,... *)
+       let luby_threshold = 32 * luby_value t.luby_index in
+       if t.conflicts_since_restart >= luby_threshold
+          && t.decision_level > t.decision_level_of_last_assumption
        then (
          t.stats <- #{ t.stats with restarts = t.stats.#restarts + 1 };
          t.conflicts_since_restart <- 0;
+         t.luby_index <- t.luby_index + 1;
          restart t);
        (solve' [@alloc a]) t ~timer
      | `Conflict failed_clause_idx ->
@@ -878,10 +886,9 @@ let add_assumptions ~(local_ assumptions) t ~timer = exclave_
 let maybe_clear_past_solve_state t =
   let has_run_before = t.stats.#iterations > 0 in
   t.stats <- Stats.empty ();
-  t.lbd_ema_fast <- 0.;
-  t.lbd_ema_slow <- 0.;
   t.conflicts_since_restart <- 0;
-  t.conflicts_until_reduce <- 2000;
+  t.luby_index <- 1;
+  t.iterations_until_reduce <- 2000;
   t.reduce_db_increment <- 300;
   if has_run_before
   then (
@@ -929,10 +936,9 @@ let create ?(random_state = Random.State.make [| 1; 2; 3 |]) ?(debug = false) ()
   ; lbd_stamp_set = Stamp_set.create ()
   ; debug
   ; vsids = Vsids.create ()
-  ; lbd_ema_fast = 0.
-  ; lbd_ema_slow = 0.
   ; conflicts_since_restart = 0
-  ; conflicts_until_reduce = 2000
+  ; luby_index = 1
+  ; iterations_until_reduce = 2000
   ; reduce_db_increment = 300
   }
 ;;

@@ -122,7 +122,9 @@ type t =
   ; known_vars : Bitset.t
   ; in_pool : Bitset.t
   ; in_heap : Bitset.t
-  ; preferred_true : Bitset.t
+  (* per-polarity activity: pos_activity tracks positive literals, heap tracks total *)
+  ; pos_activity : float Vec.Value.t
+  ; neg_activity : float Vec.Value.t
   ; mutable activity_inc : float
   }
 
@@ -131,30 +133,50 @@ let create () =
   ; known_vars = Bitset.create ()
   ; in_pool = Bitset.create ()
   ; in_heap = Bitset.create ()
-  ; preferred_true = Bitset.create ()
+  ; pos_activity = Vec.Value.create ()
+  ; neg_activity = Vec.Value.create ()
   ; activity_inc = 1.
   }
 ;;
 
+let ensure_polarity_capacity t ~var =
+  Vec.Value.fill_to_length t.pos_activity ~length:(var + 1) ~f:(fun _ -> 0.);
+  Vec.Value.fill_to_length t.neg_activity ~length:(var + 1) ~f:(fun _ -> 0.)
+;;
+
 let on_new_var t ~var =
   Heap.ensure_var_capacity t.heap ~var;
+  ensure_polarity_capacity t ~var;
   if not (Bitset.get t.known_vars var)
   then (
     Bitset.set t.known_vars var;
     Bitset.set t.in_pool var;
-    Bitset.set t.preferred_true var;
     Bitset.set t.in_heap var;
     Heap.push t.heap var)
 ;;
 
 let rescale t =
   Heap.rescale_activities t.heap ~scale:1e100;
+  Vec.Value.map_inplace t.pos_activity ~f:(fun a -> a /. 1e100);
+  Vec.Value.map_inplace t.neg_activity ~f:(fun a -> a /. 1e100);
   t.activity_inc <- t.activity_inc /. 1e100
 ;;
 
 let add_activity t ~literal =
   let var = Int.abs literal in
   Heap.bump_activity t.heap ~var ~amount:t.activity_inc;
+  ensure_polarity_capacity t ~var;
+  if literal > 0
+  then
+    Vec.Value.set
+      t.pos_activity
+      var
+      (Vec.Value.get t.pos_activity var +. t.activity_inc)
+  else
+    Vec.Value.set
+      t.neg_activity
+      var
+      (Vec.Value.get t.neg_activity var +. t.activity_inc);
   if Bitset.get t.in_heap var then Heap.fix_after_bump t.heap ~var;
   if Float.(Heap.activity t.heap var > 1e100) then rescale t
 ;;
@@ -164,9 +186,6 @@ let remove_from_pool t ~var = Bitset.clear t.in_pool var
 
 let add_to_pool t ~literal =
   let var = Int.abs literal in
-  if literal > 0
-  then Bitset.set t.preferred_true var
-  else Bitset.clear t.preferred_true var;
   if not (Bitset.get t.in_pool var) then Bitset.set t.in_pool var;
   if not (Bitset.get t.in_heap var)
   then (
@@ -183,7 +202,11 @@ let choose_literal t =
       Bitset.clear t.in_heap var;
       if not (Bitset.get t.in_pool var)
       then go ()
-      else This (if Bitset.get t.preferred_true var then var else -var)
+      else (
+        (* choose the polarity with higher accumulated activity *)
+        let pos = Vec.Value.get t.pos_activity var in
+        let neg = Vec.Value.get t.neg_activity var in
+        This (if Float.compare pos neg >= 0 then var else -var))
   in
   go ()
 ;;

@@ -48,11 +48,7 @@ module%template
     { arr = Array.create ~len:capacity (Elt.create_for_vec ()); length = 0 }
   ;;
 
-  let clear t =
-    t.arr <- [||];
-    t.length <- 0
-  ;;
-
+  let clear t = t.length <- 0
   let arr t = t.arr
   let singleton x = { arr = [| x |]; length = 1 }
   let length t = t.length
@@ -211,12 +207,7 @@ module Value = struct
   ;;
 
   let of_array_taking_ownership arr = { arr; length = Array.length arr }
-
-  let clear t =
-    t.arr <- [||];
-    t.length <- 0
-  ;;
-
+  let clear t = t.length <- 0
   let singleton x = { arr = [| x |]; length = 1 }
   let length t = t.length
 
