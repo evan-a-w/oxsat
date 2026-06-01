@@ -103,7 +103,7 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
   Vsids.add_to_pool t.vsids ~literal:trail_entry.#literal;
   var.assignment <- Null;
   var.trail_entry <- Trail_entry.Option_u.none ();
-  var.trail_index <- -1;
+  var.trail_index <- Null;
   match trail_entry.#reason with
   | T #(Decision, ()) -> ()
   | T #(Clause_idx, clause_idx) ->
@@ -132,7 +132,7 @@ let push_trail_entry t ~(trail_entry : Trail_entry.t) =
             (t.decision_level : int)];
     var.assignment <- This (trail_entry.#literal > 0);
     var.trail_entry <- Trail_entry.Option_u.some trail_entry;
-    var.trail_index <- Trail_entry.Vec.length t.trail;
+    var.trail_index <- This (Trail_entry.Vec.length t.trail);
     Trail_entry.Vec.push t.trail trail_entry;
     Vsids.remove_from_pool t.vsids ~var:(Int.abs trail_entry.#literal);
     Literal_set.remove t.unassigned_literals ~literal:trail_entry.#literal;
@@ -344,11 +344,12 @@ let rec propagate t : int or_null =
 ;;
 
 let trail_index_of_var_exn t ~var =
-  let trail_index = (Vec.Value.get t.vars var).trail_index in
+  let trail_index = Or_null.get (Vec.Value.get t.vars var).trail_index in
   if trail_index < 0
      || trail_index >= Trail_entry.Vec.length t.trail
      || Int.abs (Trail_entry.Vec.get t.trail trail_index).#literal <> var
-  then Error.raise_s [%message "BUG: assigned var missing from trail" (var : int)]
+  then
+    Error.raise_s [%message "BUG: assigned var missing from trail" (var : int)]
   else trail_index
 ;;
 
@@ -395,7 +396,7 @@ let ensure_literal t ~literal =
       t.vars
       { assignment = Null
       ; trail_entry = Trail_entry.Option_u.none ()
-      ; trail_index = -1
+      ; trail_index = Null
       ; watched_clauses = Tf_pair.create (fun _ -> Watched_clause.Vec.create ())
       ; exists = false
       }
@@ -440,7 +441,9 @@ let add_clause t ~literals ~learned =
   in
   go 0;
   if not learned
-  then Vec.Value.iter literals ~f:(fun literal -> Vsids.add_activity t.vsids ~literal);
+  then
+    Vec.Value.iter literals ~f:(fun literal ->
+      Vsids.add_activity t.vsids ~literal);
   (* has unit is populated when the trail entry is seen *)
   let clause : Clause.t = { clause = literals; has_unit = false; learned } in
   let clause_idx = Vec.Value.length t.clauses in
@@ -473,13 +476,10 @@ let mark_literal t ~seen ~literal ~(local_ path_count) ~learned_literals =
        | None -> ()
        | Some trail_entry ->
          let dl = trail_entry.#decision_level in
-         if dl = 0
-         then ()
-         else (
-           Vsids.add_activity t.vsids ~literal;
-           if dl = t.decision_level
-           then incr path_count
-           else Vec.Value.push learned_literals literal)))
+         Vsids.add_activity t.vsids ~literal;
+         if dl = t.decision_level
+         then incr path_count
+         else Vec.Value.push learned_literals literal))
 ;;
 
 let simplify_learned_clause t ~learned_literals ~uip_literal ~seen =
@@ -509,17 +509,8 @@ let simplify_learned_clause t ~learned_literals ~uip_literal ~seen =
             Vec.Value.iter reason.clause ~f:(fun literal ->
               if Int.abs literal = Int.abs uip_literal
               then ()
-              else (
-                match%optional_u
-                  ((literal_var t ~literal).trail_entry
-                   : Trail_entry.Option_u.t)
-                with
-                | None -> ()
-                | Some trail_entry ->
-                  if trail_entry.#decision_level = 0
-                  then ()
-                  else if not (Stamp_set.is_seen seen ~var:(Int.abs literal))
-                  then all_marked := false));
+              else if not (Stamp_set.is_seen seen ~var:(Int.abs literal))
+              then all_marked := false);
             !all_marked
         in
         if skip
