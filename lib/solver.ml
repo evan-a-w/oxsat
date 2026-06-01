@@ -103,6 +103,7 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
   Vsids.add_to_pool t.vsids ~literal:trail_entry.#literal;
   var.assignment <- Null;
   var.trail_entry <- Trail_entry.Option_u.none ();
+  var.trail_index <- -1;
   match trail_entry.#reason with
   | T #(Decision, ()) -> ()
   | T #(Clause_idx, clause_idx) ->
@@ -131,6 +132,7 @@ let push_trail_entry t ~(trail_entry : Trail_entry.t) =
             (t.decision_level : int)];
     var.assignment <- This (trail_entry.#literal > 0);
     var.trail_entry <- Trail_entry.Option_u.some trail_entry;
+    var.trail_index <- Trail_entry.Vec.length t.trail;
     Trail_entry.Vec.push t.trail trail_entry;
     Vsids.remove_from_pool t.vsids ~var:(Int.abs trail_entry.#literal);
     Literal_set.remove t.unassigned_literals ~literal:trail_entry.#literal;
@@ -342,16 +344,12 @@ let rec propagate t : int or_null =
 ;;
 
 let trail_index_of_var_exn t ~var =
-  let rec go i =
-    if i < 0
-    then
-      Error.raise_s
-        [%message "BUG: assigned var missing from trail" (var : int)]
-    else if Int.abs (Trail_entry.Vec.get t.trail i).#literal = var
-    then i
-    else go (i - 1)
-  in
-  go (Trail_entry.Vec.length t.trail - 1)
+  let trail_index = (Vec.Value.get t.vars var).trail_index in
+  if trail_index < 0
+     || trail_index >= Trail_entry.Vec.length t.trail
+     || Int.abs (Trail_entry.Vec.get t.trail trail_index).#literal <> var
+  then Error.raise_s [%message "BUG: assigned var missing from trail" (var : int)]
+  else trail_index
 ;;
 
 let conflict_keep_trail_len t ~failed_clause_idx =
@@ -376,18 +374,19 @@ let pop_trail_after_conflict t ~failed_clause_idx =
   <- Int.min t.trail_processed_till (Trail_entry.Vec.length t.trail)
 ;;
 
-let register_watcher t ~literal ~clause_idx ~blocking_literal =
+let register_watcher t ~literal ~clause_idx ~blocking_literal ~is_binary =
   let var = literal_var t ~literal in
   Watched_clause.Vec.push
     (Tf_pair.get var.watched_clauses (literal > 0))
-    (Watched_clause.create ~clause_idx ~blocking_literal ~is_binary:false)
+    (Watched_clause.create ~clause_idx ~blocking_literal ~is_binary)
 ;;
 
 let register_watchers_for_new_clause t ~literals ~clause_idx =
   let lit1 = Vec.Value.get literals 0 in
   let lit2 = Vec.Value.get literals 1 in
-  register_watcher t ~literal:lit1 ~clause_idx ~blocking_literal:lit2;
-  register_watcher t ~literal:lit2 ~clause_idx ~blocking_literal:lit1
+  let is_binary = Vec.Value.length literals = 2 in
+  register_watcher t ~literal:lit1 ~clause_idx ~blocking_literal:lit2 ~is_binary;
+  register_watcher t ~literal:lit2 ~clause_idx ~blocking_literal:lit1 ~is_binary
 ;;
 
 let ensure_literal t ~literal =
@@ -396,6 +395,7 @@ let ensure_literal t ~literal =
       t.vars
       { assignment = Null
       ; trail_entry = Trail_entry.Option_u.none ()
+      ; trail_index = -1
       ; watched_clauses = Tf_pair.create (fun _ -> Watched_clause.Vec.create ())
       ; exists = false
       }
@@ -439,6 +439,8 @@ let add_clause t ~literals ~learned =
       go (i + 1))
   in
   go 0;
+  if not learned
+  then Vec.Value.iter literals ~f:(fun literal -> Vsids.add_activity t.vsids ~literal);
   (* has unit is populated when the trail entry is seen *)
   let clause : Clause.t = { clause = literals; has_unit = false; learned } in
   let clause_idx = Vec.Value.length t.clauses in
@@ -471,11 +473,13 @@ let mark_literal t ~seen ~literal ~(local_ path_count) ~learned_literals =
        | None -> ()
        | Some trail_entry ->
          let dl = trail_entry.#decision_level in
-         (* if dl = 0 then () else *)
-         Vsids.add_activity t.vsids ~literal;
-         if dl = t.decision_level
-         then incr path_count
-         else Vec.Value.push learned_literals literal))
+         if dl = 0
+         then ()
+         else (
+           Vsids.add_activity t.vsids ~literal;
+           if dl = t.decision_level
+           then incr path_count
+           else Vec.Value.push learned_literals literal)))
 ;;
 
 let simplify_learned_clause t ~learned_literals ~uip_literal ~seen =
@@ -505,8 +509,17 @@ let simplify_learned_clause t ~learned_literals ~uip_literal ~seen =
             Vec.Value.iter reason.clause ~f:(fun literal ->
               if Int.abs literal = Int.abs uip_literal
               then ()
-              else if not (Stamp_set.is_seen seen ~var:(Int.abs literal))
-              then all_marked := false);
+              else (
+                match%optional_u
+                  ((literal_var t ~literal).trail_entry
+                   : Trail_entry.Option_u.t)
+                with
+                | None -> ()
+                | Some trail_entry ->
+                  if trail_entry.#decision_level = 0
+                  then ()
+                  else if not (Stamp_set.is_seen seen ~var:(Int.abs literal))
+                  then all_marked := false));
             !all_marked
         in
         if skip

@@ -1346,7 +1346,7 @@ let formula =
 
 let _assumptions : int array = [||]
 
-let _assumptions =
+let assumptions =
   [%of_sexp: int array]
     (Sexp.of_string
        {|
@@ -1355,7 +1355,7 @@ let _assumptions =
 |})
 ;;
 
-let assumptions =
+let _assumptions =
   [%of_sexp: int array]
     (Sexp.of_string
        {|
@@ -1373,7 +1373,7 @@ let () =
   | `Ok solver ->
     (try
        let res =
-         Solver.solve ~time_bound:(`Bounded 1_000) ~assumptions solver
+         Solver.solve ~time_bound:(`Bounded 10_000) ~assumptions solver
        in
        print_s [%message (res : Sat_result.t) (Solver.stats solver : Stats.t)]
      with
