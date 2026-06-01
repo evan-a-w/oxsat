@@ -1381,7 +1381,7 @@ let _assumptions =
 |})
 ;;
 
-let assumptions =
+let _assumptions_sat =
   [%of_sexp: int array]
     (Sexp.of_string
        {|
@@ -1390,36 +1390,66 @@ let assumptions =
 |})
 ;;
 
-let solver1 = false
+let assumptions_unsat =
+  [%of_sexp: int array]
+    (Sexp.of_string
+       {|
+    (327 -313 -274 -248 -92 -209 -131 -235 -196 -183 -118 -40 -53 -1 -170 -222
+     -27 -261 -300 -287 -157 -144 -79 -14 -105 -66)
+|})
+;;
+
 let debug = false
 
-let () =
-  if solver1
-  then (
-    let solver = Solver.create_with_formula ~debug formula in
-    let res = Solver.solve ~assumptions solver in
+let run_solver1 ~assumptions =
+  let solver = Solver.create_with_formula ~debug formula in
+  let res = Solver.solve ~assumptions solver in
+  print_s
+    [%message "solver1" (res : Solver.Sat_result.t) (Solver.stats solver : Solver.Stats.t)]
+;;
+
+let _run_solver2 ~assumptions =
+  match Feel2.Solver.create_with_formula ~debug formula with
+  | `Unsat unsat_core ->
     print_s
       [%message
-        (res : Solver.Sat_result.t) (Solver.stats solver : Solver.Stats.t)])
-  else (
-    match Feel2.Solver.create_with_formula ~debug formula with
-    | `Unsat unsat_core ->
-      print_s
-        [%message
-          ((Unsat { unsat_core } : Feel2.Sat_result.t) : Feel2.Sat_result.t)]
-    | `Ok solver2 ->
-      (try
-         let res =
-           Feel2.Solver.solve ~time_bound:(`Bounded 1_000) ~assumptions solver2
-         in
-         print_s
-           [%message
+        "solver2" ((Unsat { unsat_core } : Feel2.Sat_result.t) : Feel2.Sat_result.t)]
+  | `Ok solver2 ->
+    (try
+       let res =
+         Feel2.Solver.solve ~time_bound:(`Bounded 60_000) ~assumptions solver2
+       in
+       print_s
+         [%message
+           "solver2"
              (res : Feel2.Sat_result.t)
-               (Feel2.Solver.stats solver2 : Feel2.Stats.t)]
-       with
-       | Feel2.Solver.Timeout ->
-         print_s
-           [%message
-             "solver timed out"
-               ~stats:(Feel2.Solver.stats solver2 : Feel2.Stats.t)]))
+             (Feel2.Solver.stats solver2 : Feel2.Stats.t)]
+     with
+     | Feel2.Solver.Timeout ->
+       print_s
+         [%message
+           "solver2 timed out"
+             ~stats:(Feel2.Solver.stats solver2 : Feel2.Stats.t)])
+;;
+
+let run_solver2_unlimited ~assumptions =
+  match Feel2.Solver.create_with_formula ~debug formula with
+  | `Unsat unsat_core ->
+    print_s
+      [%message
+        "solver2" ((Unsat { unsat_core } : Feel2.Sat_result.t) : Feel2.Sat_result.t)]
+  | `Ok solver2 ->
+    let res = Feel2.Solver.solve ~assumptions solver2 in
+    print_s
+      [%message
+        "solver2"
+          (res : Feel2.Sat_result.t)
+          (Feel2.Solver.stats solver2 : Feel2.Stats.t)]
+;;
+
+let () =
+  print_endline "--- solver1 ---";
+  run_solver1 ~assumptions:assumptions_unsat;
+  print_endline "--- solver2 ---";
+  run_solver2_unlimited ~assumptions:assumptions_unsat
 ;;

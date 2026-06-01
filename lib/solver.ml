@@ -881,11 +881,30 @@ let clause_lbd t ~clause =
   !distinct
 ;;
 
+let conflict_log_limit = ref 0
+let decision_log : int Queue.t = Queue.create ()
+let decision_override : int Queue.t = Queue.create ()
+
 let backtrack t ~failed_clause =
   let #(~learned_clause, ~backjump_level) = analyze_conflict t ~failed_clause in
   t.learned_clauses <- t.learned_clauses + 1;
   t.learned_clause_literals
   <- t.learned_clause_literals + Clause.length learned_clause;
+  if !conflict_log_limit > 0
+  then (
+    decr conflict_log_limit;
+    let bjlevel = I64.to_int_trunc backjump_level in
+    let dl = I64.to_int_trunc t.decision_level in
+    Printf.eprintf
+      "solver1 conflict %d: len=%d lbd=%d bjlevel=%d dl=%d lits=%s\n%!"
+      t.learned_clauses
+      (Clause.length learned_clause)
+      (clause_lbd t ~clause:learned_clause)
+      bjlevel
+      dl
+      (Clause.literals_list learned_clause
+       |> List.map ~f:Int.to_string
+       |> String.concat ~sep:" "));
   if t.debug
   then
     print_s
@@ -922,8 +941,25 @@ let%template make_decision' ~is_assumption t ~literal : _ @ m =
 [@@exclave_if_stack] [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
+let choose_literal_with_override t =
+  match Queue.dequeue decision_override with
+  | Some lit_int ->
+    let literal = Literal.of_int lit_int in
+    Vsids.remove_from_pool t.vsids ~var:(Literal.var literal);
+    Queue.enqueue decision_log lit_int;
+    Literal.Option.some literal
+  | None ->
+    (match%optional_u (Vsids.choose_literal t.vsids : Literal.Option.t) with
+     | None -> Literal.Option.none
+     | Some literal ->
+       Queue.enqueue decision_log (Literal.to_int literal);
+       Literal.Option.some literal)
+;;
+
 let%template make_decision t : _ @ m =
-  match%optional_u (Vsids.choose_literal t.vsids : Literal.Option.t) with
+  match%optional_u
+    (choose_literal_with_override t : Literal.Option.t)
+  with
   | None ->
     `Done
       (Sat_result.Sat

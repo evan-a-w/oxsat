@@ -8,6 +8,8 @@ type t =
    ; learned_clauses : int
    ; learned_clause_literals : int
    ; max_decision_level : int
+   ; deleted_clauses : int
+   ; restarts : int
    }
 [@@deriving sexp, fields]
 
@@ -19,5 +21,7 @@ let empty () =
    ; learned_clauses = 0
    ; learned_clause_literals = 0
    ; max_decision_level = 0
+   ; deleted_clauses = 0
+   ; restarts = 0
    }
 ;;
