@@ -481,6 +481,16 @@ module Value = struct
     t.length <- !write
   ;;
 
+  let exists t ~f =
+    let found = ref false in
+    let i = ref 0 in
+    while !i < t.length && not !found do
+      if f t.arr.(!i) then found := true;
+      incr i
+    done;
+    !found
+  ;;
+
   let append t t' = iter t' ~f:(push t)
   let append_list t l = List.iter l ~f:(push t)
 

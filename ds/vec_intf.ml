@@ -143,6 +143,7 @@ module type S_value = sig
   val filter_mapi : 'a t -> f:(int -> 'a -> 'b option) @ local -> 'b t
   val filter_inplace : 'a t -> f:('a -> bool) @ local -> unit
   val filter_map_inplace : 'a t -> f:('a -> 'a option) @ local -> unit
+  val exists : 'a t -> f:('a -> bool) @ local -> bool
   val findi : 'a t -> f:(int -> 'a -> 'b option) @ local -> 'b option
   val map_inplace : 'a t -> f:('a -> 'a) @ local -> unit
   val singleton : 'a -> 'a t

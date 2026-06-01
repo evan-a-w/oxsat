@@ -709,7 +709,8 @@ let%expect_test "regalloc" =
   let res = Helpers.solve_formula ~debug:false ~assumptions formula in
   print_s [%message (res : Sat_result.t)];
   [%expect.unreachable]
-[@@expect.uncaught_exn {|
+[@@expect.uncaught_exn
+  {|
   (* CR expect_test_collector: This test expectation appears to contain a backtrace.
      This is strongly discouraged as backtraces are fragile.
      Please change this test to not include a backtrace. *)

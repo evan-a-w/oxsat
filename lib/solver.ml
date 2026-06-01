@@ -477,7 +477,9 @@ let mark_literal t ~seen ~literal ~(local_ path_count) ~learned_literals =
        | Some trail_entry ->
          let dl = trail_entry.#decision_level in
          Vsids.add_activity t.vsids ~literal;
-         if dl = t.decision_level
+         if dl = 0
+         then ()
+         else if dl = t.decision_level
          then incr path_count
          else Vec.Value.push learned_literals literal))
 ;;
@@ -620,11 +622,22 @@ let backtrack t ~failed_clause =
 
 let unsat_core t failed_clause_idx =
   let failed_clause = Vec.Value.get t.clauses failed_clause_idx in
-  let #(~learned_literals, ~backjump_level:_) =
-    analyze_conflict t ~failed_clause
+  let has_current_level_literal =
+    t.decision_level <> 0
+    && Vec.Value.exists failed_clause.clause ~f:(fun literal ->
+      let var = literal_var t ~literal in
+      match%optional_u (var.trail_entry : Trail_entry.Option_u.t) with
+      | None -> false
+      | Some trail_entry -> trail_entry.#decision_level = t.decision_level)
   in
-  Vec.Value.map_inplace learned_literals ~f:(fun x -> -x);
-  Vec.Value.to_array learned_literals
+  if not has_current_level_literal
+  then clause_to_array failed_clause |> Array.map ~f:Int.neg
+  else (
+    let #(~learned_literals, ~backjump_level:_) =
+      analyze_conflict t ~failed_clause
+    in
+    Vec.Value.map_inplace learned_literals ~f:(fun x -> -x);
+    Vec.Value.to_array learned_literals)
 ;;
 
 let%template unsat t failed_clause_idx : Sat_result.t @ m =
