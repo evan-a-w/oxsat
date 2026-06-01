@@ -19,7 +19,7 @@ let run_dimacs s =
 
 let%expect_test "FAIL_EG" =
   run_dimacs Examples.Dimacs.fail_eg;
-  [%expect {| (UNSAT (unsat_core (-112))) |}]
+  [%expect {| (UNSAT (unsat_core (-101 -87))) |}]
 ;;
 
 let%expect_test "small assumptions" =
@@ -38,7 +38,7 @@ let%expect_test "small assumptions" =
   [%expect
     {|
     (SAT ("Helpers.assignment_literals assignments" (-1 2 -3)))
-    (UNSAT (unsat_core (-2 -3)))
+    (UNSAT (unsat_core (-2)))
     |}]
 ;;
 
@@ -709,14 +709,13 @@ let%expect_test "regalloc" =
   let res = Helpers.solve_formula ~debug:false ~assumptions formula in
   print_s [%message (res : Sat_result.t)];
   [%expect.unreachable]
-[@@expect.uncaught_exn
-  {|
+[@@expect.uncaught_exn {|
   (* CR expect_test_collector: This test expectation appears to contain a backtrace.
      This is strongly discouraged as backtraces are fragile.
      Please change this test to not include a backtrace. *)
   (Feel__Solver.Timeout)
-  Raised at Feel__Solver.Timer.check in file "lib/solver.ml", line 54, characters 45-58
-  Called from Feel__Solver.solve' in file "lib/solver.ml", line 704, characters 3-20
+  Raised at Feel__Solver.Timer.check in file "lib/solver.ml", line 62, characters 45-58
+  Called from Feel__Solver.solve' in file "lib/solver.ml", line 808, characters 3-20
   Called from Nod_test__Test_curated.(fun) in file "test/test_curated.ml", line 709, characters 12-67
   Called from Ppx_expect_runtime__Test_block.Configured.dump_backtrace in file "runtime/test_block.ml", line 359, characters 10-25
   |}]

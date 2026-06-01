@@ -139,7 +139,7 @@ let%expect_test "pigeonhole principle - 2 pigeons, 1 hole (unsat)" =
   (match result with
    | Sat _ -> print_endline "SAT"
    | Unsat { unsat_core } -> print_s [%message "UNSAT" (unsat_core : int array)]);
-  [%expect {| (UNSAT (unsat_core (1))) |}]
+  [%expect {| (UNSAT (unsat_core (1 2))) |}]
 ;;
 
 let%expect_test "clause with multiple literals satisfied by one assignment" =
@@ -210,7 +210,7 @@ let%expect_test "succ dimacs" =
 
 let%expect_test "fail dimacs" =
   run_dimacs Examples.Dimacs.fail_eg;
-  [%expect {| (UNSAT (unsat_core (-112))) |}]
+  [%expect {| (UNSAT (unsat_core (-101 -87))) |}]
 ;;
 
 let%expect_test "assumptions" =
@@ -253,8 +253,8 @@ let%expect_test "assumptions" =
     (SAT (assignments (1 -2 3 4 5 6)))
     (SAT (assignments (1 -2 3 4 5 6)))
     (SAT (assignments (1 2 3 4 -5 -6)))
-    (UNSAT (unsat_core (2 1)))
-    (SAT (assignments (1 -2 3 -4 -5 6)))
+    (UNSAT (unsat_core (5 2 1)))
+    (SAT (assignments (1 -2 3 4 5 6)))
     (UNSAT (unsat_core (2)))
     (SAT (assignments (-1 -2 -3 -4 -5 -6)))
     (SAT (assignments (-1 -2 -3 -4 -5 6)))

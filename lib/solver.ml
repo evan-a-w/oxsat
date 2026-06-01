@@ -14,8 +14,16 @@ type t =
   ; mutable stats : Stats.t
   ; analyze_conflict_stamp_set : Stamp_set.t
   ; analyze_conflict_scratch_literals : int Vec.Value.t
+  ; lbd_stamp_set : Stamp_set.t
   ; debug : bool
   ; vsids : Vsids.t
+  (* Glucose-style restart: exponential moving averages of LBD *)
+  ; mutable lbd_ema_fast : float
+  ; mutable lbd_ema_slow : float
+  ; mutable conflicts_since_restart : int
+  (* Clause deletion: conflict budget before next reduction *)
+  ; mutable conflicts_until_reduce : int
+  ; mutable reduce_db_increment : int
   }
 
 type time_bound =
@@ -410,7 +418,7 @@ let ensure_literal t ~literal =
     var.exists <- true)
 ;;
 
-let add_clause t ~literals ~learned =
+let add_clause t ~literals ~learned ?(lbd = 0) () =
   let len = Vec.Value.length literals in
   if len = 0 then t.has_empty_clause <- true;
   let satisfied = stack_ (ref false) in
@@ -445,7 +453,9 @@ let add_clause t ~literals ~learned =
     Vec.Value.iter literals ~f:(fun literal ->
       Vsids.add_activity t.vsids ~literal);
   (* has unit is populated when the trail entry is seen *)
-  let clause : Clause.t = { clause = literals; has_unit = false; learned } in
+  let clause : Clause.t =
+    { clause = literals; has_unit = false; learned; lbd; deleted = false }
+  in
   let clause_idx = Vec.Value.length t.clauses in
   Vec.Value.push t.clauses clause;
   if len >= 2 then register_watchers_for_new_clause t ~literals ~clause_idx;
@@ -597,10 +607,77 @@ let analyze_conflict t ~(failed_clause : Clause.t) =
   simplify_learned_clause ~learned_literals ~uip_literal ~seen t
 ;;
 
+let compute_lbd t ~literals =
+  let seen = t.lbd_stamp_set in
+  Stamp_set.reset seen;
+  let lbd = ref 0 in
+  Vec.Value.iter literals ~f:(fun literal ->
+    let var = literal_var t ~literal in
+    (match%optional_u (var.trail_entry : Trail_entry.Option_u.t) with
+     | None -> ()
+     | Some trail_entry ->
+       let dl = trail_entry.#decision_level in
+       if not (Stamp_set.is_seen seen ~var:dl)
+       then (
+         Stamp_set.mark_seen seen ~var:dl;
+         incr lbd)));
+  !lbd
+;;
+
+(* Remove low-quality learned clauses. Keep:
+   - all original clauses (not learned)
+   - learned clauses with LBD <= 2 (glue clauses — highly predictive)
+   - the most active half of the remaining learned clauses by LBD
+   After deletion, rebuild all watch lists from scratch. *)
+let reduce_db t =
+  (* Mark clauses to delete: learned, LBD > 2, and in the worse half by LBD *)
+  let learned_above_glue =
+    Vec.Value.filter_mapi t.clauses ~f:(fun i clause ->
+      if clause.Clause.learned && clause.lbd > 2 && not clause.deleted
+      then Some (i, clause.lbd)
+      else None)
+    |> Vec.Value.to_array
+  in
+  (* Sort by LBD descending — worst clauses first *)
+  Array.sort learned_above_glue ~compare:(fun (_, a) (_, b) -> Int.compare b a);
+  let n_delete = Array.length learned_above_glue / 2 in
+  let deleted = ref 0 in
+  Array.iteri learned_above_glue ~f:(fun i (clause_idx, _) ->
+    if i < n_delete
+    then (
+      let clause = Vec.Value.get t.clauses clause_idx in
+      if not clause.has_unit
+      then (
+        clause.deleted <- true;
+        incr deleted)));
+  (* Rebuild all watch lists by scanning clauses *)
+  Vec.Value.iter t.vars ~f:(fun (var : Var.t) ->
+    if var.exists
+    then (
+      Watched_clause.Vec.clear (Tf_pair.get var.watched_clauses true);
+      Watched_clause.Vec.clear (Tf_pair.get var.watched_clauses false)));
+  Vec.Value.iteri t.clauses ~f:(fun clause_idx clause ->
+    if (not clause.deleted) && Vec.Value.length clause.clause >= 2
+    then register_watchers_for_new_clause t ~literals:clause.clause ~clause_idx);
+  t.stats
+  <- #{ t.stats with deleted_clauses = t.stats.#deleted_clauses + !deleted };
+  t.conflicts_until_reduce <- t.conflicts_until_reduce + t.reduce_db_increment;
+  t.reduce_db_increment <- t.reduce_db_increment + 100
+;;
+
 let backtrack t ~failed_clause =
   let #(~learned_literals, ~backjump_level) =
     analyze_conflict t ~failed_clause
   in
+  let lbd = compute_lbd t ~literals:learned_literals in
+  (* Glucose-style EMAs: fast window ~32 conflicts, slow window ~4096 *)
+  let alpha_fast = 1. /. 32. in
+  let alpha_slow = 1. /. 4096. in
+  t.lbd_ema_fast
+  <- (t.lbd_ema_fast *. (1. -. alpha_fast)) +. (Float.of_int lbd *. alpha_fast);
+  t.lbd_ema_slow
+  <- (t.lbd_ema_slow *. (1. -. alpha_slow)) +. (Float.of_int lbd *. alpha_slow);
+  t.conflicts_since_restart <- t.conflicts_since_restart + 1;
   t.stats
   <- #{ t.stats with
         learned_clauses = t.stats.#learned_clauses + 1
@@ -612,10 +689,11 @@ let backtrack t ~failed_clause =
     print_s
       [%message
         "backtrack"
-          ~learned_clause:(Vec.Value.to_list learned_literals : int list)];
+          ~learned_clause:(Vec.Value.to_list learned_literals : int list)
+          (lbd : int)];
   Vsids.decay t.vsids;
   remove_greater_than_decision_level t ~decision_level:backjump_level;
-  match add_clause t ~literals:learned_literals ~learned:true with
+  match add_clause t ~literals:learned_literals ~learned:true ~lbd () with
   | `Ok -> `Ok
   | `Conflict failed_clause_idx -> `Conflict failed_clause_idx
 ;;
@@ -712,6 +790,19 @@ let%template check_sat_result t ~(sat_result : _ @ m) : _ @ m =
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
+let restart t =
+  t.decision_level <- t.decision_level_of_last_assumption;
+  while
+    Trail_entry.Vec.length t.trail <> 0
+    && (Trail_entry.Vec.last_exn t.trail).#decision_level
+       > t.decision_level_of_last_assumption
+  do
+    pop_from_trail_exn t
+  done;
+  t.trail_processed_till
+  <- Int.min t.trail_processed_till (Trail_entry.Vec.length t.trail)
+;;
+
 let%template rec solve' t ~timer : Sat_result.t @ m =
   (t.stats <- #{ t.stats with iterations = t.stats.#iterations + 1 };
    Timer.check timer;
@@ -737,24 +828,22 @@ and learn_from_failure t ~failed_clause_idx ~timer : Sat_result.t @ m =
     let failed_clause = Vec.Value.get t.clauses failed_clause_idx in
     t.stats <- #{ t.stats with conflicts = t.stats.#conflicts + 1 };
     (match backtrack t ~failed_clause with
-     | `Ok -> (solve' [@alloc a]) t ~timer
+     | `Ok ->
+       (* Clause database reduction: triggered on a conflict budget *)
+       if t.stats.#conflicts >= t.conflicts_until_reduce then reduce_db t;
+       (* Glucose-style restart: restart when fast LBD average is significantly
+          worse than the slow average, and we've had enough conflicts to warm up
+          the slow EMA (require at least 50 conflicts since last restart) *)
+       if t.conflicts_since_restart >= 50
+          && Float.(t.lbd_ema_fast > t.lbd_ema_slow *. 1.25)
+       then (
+         t.stats <- #{ t.stats with restarts = t.stats.#restarts + 1 };
+         t.conflicts_since_restart <- 0;
+         restart t);
+       (solve' [@alloc a]) t ~timer
      | `Conflict failed_clause_idx ->
        (learn_from_failure [@alloc a]) t ~failed_clause_idx ~timer)
 [@@alloc a @ m = (stack_local, heap_global)]
-;;
-
-let restart t = exclave_
-  t.stats <- #{ t.stats with conflicts = 0 };
-  t.decision_level <- t.decision_level_of_last_assumption;
-  while
-    Trail_entry.Vec.length t.trail <> 0
-    && (Trail_entry.Vec.last_exn t.trail).#decision_level
-       > t.decision_level_of_last_assumption
-  do
-    pop_from_trail_exn t
-  done;
-  t.trail_processed_till
-  <- Int.min t.trail_processed_till (Trail_entry.Vec.length t.trail)
 ;;
 
 let add_assumptions ~(local_ assumptions) t ~timer = exclave_
@@ -789,6 +878,11 @@ let add_assumptions ~(local_ assumptions) t ~timer = exclave_
 let maybe_clear_past_solve_state t =
   let has_run_before = t.stats.#iterations > 0 in
   t.stats <- Stats.empty ();
+  t.lbd_ema_fast <- 0.;
+  t.lbd_ema_slow <- 0.;
+  t.conflicts_since_restart <- 0;
+  t.conflicts_until_reduce <- 2000;
+  t.reduce_db_increment <- 300;
   if has_run_before
   then (
     if t.debug then print_endline "restarting";
@@ -832,8 +926,14 @@ let create ?(random_state = Random.State.make [| 1; 2; 3 |]) ?(debug = false) ()
   ; stats = Stats.empty ()
   ; analyze_conflict_stamp_set = Stamp_set.create ()
   ; analyze_conflict_scratch_literals = Vec.Value.create ()
+  ; lbd_stamp_set = Stamp_set.create ()
   ; debug
   ; vsids = Vsids.create ()
+  ; lbd_ema_fast = 0.
+  ; lbd_ema_slow = 0.
+  ; conflicts_since_restart = 0
+  ; conflicts_until_reduce = 2000
+  ; reduce_db_increment = 300
   }
 ;;
 
@@ -844,6 +944,7 @@ let add_clause t ~clause =
       t
       ~literals:(Vec.Value.of_array_taking_ownership clause)
       ~learned:false
+      ()
   with
   | `Ok -> `Ok
   | `Conflict failed_clause_idx -> `Unsat (unsat_core t failed_clause_idx)
