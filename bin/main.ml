@@ -1401,66 +1401,15 @@ let assumptions_unsat =
 
 let debug = false
 
-let run_solver1 ~assumptions =
+let run_solver ~assumptions =
   match Solver.create_with_formula ~debug formula with
   | `Unsat unsat_core ->
     print_s
-      [%message
-        "solver1"
-          ((Unsat { unsat_core } : Sat_result.t) : Sat_result.t)]
+      [%message ((Unsat { unsat_core } : Sat_result.t) : Sat_result.t)]
   | `Ok solver ->
     let res = Solver.solve ~assumptions solver in
     print_s
-      [%message
-        "solver1"
-          (res : Sat_result.t)
-          (Solver.stats solver : Stats.t)]
+      [%message (res : Sat_result.t) (Solver.stats solver : Stats.t)]
 ;;
 
-let _run_solver2 ~assumptions =
-  match Feel2.Solver.create_with_formula ~debug formula with
-  | `Unsat unsat_core ->
-    print_s
-      [%message
-        "solver2"
-          ((Unsat { unsat_core } : Feel2.Sat_result.t) : Feel2.Sat_result.t)]
-  | `Ok solver2 ->
-    (try
-       let res =
-         Feel2.Solver.solve ~time_bound:(`Bounded 60_000) ~assumptions solver2
-       in
-       print_s
-         [%message
-           "solver2"
-             (res : Feel2.Sat_result.t)
-             (Feel2.Solver.stats solver2 : Feel2.Stats.t)]
-     with
-     | Feel2.Solver.Timeout ->
-       print_s
-         [%message
-           "solver2 timed out"
-             ~stats:(Feel2.Solver.stats solver2 : Feel2.Stats.t)])
-;;
-
-let run_solver2_unlimited ~assumptions =
-  match Feel2.Solver.create_with_formula ~debug formula with
-  | `Unsat unsat_core ->
-    print_s
-      [%message
-        "solver2"
-          ((Unsat { unsat_core } : Feel2.Sat_result.t) : Feel2.Sat_result.t)]
-  | `Ok solver2 ->
-    let res = Feel2.Solver.solve ~assumptions solver2 in
-    print_s
-      [%message
-        "solver2"
-          (res : Feel2.Sat_result.t)
-          (Feel2.Solver.stats solver2 : Feel2.Stats.t)]
-;;
-
-let () =
-  print_endline "--- solver1 ---";
-  run_solver1 ~assumptions:assumptions_unsat;
-  print_endline "--- solver2 ---";
-  run_solver2_unlimited ~assumptions:assumptions_unsat
-;;
+let () = run_solver ~assumptions:assumptions_unsat
