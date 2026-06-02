@@ -141,3 +141,40 @@ Still timing out on the 60s regalloc UNSAT test but with ~324K conflicts
 
 The correct long-term direction is Option B or a broader benchmark
 to determine if the gap matters in practice.
+
+## Follow-up Debugging Notes
+
+Additional experiments after the above:
+
+1. **Binary watcher special-casing was tested and reverted.**
+   Setting `Watched_clause.is_binary = true` for length-2 clauses made the
+   regalloc timeout path worse: ~374K conflicts in 60s, max DL 189. The fast
+   path avoids clause literal swapping for binary clauses, which changes the
+   search path unfavorably here.
+
+2. **A pending-unit stack was tested and reverted.**
+   Queueing watcher-discovered units and revalidating them before trail push
+   also worsened the timeout path: ~357K conflicts in 60s. A small queue
+   wrapper is not enough to reproduce solver1's propagation behavior.
+
+3. **Level-0 literals are now skipped for non-root conflict learning.**
+   Solver1 already ignores decision-level 0 literals during conflict analysis.
+   Solver2 had that check commented out. Re-enabling it for non-root conflicts
+   reduced learned literal volume on regalloc:
+   - before: ~27.1M learned literals in 60s
+   - after:  ~24.2M learned literals in 60s
+   It did not solve the instance, but it removes noise from learned clauses.
+   Root-level conflicts still include level-0 literals so unsat-core generation
+   can find a UIP.
+
+4. **Clause deletion frequency is a major lever.**
+   The 2,500-iteration reduce interval is too aggressive for solver2 on the
+   regalloc case. Measured with the level-0 literal fix:
+   - no deletion: 43,810 conflicts, 0 deleted clauses, timeout
+   - reduce every 25,000 iterations: 70,952 conflicts, 45,853 deleted, timeout
+   - reduce every 50,000 iterations: 76,813 conflicts, 50,899 deleted, timeout
+   - reduce every 100,000 iterations: 57,376 conflicts, 23,307 deleted, timeout
+
+   Current code uses 100,000. This is still not a fix, but it keeps solver2 in
+   a much lower-conflict regime than the previous 2,500 interval (~325K
+   conflicts).

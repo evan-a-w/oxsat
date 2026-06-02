@@ -1405,7 +1405,10 @@ let run_solver1 ~assumptions =
   let solver = Solver.create_with_formula ~debug formula in
   let res = Solver.solve ~assumptions solver in
   print_s
-    [%message "solver1" (res : Solver.Sat_result.t) (Solver.stats solver : Solver.Stats.t)]
+    [%message
+      "solver1"
+        (res : Solver.Sat_result.t)
+        (Solver.stats solver : Solver.Stats.t)]
 ;;
 
 let _run_solver2 ~assumptions =
@@ -1413,7 +1416,8 @@ let _run_solver2 ~assumptions =
   | `Unsat unsat_core ->
     print_s
       [%message
-        "solver2" ((Unsat { unsat_core } : Feel2.Sat_result.t) : Feel2.Sat_result.t)]
+        "solver2"
+          ((Unsat { unsat_core } : Feel2.Sat_result.t) : Feel2.Sat_result.t)]
   | `Ok solver2 ->
     (try
        let res =
@@ -1437,7 +1441,8 @@ let run_solver2_unlimited ~assumptions =
   | `Unsat unsat_core ->
     print_s
       [%message
-        "solver2" ((Unsat { unsat_core } : Feel2.Sat_result.t) : Feel2.Sat_result.t)]
+        "solver2"
+          ((Unsat { unsat_core } : Feel2.Sat_result.t) : Feel2.Sat_result.t)]
   | `Ok solver2 ->
     let res = Feel2.Solver.solve ~assumptions solver2 in
     print_s

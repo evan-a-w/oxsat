@@ -20,7 +20,7 @@ let%expect_test "small assumptions" =
   [%expect
     {|
     (SAT ("Clause.to_int_array assignments" (-1 2 -3)))
-    (UNSAT ("Clause.to_int_array unsat_core" (1 -3)))
+    (UNSAT ("Clause.to_int_array unsat_core" (-2)))
     |}]
 ;;
 

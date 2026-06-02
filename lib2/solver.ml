@@ -447,7 +447,15 @@ let add_clause t ~literals ~learned =
   in
   go 0;
   (* has unit is populated when the trail entry is seen *)
-  let clause : Clause.t = { clause = literals; has_unit = false; learned; lbd = 0; deleted = false; activity = 0.0 } in
+  let clause : Clause.t =
+    { clause = literals
+    ; has_unit = false
+    ; learned
+    ; lbd = 0
+    ; deleted = false
+    ; activity = 0.0
+    }
+  in
   let clause_idx = Vec.Value.length t.clauses in
   Vec.Value.push t.clauses clause;
   if len >= 2 then register_watchers_for_new_clause t ~literals ~clause_idx;
@@ -499,11 +507,13 @@ let mark_literal t ~seen ~literal ~(local_ path_count) ~learned_literals =
        | None -> ()
        | Some trail_entry ->
          let dl = trail_entry.#decision_level in
-         (* if dl = 0 then () else *)
-         Vsids.add_activity t.vsids ~literal;
-         if dl = t.decision_level
-         then incr path_count
-         else Vec.Value.push learned_literals literal))
+         if dl = 0 && t.decision_level <> 0
+         then ()
+         else (
+           Vsids.add_activity t.vsids ~literal;
+           if dl = t.decision_level
+           then incr path_count
+           else Vec.Value.push learned_literals literal)))
 ;;
 
 let simplify_learned_clause t ~learned_literals ~uip_literal ~seen =
@@ -565,7 +575,8 @@ let analyze_conflict t ~(failed_clause : Clause.t) ~failed_clause_idx =
   let mark_literal literal =
     mark_literal t ~seen ~literal ~learned_literals ~path_count
   in
-  needs_rescale := add_clause_activity t ~clause_idx:failed_clause_idx || !needs_rescale;
+  needs_rescale
+  := add_clause_activity t ~clause_idx:failed_clause_idx || !needs_rescale;
   Vec.Value.iter failed_clause.clause ~f:mark_literal;
   let failed_clause_with_assignments =
     clause_with_assignments t ~clause:failed_clause
@@ -656,13 +667,17 @@ let compute_lbd t ~literals =
 
 let reduce_db t =
   let n = Vec.Value.length t.clauses in
-  let candidates = Array.init n ~f:(fun i ->
-    let c = Vec.Value.get t.clauses i in
-    if c.Clause.learned && c.lbd >= 4 && Vec.Value.length c.clause > 3
-       && not c.deleted && not c.has_unit
-    then Some (i, c.activity)
-    else None)
-  |> Array.filter_opt
+  let candidates =
+    Array.init n ~f:(fun i ->
+      let c = Vec.Value.get t.clauses i in
+      if c.Clause.learned
+         && c.lbd >= 4
+         && Vec.Value.length c.clause > 3
+         && (not c.deleted)
+         && not c.has_unit
+      then Some (i, c.activity)
+      else None)
+    |> Array.filter_opt
   in
   (* sort ascending by activity: lowest activity deleted first *)
   Array.sort candidates ~compare:(fun (_, a) (_, b) -> Float.compare a b);
@@ -681,7 +696,8 @@ let reduce_db t =
       in
       filter_wl (Tf_pair.get var.watched_clauses true);
       filter_wl (Tf_pair.get var.watched_clauses false)));
-  t.stats <- #{ t.stats with deleted_clauses = t.stats.#deleted_clauses + n_delete }
+  t.stats
+  <- #{ t.stats with deleted_clauses = t.stats.#deleted_clauses + n_delete }
 ;;
 
 let restart t = exclave_
@@ -696,7 +712,8 @@ let restart t = exclave_
   t.trail_processed_till
   <- Int.min t.trail_processed_till (Trail_entry.Vec.length t.trail);
   Vec.Value.iteri t.clauses ~f:(fun clause_idx (clause : Clause.t) ->
-    if not clause.deleted && not clause.has_unit then (
+    if (not clause.deleted) && not clause.has_unit
+    then (
       let lits = clause.clause in
       let len = Vec.Value.length lits in
       let candidate = ref None in
@@ -714,12 +731,13 @@ let restart t = exclave_
             | Some _ -> ok := false (* two unset → not unit *)));
         incr i
       done;
-      if !ok then
+      if !ok
+      then (
         match !candidate with
         | None -> () (* all false = conflict, will be caught elsewhere *)
         | Some literal ->
           (match push_unit_trail_entry t ~literal ~clause_idx with
-           | Null | This _ -> ())))
+           | Null | This _ -> ()))))
 ;;
 
 let backtrack t ~failed_clause ~failed_clause_idx =
@@ -738,7 +756,7 @@ let backtrack t ~failed_clause ~failed_clause_idx =
     decr conflict_log_limit;
     Printf.eprintf
       "solver2 conflict %d: len=%d lbd=%d bjlevel=%d dl=%d lits=%s\n%!"
-      (t.stats.#learned_clauses)
+      t.stats.#learned_clauses
       (Vec.Value.length learned_literals)
       lbd
       backjump_level
@@ -826,15 +844,15 @@ let%template make_decision t : _ @ m =
       This lit_int
     | None -> Vsids.choose_literal t.vsids
   in
-  (match literal_opt with
-   | Null -> `Done (Sat_result.Sat { assignments = assignments_array t })
-   | This literal ->
-     Queue.enqueue decision_log literal;
-     (match[@exclave_if_stack a]
-        make_decision' ~is_assumption:false t ~literal
-      with
-      | Null -> `Continue
-      | This clause_idx -> `Failed_clause clause_idx))
+  match literal_opt with
+  | Null -> `Done (Sat_result.Sat { assignments = assignments_array t })
+  | This literal ->
+    Queue.enqueue decision_log literal;
+    (match[@exclave_if_stack a]
+       make_decision' ~is_assumption:false t ~literal
+     with
+     | Null -> `Continue
+     | This clause_idx -> `Failed_clause clause_idx)
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
@@ -862,7 +880,7 @@ let%template check_sat_result t ~(sat_result : _ @ m) : _ @ m =
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
-let simplify_clauses_every = 2500
+let simplify_clauses_every = 100_000
 
 let%template rec solve' t ~timer : Sat_result.t @ m =
   (t.stats <- #{ t.stats with iterations = t.stats.#iterations + 1 };
