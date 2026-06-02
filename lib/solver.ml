@@ -9,7 +9,6 @@ type t =
   ; mutable decision_level_of_last_assumption : int
   ; clauses : Clause.t Vec.Value.t
   ; vars : Var.t Vec.Value.t
-  ; unassigned_literals : Literal_set.t
   ; mutable has_empty_clause : bool
   ; mutable stats : Stats.t
   ; analyze_conflict_stamp_set : Stamp_set.t
@@ -103,8 +102,6 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
         "undo_entry" (trail_entry.#literal : int) (t.decision_level : int)];
   let literal = trail_entry.#literal in
   let var = literal_var t ~literal in
-  Literal_set.insert t.unassigned_literals ~literal:trail_entry.#literal;
-  Literal_set.insert t.unassigned_literals ~literal:(-trail_entry.#literal);
   Vsids.add_to_pool t.vsids ~literal:trail_entry.#literal;
   var.assignment <- Null;
   var.trail_entry <- Trail_entry.Option_u.none ();
@@ -138,8 +135,6 @@ let push_trail_entry t ~(trail_entry : Trail_entry.t) =
     var.trail_entry <- Trail_entry.Option_u.some trail_entry;
     Trail_entry.Vec.push t.trail trail_entry;
     Vsids.remove_from_pool t.vsids ~var:(Int.abs trail_entry.#literal);
-    Literal_set.remove t.unassigned_literals ~literal:trail_entry.#literal;
-    Literal_set.remove t.unassigned_literals ~literal:(-trail_entry.#literal);
     (match trail_entry.#reason with
      | T #(Decision, ()) -> ()
      | T #(Clause_idx, clause_idx) ->
@@ -430,8 +425,6 @@ let ensure_literal t ~literal =
   let var = literal_var t ~literal in
   if not var.exists
   then (
-    Literal_set.insert t.unassigned_literals ~literal;
-    Literal_set.insert t.unassigned_literals ~literal:(-literal);
     Vsids.on_new_var t.vsids ~var:(Int.abs literal);
     var.exists <- true)
 ;;
@@ -956,13 +949,13 @@ let%template solve ?(time_bound = `Unlimited) ?(local_ assumptions = [||]) t
 
 let create ?(random_state = Random.State.make [| 1; 2; 3 |]) ?(debug = false) ()
   =
+  let _ = random_state in
   { trail = Trail_entry.Vec.create ()
   ; trail_processed_till = 0
   ; decision_level = 0
   ; decision_level_of_last_assumption = 0
   ; clauses = Vec.Value.create ()
   ; vars = Vec.Value.create ()
-  ; unassigned_literals = Literal_set.create ~random_state
   ; has_empty_clause = false
   ; stats = Stats.empty ()
   ; analyze_conflict_stamp_set = Stamp_set.create ()
