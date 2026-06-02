@@ -4,6 +4,8 @@ include struct
   open Ds
   module Bitset = Bitset
   module Vec = Vec
+  module Vec_intf = Vec_intf
+  module Vecable = Vecable
   module Pool = Pool
   module Pool_intf = Pool_intf
   module Poolable = Poolable
@@ -11,6 +13,7 @@ include struct
   module Ptr = Ptr
   module Rb = Rb
   module Hash_table = Hash_table
+  module Option_u = Option_u
 end
 
 include struct

@@ -1402,13 +1402,19 @@ let assumptions_unsat =
 let debug = false
 
 let run_solver1 ~assumptions =
-  let solver = Solver.create_with_formula ~debug formula in
-  let res = Solver.solve ~assumptions solver in
-  print_s
-    [%message
-      "solver1"
-        (res : Solver.Sat_result.t)
-        (Solver.stats solver : Solver.Stats.t)]
+  match Solver.create_with_formula ~debug formula with
+  | `Unsat unsat_core ->
+    print_s
+      [%message
+        "solver1"
+          ((Unsat { unsat_core } : Sat_result.t) : Sat_result.t)]
+  | `Ok solver ->
+    let res = Solver.solve ~assumptions solver in
+    print_s
+      [%message
+        "solver1"
+          (res : Sat_result.t)
+          (Solver.stats solver : Stats.t)]
 ;;
 
 let _run_solver2 ~assumptions =

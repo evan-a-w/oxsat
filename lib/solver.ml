@@ -1,1223 +1,1032 @@
 open! Core
 open! Import
-
-module Sat_result = struct
-  type t =
-    | Sat of { assignments : Clause.t }
-    | Unsat of { global_ unsat_core : Clause.t }
-  [@@deriving sexp]
-end
-
-module Reason : sig
-  type (_ : value mod external_, _ : bits64) tag : value mod external_ =
-    | Decision : (_, Literal.t) tag
-    | Clause_idx : (int, _) tag
-
-  type t : (value & value & bits64) mod external_ = private
-    | T : #(('a, 'b) tag * 'a * 'b) -> t
-  [@@unboxed]
-  (* Safe as long as noone puts non external_ values in the slot used for
-     [Clause_idx].
-
-     This is enforced in the interface, because [t] can't be constructed outside
-     of the given constructors.
-  *)
-  [@@unsafe_allow_any_mode_crossing]
-
-  val decision : Literal.t -> t
-  val clause_idx : int -> t
-end = struct
-  type (_ : value mod external_, _ : bits64) tag : value mod external_ =
-    | Decision : (_, Literal.t) tag
-    | Clause_idx : (int, _) tag
-
-  type t : (value & value & bits64) mod external_ =
-    | T : #(('a, 'b) tag * 'a * 'b) -> t
-  [@@unboxed] [@@unsafe_allow_any_mode_crossing]
-
-  let decision literal = T #(Decision, 0, literal)
-  let clause_idx idx = T #(Clause_idx, idx, Literal.of_int 0)
-end
-
-module Trail_entry = struct
-  module T = struct
-    type t : ((value & value & bits64) & bits64 & bits64) mod external_ =
-      #{ reason : Reason.t
-       ; literal : Literal.t
-       ; decision_level : int64#
-       }
-    (* reason is actually [external_], idk why I need this *)
-    [@@unsafe_allow_any_mode_crossing]
-
-    let create_for_vec () =
-      #{ literal = Literal.create ~var:0 ~value:true
-       ; decision_level = #0L
-       ; reason = Reason.clause_idx 0
-       }
-    ;;
-  end
-
-  include T
-  module Vec = Vec.Make [@kind (value & value & bits64) & bits64 & bits64] (T)
-end
-
-module Pending_unit = struct
-  type t =
-    { clause_idx : int
-    ; clause_generation : int
-    ; unit_literal : int
-    }
-  [@@deriving fields]
-
-  let create ~clause_idx ~clause_generation ~unit_literal =
-    { clause_idx; clause_generation; unit_literal }
-  ;;
-end
-
-module Watched_clause = struct
-  type t =
-    { clause_idx : int
-    ; watch_index : int
-    ; mutable blocker : int
-    }
-  [@@deriving fields]
-
-  let create ~clause_idx ~watch_index ~blocker =
-    { clause_idx; watch_index; blocker }
-  ;;
-
-  let set_blocker t blocker = t.blocker <- blocker
-end
-
-module Conflict_analysis_state = struct
-  type t =
-    { seen_by_var : int Vec.Value.t
-    ; learned : int Vec.Value.t
-    ; mutable stamp : int
-    }
-
-  let create () =
-    { seen_by_var = Vec.Value.create ()
-    ; learned = Vec.Value.create ()
-    ; stamp = 1
-    }
-  ;;
-
-  let reset t =
-    Vec.Value.clear t.learned;
-    if t.stamp = Int.max_value
-    then (
-      Vec.Value.map_inplace t.seen_by_var ~f:(fun (_ : int) -> 0);
-      t.stamp <- 1)
-    else t.stamp <- t.stamp + 1
-  ;;
-
-  let ensure_capacity t ~var =
-    Vec.Value.fill_to_length
-      t.seen_by_var
-      ~length:(var + 1)
-      ~f:(fun (_ : int) -> 0)
-  ;;
-
-  let is_seen t ~var =
-    var < Vec.Value.length t.seen_by_var
-    && Vec.Value.get t.seen_by_var var = t.stamp
-  ;;
-
-  let mark_seen t ~var =
-    ensure_capacity t ~var;
-    Vec.Value.set t.seen_by_var var t.stamp
-  ;;
-
-  let clear_seen t ~var =
-    ensure_capacity t ~var;
-    Vec.Value.set t.seen_by_var var 0
-  ;;
-end
+open! Stdlib_stable
 
 type t =
-  { debug : bool
+  { trail : Trail_entry.Vec.t
+  ; mutable trail_processed_till : int
+  ; mutable decision_level : int
+  ; mutable decision_level_of_last_assumption : int
+  ; clauses : Clause.t Vec.Value.t
+  ; vars : Var.t Vec.Value.t
+  ; unassigned_literals : Literal_set.t
   ; mutable has_empty_clause : bool
-  ; mutable decision_level : int64#
-  ; mutable decision_level_of_last_assumption : int64#
-  ; mutable iterations : int
-  ; mutable decisions : int
-  ; mutable propagations : int
-  ; mutable total_conflicts : int
-  ; mutable learned_clauses : int
-  ; mutable learned_clause_literals : int
-  ; mutable max_decision_level : int
-  ; mutable clause_adjusting_score : Adjusting_score.t
-  ; assignments : Bitset.t Tf_pair.t
-  ; trail : Trail_entry.Vec.t
-  ; clauses : Clause.Pool.t
-  ; clauses_with_active_unit : Int.H_set.t
-  ; pending_units : Pending_unit.t Vec.Value.t
-  ; trail_entry_idx_by_var : I64.Option.Vec.t
-  ; watched_clauses_by_literal :
-      Watched_clause.t Vec.Value.t Vec.Value.t Tf_pair.t
+  ; mutable stats : Stats.t
+  ; analyze_conflict_stamp_set : Stamp_set.t
+  ; analyze_conflict_scratch_literals : int Vec.Value.t
+  ; debug : bool
   ; vsids : Vsids.t
-  ; simplify_clauses_every : int
-  ; clause_sorting_buckets : int Vec.Value.t
-  ; lbd_seen_at_level : int Vec.Value.t
-  ; mutable lbd_stamp : int
-  ; conflict_analysis_state : Conflict_analysis_state.t
-  ; luby : Luby.t
-  ; mutable conflicts : int64#
+  ; mutable luby_index : int
+  ; mutable conflicts_since_restart : int
+  ; lbd_stamp_set : Stamp_set.t
+  ; mutable clause_act_inc : float
+  ; mutable iterations : int
   }
 
-module Stats = struct
+type time_bound =
+  [ `Unlimited
+  | `Bounded of int
+  ]
+
+exception Timeout
+
+let timeout_check_every = 1024
+
+module Timer = struct
   type t =
-    { iterations : int
-    ; decisions : int
-    ; propagations : int
-    ; conflicts : int
-    ; learned_clauses : int
-    ; learned_clause_literals : int
-    ; max_decision_level : int
+    { deadline : Time_ns.t option
+    ; mutable iterations_until_check : int
     }
-  [@@deriving sexp]
+
+  let create = function
+    | `Unlimited ->
+      { deadline = None; iterations_until_check = Core.Int.max_value }
+    | `Bounded ms ->
+      let deadline =
+        Time_ns.add (Time_ns.now ()) (Time_ns.Span.of_ms (Float.of_int ms))
+      in
+      { deadline = Some deadline; iterations_until_check = 0 }
+  ;;
+
+  let check t =
+    match t.deadline with
+    | None -> ()
+    | Some deadline ->
+      if t.iterations_until_check > 0
+      then t.iterations_until_check <- t.iterations_until_check - 1
+      else (
+        t.iterations_until_check <- timeout_check_every;
+        if Time_ns.(now () >= deadline) then raise Timeout)
+  ;;
 end
 
-let stats t : Stats.t =
-  { iterations = t.iterations
-  ; decisions = t.decisions
-  ; propagations = t.propagations
-  ; conflicts = t.total_conflicts
-  ; learned_clauses = t.learned_clauses
-  ; learned_clause_literals = t.learned_clause_literals
-  ; max_decision_level = t.max_decision_level
-  }
+let stats t = t.stats
+let literal_var t ~literal = Vec.Value.get t.vars (Int.abs literal)
+let clause_to_array clause = Vec.Value.to_array clause.Clause.clause
+
+let clause_with_assignments t ~clause =
+  clause_to_array clause
+  |> Array.map ~f:(fun literal ->
+    let var = literal_var t ~literal in
+    literal, var.assignment)
 ;;
 
-let reset_stats t =
-  t.iterations <- 0;
-  t.decisions <- 0;
-  t.propagations <- 0;
-  t.total_conflicts <- 0;
-  t.learned_clauses <- 0;
-  t.learned_clause_literals <- 0;
-  t.max_decision_level <- 0
+let assignments_array t : bool option array =
+  Vec.Value.map t.vars ~f:(fun (var : Var.t) ->
+    if var.exists then Or_null.to_option var.assignment else None)
+  |> Vec.Value.to_array
 ;;
 
-let assignment t ~var = exclave_
-  if Bitset.get (Tf_pair.get t.assignments true) var
-  then Some true
-  else if Bitset.get (Tf_pair.get t.assignments false) var
-  then Some false
-  else None
-;;
-
-let assignment_literal_is_true assignments literal =
-  Bitset.get (Tf_pair.get assignments (literal > 0)) (Int.abs literal)
-;;
-
-let%template assignments_array t : _ @ m =
-  (let open Local_ref.O in
-   let f = Tf_pair.get t.assignments false in
-   let t = Tf_pair.get t.assignments true in
-   let len = Bitset.popcount f + Bitset.popcount t in
-   let res = (Array.create [@alloc a]) ~len 0 in
-   let loc = Local_ref.create 0 in
-   let add i =
-     res.(!loc) <- i;
-     loc := !loc + 1
-   in
-   Bitset.iter_set_bits t ~f:add;
-   Bitset.iter_set_bits f ~f:(fun i -> add (-i));
-   res) [@exclave_if_stack a]
-[@@alloc a @ m = (stack_local, heap_global)]
-;;
-
-let _ = assignments_array [@alloc stack]
-
-let add_clause_activity t ~clause_idx =
-  let inc = t.clause_adjusting_score.#inc in
-  let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
-  let to_set = F64.O.(inc + Clause.activity clause) in
-  Clause.set_activity clause to_set;
-  exclave_ F64.O.(to_set > t.clause_adjusting_score.#rescale)
-;;
-
-let rescale_clause_activities t =
-  Clause.Pool.iter t.clauses ~f:(fun ptr ->
-    let clause = Clause.Pool.get t.clauses ptr in
-    Clause.set_activity
-      clause
-      F64.O.(Clause.activity clause / t.clause_adjusting_score.#rescale));
-  t.clause_adjusting_score <- Adjusting_score.rescale t.clause_adjusting_score
-;;
-
-let decay_clause_activities t =
-  t.clause_adjusting_score <- Adjusting_score.decay t.clause_adjusting_score
-;;
-
-let simplify_learned_clause ~clause ~uip_literal t =
-  (* just don't add redundant literals
-
-     redundant if the learned clause is implied by the literals we've already
-     seen *)
-  let backjump_level = ref 0 in
-  let learned_clause = Vec.Value.of_array_taking_ownership [| uip_literal |] in
-  let rec go i =
-    if i >= Vec.Value.length clause
-    then ()
-    else (
-      let literal = Vec.Value.get clause i in
-      match%optional_u
-        (I64.Option.Vec.get t.trail_entry_idx_by_var (Int.abs literal)
-         : I64.Option.t)
-      with
-      | None -> go (i + 1)
-      | Some idx ->
-        let trail_entry = Trail_entry.Vec.get t.trail (I64.to_int_trunc idx) in
-        let skip =
-          match trail_entry.#reason with
-          | T #(Decision, _, _) -> false
-          | T #(Clause_idx, clause_idx, _) ->
-            let reason = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
-            let all_marked = ref (Clause.length reason > 1) in
-            Clause.iteri reason ~f:(fun _i literal ->
-              if Literal.var literal = Int.abs uip_literal
-              then ()
-              else if not
-                        (Conflict_analysis_state.is_seen
-                           t.conflict_analysis_state
-                           ~var:(Literal.var literal))
-              then all_marked := false);
-            !all_marked
-        in
-        if skip
-        then ()
-        else (
-          let dl = I64.to_int_trunc trail_entry.#decision_level in
-          Vec.Value.push learned_clause literal;
-          if !backjump_level < dl
-          then (
-            backjump_level := dl;
-            Vec.Value.set
-              learned_clause
-              (Vec.Value.length learned_clause - 1)
-              (Vec.Value.get learned_clause 1);
-            Vec.Value.set learned_clause 1 literal));
-        go (i + 1))
-  in
-  go 1;
-  #( ~learned_clause:(Clause.of_int_array (Vec.Value.to_array learned_clause))
-   , ~backjump_level:(I64.of_int !backjump_level) )
-;;
-
-let analyze_conflict ~failed_clause t =
-  let state = t.conflict_analysis_state in
-  Conflict_analysis_state.reset state;
-  let path_count = ref 0 in
-  let rescale = Local_ref.create false in
-  let mark_literal literal =
-    let var = Literal.var literal in
-    if not (Conflict_analysis_state.is_seen state ~var)
-    then (
-      Conflict_analysis_state.mark_seen state ~var;
-      match%optional_u
-        (I64.Option.Vec.get t.trail_entry_idx_by_var var : I64.Option.t)
-      with
-      | None -> ()
-      | Some idx ->
-        let trail_entry = Trail_entry.Vec.get t.trail (I64.to_int_trunc idx) in
-        let dl = trail_entry.#decision_level in
-        if I64.O.(dl = #0L)
-        then ()
-        else (
-          Vsids.add_activity t.vsids ~literal;
-          if I64.O.(dl = t.decision_level)
-          then incr path_count
-          else Vec.Value.push state.learned (Literal.to_int literal)))
-  in
-  Clause.iter_literals failed_clause ~f:mark_literal;
-  if t.debug
-  then
-    print_s
-      [%message
-        "analyze_conflict"
-          ~failed_clause:(Clause.to_int_array failed_clause : int array)];
-  let found_uip = ref false in
-  let uip_literal = ref 0 in
-  let i = ref (Trail_entry.Vec.length t.trail - 1) in
-  while !i >= 0 && not !found_uip do
-    let trail_entry = Trail_entry.Vec.get t.trail !i in
-    let literal = trail_entry.#literal in
-    let var = Literal.var literal in
-    if Conflict_analysis_state.is_seen state ~var
-       && I64.O.(trail_entry.#decision_level = t.decision_level)
-    then (
-      Conflict_analysis_state.clear_seen state ~var;
-      decr path_count;
-      if !path_count = 0
-      then (
-        found_uip := true;
-        uip_literal := Literal.to_int (Literal.negate literal))
+let assignments_array_pretty t =
+  let res =
+    Vec.Value.filter_mapi t.vars ~f:(fun i (var : Var.t) ->
+      if not var.exists
+      then None
       else (
-        match trail_entry.#reason with
-        | T #(Decision, _, _) -> failwith "found decision before reaching UIP"
-        | T #(Clause_idx, clause_idx, _) ->
-          Local_ref.O.(rescale := !rescale || add_clause_activity t ~clause_idx);
-          let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
-          if t.debug
-          then
-            print_s
-              [%message
-                "analyze_conflict"
-                  ~learned:(Vec.Value.to_array state.learned : int array)
-                  ~see:(Clause.to_int_array clause : int array)
-                  (literal : Literal.t)
-                  (!path_count : int)];
-          Clause.iter_literals clause ~f:(fun reason_literal ->
-            if Literal.var reason_literal <> var
-            then mark_literal reason_literal)));
-    decr i
-  done;
-  if not !found_uip then failwith "conflict analysis failed to find UIP";
-  let uip_literal = !uip_literal in
-  if Local_ref.get rescale then rescale_clause_activities t;
-  if Vec.Value.length state.learned = 0
-  then Vec.Value.push state.learned uip_literal
-  else (
-    Vec.Value.push state.learned (Vec.Value.get state.learned 0);
-    Vec.Value.set state.learned 0 uip_literal);
-  simplify_learned_clause ~clause:state.learned ~uip_literal t
-;;
-
-(** can be called multiple times for the same var *)
-let on_new_var
-  { trail_entry_idx_by_var
-  ; watched_clauses_by_literal
-  ; vsids
-  ; assignments = _
-  ; iterations = _
-  ; decisions = _
-  ; propagations = _
-  ; total_conflicts = _
-  ; learned_clauses = _
-  ; learned_clause_literals = _
-  ; max_decision_level = _
-  ; decision_level = _
-  ; decision_level_of_last_assumption = _
-  ; trail = _
-  ; clauses = _
-  ; pending_units = _
-  ; has_empty_clause = _
-  ; debug = _
-  ; clauses_with_active_unit = _
-  ; clause_adjusting_score = _
-  ; simplify_clauses_every = _
-  ; clause_sorting_buckets = _
-  ; lbd_seen_at_level = _
-  ; lbd_stamp = _
-  ; conflict_analysis_state = _
-  ; luby = _
-  ; conflicts = _
-  }
-  ~var
-  =
-  Vsids.on_new_var vsids ~var;
-  I64.Option.Vec.fill_to_length
-    trail_entry_idx_by_var
-    ~f:(fun (_ : int) -> I64.Option.none)
-    ~length:(var + 1);
-  let fill tf with_ = exclave_
-    Tf_pair.iter
-      tf
-      ~f:
-        (Vec.Value.fill_to_length ~length:(var + 1) ~f:(fun (_ : int) ->
-           with_ ()))
+        match var.assignment with
+        | Null -> None
+        | This true -> Some i
+        | This false -> Some (-i)))
+    |> Vec.Value.to_array
   in
-  fill watched_clauses_by_literal Vec.Value.create [@nontail]
+  Array.sort res ~compare:Int.compare;
+  res
 ;;
 
-let get_by_literal by_literal literal =
-  Vec.Value.get
-    (Tf_pair.get by_literal (Literal.value literal))
-    (Literal.var literal)
-;;
-
-let queue_pending_unit t ~clause_idx ~literal =
-  let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
-  let generation = Clause.generation clause in
-  if Clause.pending_unit_generation clause <> generation
-  then (
-    Clause.set_pending_unit_generation clause generation;
-    Vec.Value.push
-      t.pending_units
-      (Pending_unit.create
-         ~clause_idx
-         ~clause_generation:generation
-         ~unit_literal:(Literal.to_int literal)))
-;;
-
-let clear_pending_units t =
-  Vec.Value.iter t.pending_units ~f:(fun pending_unit ->
-    let clause =
-      Clause.Pool.get t.clauses (Ptr.of_int pending_unit.clause_idx)
-    in
-    if Clause.pending_unit_generation clause = pending_unit.clause_generation
-    then Clause.set_pending_unit_generation clause (-1));
-  Vec.Value.clear t.pending_units
-;;
-
-let remove_watcher_at t ~literal ~slot =
-  let watched_clauses = get_by_literal t.watched_clauses_by_literal literal in
-  let last_slot = Vec.Value.length watched_clauses - 1 in
-  let moved_watched_clause = Vec.Value.get watched_clauses last_slot in
-  if slot <> last_slot
-  then (
-    Vec.Value.set watched_clauses slot moved_watched_clause;
-    let moved_clause =
-      Clause.Pool.get t.clauses (Ptr.of_int moved_watched_clause.clause_idx)
-    in
-    Clause.set_watch_slot
-      moved_clause
-      ~watch:moved_watched_clause.watch_index
-      slot);
-  ignore (Vec.Value.pop_exn watched_clauses)
-;;
-
-let add_watcher t ~clause_idx ~watch ~watch_pos =
-  let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
-  let literal = Literal.of_int (Clause.get clause watch_pos) in
-  let watched_clauses = get_by_literal t.watched_clauses_by_literal literal in
-  let slot = Vec.Value.length watched_clauses in
-  let blocker =
-    if Clause.watch_pos clause ~watch:(1 - watch) >= 0
-    then Clause.get clause (1 - watch)
-    else 0
-  in
-  Vec.Value.push
-    watched_clauses
-    (Watched_clause.create ~clause_idx ~watch_index:watch ~blocker);
-  Clause.set_watch_pos clause ~watch watch_pos;
-  Clause.set_watch_slot clause ~watch slot
-;;
-
-let set_other_watch_blocker t clause ~clause_idx ~watch_index ~blocker =
-  let other_watch = 1 - watch_index in
-  if Clause.watch_pos clause ~watch:other_watch >= 0
-  then (
-    let other_literal = Literal.of_int (Clause.get clause other_watch) in
-    let other_slot = Clause.watch_slot clause ~watch:other_watch in
-    let watched_clauses =
-      get_by_literal t.watched_clauses_by_literal other_literal
-    in
-    if other_slot >= 0 && other_slot < Vec.Value.length watched_clauses
-    then (
-      let watched_clause = Vec.Value.get watched_clauses other_slot in
-      if watched_clause.clause_idx = clause_idx
-         && watched_clause.watch_index = other_watch
-      then Watched_clause.set_blocker watched_clause blocker))
-;;
-
-let remove_clause_watches t clause =
-  let remove watch =
-    let pos = Clause.watch_pos clause ~watch in
-    if pos >= 0
-    then (
-      let literal = Literal.of_int (Clause.get clause pos) in
-      let slot = Clause.watch_slot clause ~watch in
-      remove_watcher_at t ~literal ~slot)
-  in
-  let pos0 = Clause.watch_pos clause ~watch:0 in
-  let pos1 = Clause.watch_pos clause ~watch:1 in
-  if pos0 >= 0 && pos1 >= 0 && Clause.get clause pos0 = Clause.get clause pos1
-  then
-    if Clause.watch_slot clause ~watch:0 > Clause.watch_slot clause ~watch:1
-    then (
-      remove 0;
-      remove 1)
-    else (
-      remove 1;
-      remove 0)
-  else (
-    remove 1;
-    remove 0);
-  Clause.clear_watch_data clause
-;;
-
-(* return is [This clause_idx] for unsat [clause_idx] *)
-let%template update_watched_clauses t ~set_literal =
-  let literal = Literal.negate set_literal in
-  let watched_clauses = get_by_literal t.watched_clauses_by_literal literal in
-  let rec process idx =
-    if idx >= Vec.Value.length watched_clauses
-    then Null
-    else (
-      let watched_clause = Vec.Value.get watched_clauses idx in
-      let clause =
-        Clause.Pool.get t.clauses (Ptr.of_int watched_clause.clause_idx)
-      in
-      let false_watch_pos =
-        Clause.watch_pos clause ~watch:watched_clause.watch_index
-      in
-      if Clause.watch_slot clause ~watch:watched_clause.watch_index <> idx
-         || false_watch_pos < 0
-         || Clause.get clause false_watch_pos <> Literal.to_int literal
-      then (
-        remove_watcher_at t ~literal ~slot:idx;
-        process idx)
-      else (
-        let other_watch_pos =
-          Clause.watch_pos clause ~watch:(1 - watched_clause.watch_index)
-        in
-        if assignment_literal_is_true t.assignments watched_clause.blocker
-        then process (idx + 1)
-        else (
-          match
-            Clause.analyze_false_watch
-              clause
-              ~assignments:t.assignments
-              ~false_watch_pos
-              ~other_watch_pos
-          with
-          | Satisfied -> process (idx + 1)
-          | Replacement replacement_pos ->
-            set_other_watch_blocker
-              t
-              clause
-              ~clause_idx:watched_clause.clause_idx
-              ~watch_index:watched_clause.watch_index
-              ~blocker:(Clause.get clause replacement_pos);
-            remove_watcher_at t ~literal ~slot:idx;
-            add_watcher
-              t
-              ~clause_idx:watched_clause.clause_idx
-              ~watch:watched_clause.watch_index
-              ~watch_pos:replacement_pos;
-            process idx
-          | Unit unit_literal ->
-            queue_pending_unit
-              t
-              ~clause_idx:watched_clause.clause_idx
-              ~literal:unit_literal;
-            process (idx + 1)
-          | Conflict -> This watched_clause.clause_idx)))
-  in
-  process 0 [@nontail]
-;;
-
-let populate_watched_literals_for_new_clause
-  ({ clauses
-   ; watched_clauses_by_literal = _
-   ; pending_units = _
-   ; assignments = _
-   ; iterations = _
-   ; decisions = _
-   ; propagations = _
-   ; total_conflicts = _
-   ; learned_clauses = _
-   ; learned_clause_literals = _
-   ; max_decision_level = _
-   ; decision_level_of_last_assumption = _
-   ; decision_level = _
-   ; trail = _
-   ; trail_entry_idx_by_var = _
-   ; vsids = _
-   ; has_empty_clause = _
-   ; debug = _
-   ; clauses_with_active_unit = _
-   ; clause_adjusting_score = _
-   ; simplify_clauses_every = _
-   ; clause_sorting_buckets = _
-   ; lbd_seen_at_level = _
-   ; lbd_stamp = _
-   ; conflict_analysis_state = _
-   ; luby = _
-   ; conflicts = _
-   } as t)
-  ~ptr
-  =
-  let clause = Clause.Pool.get clauses ptr in
-  let clause_idx = Ptr.to_int ptr in
-  Clause.clear_watch_data clause;
-  if Clause.length clause = 0
-  then t.has_empty_clause <- true
-  else (
-    let first_non_false = ref (-1) in
-    let second_non_false = ref (-1) in
-    let first_fallback = ref (-1) in
-    let satisfied = ref false in
-    for i = 0 to Clause.length clause - 1 do
-      let literal = Literal.of_int (Clause.get clause i) in
-      match assignment t ~var:(Literal.var literal) with
-      | Some value when Bool.equal value (Literal.value literal) ->
-        satisfied := true;
-        if !first_non_false < 0
-        then first_non_false := i
-        else if !second_non_false < 0
-        then second_non_false := i
-      | Some _ -> if !first_fallback < 0 then first_fallback := i
-      | None ->
-        if !first_non_false < 0
-        then first_non_false := i
-        else if !second_non_false < 0
-        then second_non_false := i
-    done;
-    let watch0 = if !first_non_false >= 0 then !first_non_false else 0 in
-    let watch1 =
-      if !second_non_false >= 0
-      then !second_non_false
-      else if Clause.length clause > 1
-      then (
-        let fallback =
-          if !first_fallback >= 0 && !first_fallback <> watch0
-          then !first_fallback
-          else if watch0 = 0
-          then 1
-          else 0
-        in
-        fallback)
-      else -1
-    in
-    add_watcher t ~clause_idx ~watch:0 ~watch_pos:watch0;
-    if watch1 >= 0 then add_watcher t ~clause_idx ~watch:1 ~watch_pos:watch1;
-    if (not !satisfied) && !first_non_false >= 0 && !second_non_false < 0
-    then
-      queue_pending_unit
-        t
-        ~clause_idx
-        ~literal:(Literal.of_int (Clause.get clause !first_non_false)))
-;;
-
-(** can NOT be called multiple times for the same clause *)
-let push_clause
-  ({ clauses
-   ; clause_adjusting_score
-   ; watched_clauses_by_literal = _
-   ; iterations = _
-   ; decisions = _
-   ; propagations = _
-   ; total_conflicts = _
-   ; learned_clauses = _
-   ; learned_clause_literals = _
-   ; max_decision_level = _
-   ; pending_units = _
-   ; assignments = _
-   ; decision_level_of_last_assumption = _
-   ; decision_level = _
-   ; trail = _
-   ; trail_entry_idx_by_var = _
-   ; vsids = _
-   ; has_empty_clause = _
-   ; debug = _
-   ; clauses_with_active_unit = _
-   ; simplify_clauses_every = _
-   ; clause_sorting_buckets = _
-   ; lbd_seen_at_level = _
-   ; lbd_stamp = _
-   ; conflict_analysis_state = _
-   ; luby = _
-   ; conflicts = _
-   } as t)
-  ~clause
-  =
-  let ptr = Clause.Pool.alloc clauses in
-  Clause.Pool.set clauses ptr clause;
-  let clause = Clause.Pool.get clauses ptr in
-  Clause.set_deleted clause false;
-  Clause.set_activity clause (Adjusting_score.unit clause_adjusting_score);
-  ignore (Clause.bump_generation clause);
-  (* bookkeeping for vars *)
-  Clause.iter_literals clause ~f:(fun literal ->
-    let var = Literal.var literal in
-    on_new_var t ~var);
-  populate_watched_literals_for_new_clause t ~ptr;
-  ptr
-;;
-
-let free_clause
-  ({ clauses
-   ; watched_clauses_by_literal = _
-   ; pending_units = _
-   ; clauses_with_active_unit
-   ; clause_adjusting_score = _
-   ; assignments = _
-   ; decision_level = _
-   ; decision_level_of_last_assumption = _
-   ; trail = _
-   ; iterations = _
-   ; decisions = _
-   ; propagations = _
-   ; total_conflicts = _
-   ; learned_clauses = _
-   ; learned_clause_literals = _
-   ; max_decision_level = _
-   ; trail_entry_idx_by_var = _
-   ; vsids = _
-   ; has_empty_clause = _
-   ; debug = _
-   ; simplify_clauses_every = _
-   ; clause_sorting_buckets = _
-   ; lbd_seen_at_level = _
-   ; lbd_stamp = _
-   ; conflict_analysis_state = _
-   ; luby = _
-   ; conflicts = _
-   } as t)
-  ptr
-  =
-  let clause_idx = Ptr.to_int ptr in
-  let clause = Clause.Pool.get clauses ptr in
-  Clause.iter_literals clause ~f:(fun literal ->
-    let var = Literal.var literal in
-    on_new_var t ~var);
-  remove_clause_watches t clause;
-  Int.H_set.remove clauses_with_active_unit clause_idx;
-  Clause.set_deleted clause true;
-  Clause.clear clause;
-  Clause.Pool.free t.clauses ptr
-;;
-
-let add_to_trail t ~(trail_entry : Trail_entry.t) =
-  if t.debug
-  then
-    print_s
-      [%message
-        "add_to_trail"
-          (trail_entry.#literal : Literal.t)
-          (t.decision_level : I64.t)];
-  assert (
-    not
-      (Bitset.get
-         (Tf_pair.get t.assignments true)
-         (Literal.var trail_entry.#literal)
-       || Bitset.get
-            (Tf_pair.get t.assignments false)
-            (Literal.var trail_entry.#literal)));
-  (match trail_entry.#reason with
-   | T #(Decision, _, _) -> ()
-   | T #(Clause_idx, clause_ptr, _) ->
-     Int.H_set.insert t.clauses_with_active_unit ~key:clause_ptr ~data:());
-  Bitset.set
-    (Tf_pair.get t.assignments (Literal.value trail_entry.#literal))
-    (Literal.var trail_entry.#literal);
-  I64.Option.Vec.set
-    t.trail_entry_idx_by_var
-    (Literal.var trail_entry.#literal)
-    (Trail_entry.Vec.length t.trail |> I64.of_int |> I64.Option.some);
-  Vsids.remove_from_pool t.vsids ~var:(Literal.var trail_entry.#literal);
-  Trail_entry.Vec.push t.trail trail_entry;
-  update_watched_clauses t ~set_literal:trail_entry.#literal
-;;
+let _ = assignments_array_pretty
 
 let undo_entry t ~(trail_entry : Trail_entry.t) =
   if t.debug
   then
     print_s
       [%message
-        "undo_entry"
-          (trail_entry.#literal : Literal.t)
-          (t.decision_level : I64.t)];
-  assert (
-    Bitset.get
-      (Tf_pair.get t.assignments (Literal.value trail_entry.#literal))
-      (Literal.var trail_entry.#literal));
-  (match trail_entry.#reason with
-   | T #(Decision, _, _) -> ()
-   | T #(Clause_idx, clause_ptr, _) ->
-     Int.H_set.remove t.clauses_with_active_unit clause_ptr);
+        "undo_entry" (trail_entry.#literal : int) (t.decision_level : int)];
+  let literal = trail_entry.#literal in
+  let var = literal_var t ~literal in
+  Literal_set.insert t.unassigned_literals ~literal:trail_entry.#literal;
+  Literal_set.insert t.unassigned_literals ~literal:(-trail_entry.#literal);
   Vsids.add_to_pool t.vsids ~literal:trail_entry.#literal;
-  Bitset.clear
-    (Tf_pair.get t.assignments (Literal.value trail_entry.#literal))
-    (Literal.var trail_entry.#literal);
-  I64.Option.Vec.set
-    t.trail_entry_idx_by_var
-    (Literal.var trail_entry.#literal)
-    I64.Option.none
+  var.assignment <- Null;
+  var.trail_entry <- Trail_entry.Option_u.none ();
+  match trail_entry.#reason with
+  | T #(Decision, ()) -> ()
+  | T #(Clause_idx, clause_idx) ->
+    (Vec.Value.get t.clauses clause_idx).has_unit <- false
+;;
+
+let pop_from_trail_exn t =
+  let trail_entry = Trail_entry.Vec.pop_exn t.trail in
+  undo_entry t ~trail_entry
+;;
+
+let push_trail_entry t ~(trail_entry : Trail_entry.t) =
+  let literal = trail_entry.#literal in
+  let var = literal_var t ~literal in
+  match var.assignment with
+  | This b when Bool.equal b (literal > 0) -> `Duplicate_in_trail
+  | This _ -> `Conflict_in_trail
+  | Null ->
+    if t.debug
+    then
+      print_s
+        [%message
+          "add_to_trail"
+            (trail_entry.#literal : int)
+            (trail_entry.#decision_level : int)
+            (t.decision_level : int)];
+    var.assignment <- This (trail_entry.#literal > 0);
+    var.trail_entry <- Trail_entry.Option_u.some trail_entry;
+    Trail_entry.Vec.push t.trail trail_entry;
+    Vsids.remove_from_pool t.vsids ~var:(Int.abs trail_entry.#literal);
+    Literal_set.remove t.unassigned_literals ~literal:trail_entry.#literal;
+    Literal_set.remove t.unassigned_literals ~literal:(-trail_entry.#literal);
+    (match trail_entry.#reason with
+     | T #(Decision, ()) -> ()
+     | T #(Clause_idx, clause_idx) ->
+       (Vec.Value.get t.clauses clause_idx).has_unit <- true);
+    `Added_to_trail
+;;
+
+let push_unit_trail_entry t ~literal ~clause_idx =
+  if t.debug
+  then (
+    let clause = Vec.Value.get t.clauses clause_idx in
+    print_s
+      [%message
+        "found unit"
+          ~clause:
+            (clause_with_assignments t ~clause : (int * bool or_null) array)
+          (literal : int)]);
+  match
+    push_trail_entry
+      t
+      ~trail_entry:
+        (#{ decision_level = t.decision_level
+          ; literal
+          ; reason = Reason.clause_idx clause_idx
+          }
+         : Trail_entry.t)
+  with
+  | `Added_to_trail | `Duplicate_in_trail -> Null
+  | `Conflict_in_trail -> This clause_idx
+;;
+
+let is_satisfied t ~literal =
+  let var = literal_var t ~literal in
+  [%equal: bool or_null] var.assignment (This (literal > 0))
+;;
+
+let update_blocker_for_watcher t ~watched_literal ~clause_idx ~blocking_literal =
+  let var = literal_var t ~literal:watched_literal in
+  let watched_clauses = Tf_pair.get var.watched_clauses (watched_literal > 0) in
+  Watched_clause.Vec.iteri watched_clauses ~f:(fun i watched_clause ->
+    if watched_clause.#clause_idx = clause_idx
+    then
+      Watched_clause.Vec.set
+        watched_clauses
+        i
+        (Watched_clause.create
+           ~clause_idx
+           ~blocking_literal
+           ~is_binary:watched_clause.#is_binary))
+;;
+
+let replace_watched_literal' t ~clause_idx ~nullified_literal = exclave_
+  let clause = Vec.Value.get t.clauses clause_idx in
+  assert (
+    nullified_literal = Vec.Value.get clause.clause 0
+    || nullified_literal = Vec.Value.get clause.clause 1);
+  if Vec.Value.length clause.clause = 1
+  then `Not_replaced_conflict clause_idx
+  else (
+    if Vec.Value.get clause.clause 0 = nullified_literal
+    then Vec.Value.swap clause.clause 0 1;
+    assert (Vec.Value.get clause.clause 1 = nullified_literal);
+    let other_literal = Vec.Value.get clause.clause 0 in
+    let other_var = literal_var t ~literal:other_literal in
+    if is_satisfied t ~literal:other_literal
+    then
+      (* already satisfied, do nothing *)
+      `Not_replaced_not_conflict
+        (* else if not (Or_null.is_null other_var.assignment) *)
+        (* then *)
+        (* (\* other watched literal is already assigned, so there can't be a *)
+        (* replacement, so this is a conflict *\) *)
+        (* `Not_replaced_conflict clause_idx *)
+    else (
+      let rec go i = exclave_
+        if i >= Vec.Value.length clause.clause
+        then `No_replacement_found
+        else (
+          let literal = Vec.Value.get clause.clause i in
+          let var = literal_var t ~literal in
+          if is_satisfied t ~literal
+          then `Replacement (~var:{ global = var }, ~literal, ~i)
+          else (
+            match var.assignment with
+            | This _ -> go (i + 1)
+            | Null ->
+              (* found a replacement *)
+              (* TODO: this might already be in the trail, ideally we take ones
+                 that aren't in the trail *)
+              `Replacement (~var:{ global = var }, ~literal, ~i)))
+      in
+      match go 2 with
+      | `No_replacement_found ->
+        (match other_var.assignment with
+         | Null ->
+           (* other watched literal is a unit *)
+           (match
+              push_unit_trail_entry t ~literal:other_literal ~clause_idx
+            with
+            | Null -> `Not_replaced_not_conflict
+            | This clause_idx -> `Not_replaced_conflict clause_idx)
+         | This _ -> `Not_replaced_conflict clause_idx)
+      | `Replacement (~var:{ global = var }, ~literal, ~i) ->
+        assert (literal <> nullified_literal);
+        Vec.Value.swap clause.clause 1 i;
+        update_blocker_for_watcher
+          t
+          ~watched_literal:other_literal
+          ~clause_idx
+          ~blocking_literal:literal;
+        (* guaranteed non binary *)
+        Watched_clause.Vec.push
+          (Tf_pair.get var.watched_clauses (literal > 0))
+          (Watched_clause.create
+             ~clause_idx
+             ~blocking_literal:other_literal
+             ~is_binary:false);
+        `Replaced literal))
+;;
+
+let replace_watched_literal t ~clause_idx ~nullified_literal = exclave_
+  let res = replace_watched_literal' t ~clause_idx ~nullified_literal in
+  (* if t.debug *)
+  (* then ( *)
+  (* let clause = Vec.Value.get t.clauses clause_idx in *)
+  (* print_s *)
+  (*     [%message *)
+  (*       "replaced_watched_literal" *)
+  (* (nullified_literal : int) *)
+  (* (clause_with_assignments t ~clause : (int * bool or_null) array) *)
+  (* (res *)
+  (*          : [ `Not_replaced_not_conflict *)
+  (* | `Not_replaced_conflict of int *)
+  (* | `Replaced of int *)
+  (*            ])]); *)
+  res
+;;
+
+let update_watches_for_assignment t ~(var : Var.t) ~literal = exclave_
+  if t.debug
+  then print_s [%message "update_watches_for_assignment" (literal : int)];
+  (* other assignment invalidated *)
+  let watched_clauses = Tf_pair.get var.watched_clauses (not (literal > 0)) in
+  let conflict_clause = stack_ (ref Null) in
+  Watched_clause.Vec.filter_inplace
+    watched_clauses
+    ~f:(fun #{ clause_idx; blocking_literal; is_binary } ->
+      if (Vec.Value.get t.clauses clause_idx).deleted
+      then false (* eagerly remove deleted clauses from watch lists *)
+      else if not (Or_null.is_null !conflict_clause)
+      then (* just do nothing if already conflict *)
+        true
+      else if is_satisfied t ~literal:blocking_literal
+      then true (* already satisfied, do nothing *)
+      else if is_binary
+      then (
+        let blocking_var = literal_var t ~literal:blocking_literal in
+        match blocking_var.assignment with
+        | Null ->
+          (* immediately add unit literal, because binary and this literal isn't
+             satisfied *)
+          (match
+             push_unit_trail_entry t ~literal:blocking_literal ~clause_idx
+           with
+           | Null -> true
+           | This clause_idx ->
+             conflict_clause := This clause_idx;
+             true)
+        | This _ ->
+          conflict_clause := This clause_idx;
+          true)
+      else (
+        match
+          replace_watched_literal t ~clause_idx ~nullified_literal:(-literal)
+        with
+        | `Replaced _ -> false
+        | `Not_replaced_not_conflict | `Clause_too_short -> true
+        | `Not_replaced_conflict clause_idx ->
+          conflict_clause := This clause_idx;
+          true));
+  match !conflict_clause with
+  | This conflict_clause -> `Conflict conflict_clause
+  | Null -> `No_conflict
 ;;
 
 let rec remove_greater_than_decision_level t ~decision_level =
+  let rec undo_while_unprocessed () =
+    if t.trail_processed_till >= Trail_entry.Vec.length t.trail
+    then ()
+    else (
+      pop_from_trail_exn t;
+      undo_while_unprocessed ())
+  in
+  undo_while_unprocessed ();
   let remaining_level =
     if Trail_entry.Vec.length t.trail = 0
-    then #0L
+    then 0
     else (Trail_entry.Vec.last_exn t.trail).#decision_level
   in
-  if I64.O.(remaining_level <= decision_level)
-  then t.decision_level <- remaining_level
+  if remaining_level <= decision_level
+  then (
+    t.decision_level <- remaining_level;
+    t.trail_processed_till <- Trail_entry.Vec.length t.trail)
   else (
-    let trail_entry = Trail_entry.Vec.pop_exn t.trail in
-    undo_entry t ~trail_entry;
+    pop_from_trail_exn t;
     remove_greater_than_decision_level t ~decision_level)
 ;;
 
-let next_lbd_stamp t =
-  if t.lbd_stamp = Int.max_value
-  then (
-    Vec.Value.map_inplace t.lbd_seen_at_level ~f:(fun (_ : int) -> 0);
-    t.lbd_stamp <- 1)
-  else t.lbd_stamp <- t.lbd_stamp + 1;
-  t.lbd_stamp
+let rec propagate t : int or_null =
+  match t.trail_processed_till < Trail_entry.Vec.length t.trail with
+  | false -> Null
+  | true ->
+    let trail_entry = Trail_entry.Vec.get t.trail t.trail_processed_till in
+    t.trail_processed_till <- t.trail_processed_till + 1;
+    let var = Vec.Value.get t.vars (Int.abs trail_entry.#literal) in
+    if t.debug
+    then
+      print_s
+        [%message "propagate: trying assignment" (trail_entry.#literal : int)];
+    (match
+       update_watches_for_assignment t ~var ~literal:trail_entry.#literal
+     with
+     | `Conflict clause_idx -> This clause_idx
+     | `No_conflict ->
+       t.stats <- #{ t.stats with propagations = t.stats.#propagations + 1 };
+       propagate t)
 ;;
 
-let clause_lbd t ~clause =
-  let stamp = next_lbd_stamp t in
-  let distinct = ref 0 in
-  for i = 0 to Clause.length clause - 1 do
-    let literal = Clause.get clause i in
-    match%optional_u
-      (I64.Option.Vec.get t.trail_entry_idx_by_var (Int.abs literal)
-       : I64.Option.t)
-    with
-    | None -> ()
-    | Some idx ->
-      let dl =
-        (Trail_entry.Vec.get t.trail (I64.to_int_trunc idx)).#decision_level
-      in
-      let dl = I64.to_int_trunc dl in
-      Vec.Value.fill_to_length
-        t.lbd_seen_at_level
-        ~length:(dl + 1)
-        ~f:(fun (_ : int) -> 0);
-      if Vec.Value.get t.lbd_seen_at_level dl <> stamp
-      then (
-        Vec.Value.set t.lbd_seen_at_level dl stamp;
-        incr distinct)
+let trail_index_of_var_exn t ~var =
+  let rec go i =
+    if i < 0
+    then
+      Error.raise_s
+        [%message "BUG: assigned var missing from trail" (var : int)]
+    else if Int.abs (Trail_entry.Vec.get t.trail i).#literal = var
+    then i
+    else go (i - 1)
+  in
+  go (Trail_entry.Vec.length t.trail - 1)
+;;
+
+let conflict_keep_trail_len t ~failed_clause_idx =
+  let failed_clause = Vec.Value.get t.clauses failed_clause_idx in
+  let keep = ref t.trail_processed_till in
+  Vec.Value.iter failed_clause.clause ~f:(fun literal ->
+    let var = literal_var t ~literal in
+    match var.assignment with
+    | Null -> ()
+    | This _ ->
+      let trail_idx = trail_index_of_var_exn t ~var:(Int.abs literal) in
+      keep := Int.max !keep (trail_idx + 1));
+  !keep
+;;
+
+let pop_trail_after_conflict t ~failed_clause_idx =
+  let keep_trail_len = conflict_keep_trail_len t ~failed_clause_idx in
+  while Trail_entry.Vec.length t.trail > keep_trail_len do
+    pop_from_trail_exn t
   done;
-  !distinct
+  t.trail_processed_till
+  <- Int.min t.trail_processed_till (Trail_entry.Vec.length t.trail)
 ;;
 
-let backtrack t ~failed_clause =
-  let #(~learned_clause, ~backjump_level) = analyze_conflict t ~failed_clause in
-  t.learned_clauses <- t.learned_clauses + 1;
-  t.learned_clause_literals
-  <- t.learned_clause_literals + Clause.length learned_clause;
+let register_watcher t ~literal ~clause_idx ~blocking_literal =
+  let var = literal_var t ~literal in
+  Watched_clause.Vec.push
+    (Tf_pair.get var.watched_clauses (literal > 0))
+    (Watched_clause.create ~clause_idx ~blocking_literal ~is_binary:false)
+;;
+
+let register_watchers_for_new_clause t ~literals ~clause_idx =
+  let lit1 = Vec.Value.get literals 0 in
+  let lit2 = Vec.Value.get literals 1 in
+  register_watcher t ~literal:lit1 ~clause_idx ~blocking_literal:lit2;
+  register_watcher t ~literal:lit2 ~clause_idx ~blocking_literal:lit1
+;;
+
+let ensure_literal t ~literal =
+  while Vec.Value.length t.vars <= Int.abs literal do
+    Vec.Value.push
+      t.vars
+      { assignment = Null
+      ; trail_entry = Trail_entry.Option_u.none ()
+      ; watched_clauses = Tf_pair.create (fun _ -> Watched_clause.Vec.create ())
+      ; exists = false
+      }
+  done;
+  let var = literal_var t ~literal in
+  if not var.exists
+  then (
+    Literal_set.insert t.unassigned_literals ~literal;
+    Literal_set.insert t.unassigned_literals ~literal:(-literal);
+    Vsids.on_new_var t.vsids ~var:(Int.abs literal);
+    var.exists <- true)
+;;
+
+let add_clause t ~literals ~learned =
+  let len = Vec.Value.length literals in
+  if len = 0 then t.has_empty_clause <- true;
+  let satisfied = stack_ (ref false) in
+  let num_unassigned = stack_ (ref 0) in
+  let satisfied_at_front = stack_ (ref 0) in
+  (* figure out if satisfied, and place unassigned variables at the front if not
+     satisfied, and satisfied variables at the front if satisfied *)
+  let rec go i =
+    if i >= Vec.Value.length literals
+    then ()
+    else (
+      let literal = Vec.Value.get literals i in
+      ensure_literal t ~literal;
+      let var = literal_var t ~literal in
+      let satisfied_by_this = is_satisfied t ~literal in
+      if satisfied_by_this && !satisfied_at_front <= 1
+      then (
+        Vec.Value.swap literals !satisfied_at_front i;
+        incr satisfied_at_front);
+      satisfied := !satisfied || satisfied_by_this;
+      (match var.assignment with
+       | This _ -> ()
+       | Null ->
+         if !num_unassigned <= 1 && not !satisfied
+         then Vec.Value.swap literals !num_unassigned i;
+         incr num_unassigned);
+      go (i + 1))
+  in
+  go 0;
+  (* has unit is populated when the trail entry is seen *)
+  let clause : Clause.t =
+    { clause = literals
+    ; has_unit = false
+    ; learned
+    ; lbd = 0
+    ; deleted = false
+    ; activity = 0.0
+    }
+  in
+  let clause_idx = Vec.Value.length t.clauses in
+  Vec.Value.push t.clauses clause;
+  if len >= 2 then register_watchers_for_new_clause t ~literals ~clause_idx;
+  if (not !satisfied) && !num_unassigned = 0 && len > 0
+  then `Conflict clause_idx
+  else (
+    match !num_unassigned = 1 && not !satisfied with
+    | false -> `Ok
+    | true ->
+      (* add unit *)
+      (match
+         push_unit_trail_entry t ~literal:(Vec.Value.get literals 0) ~clause_idx
+       with
+       | Null -> `Ok
+       | This _ -> `Conflict clause_idx))
+;;
+
+let clause_act_decay_factor = 0.95
+let clause_act_rescale_threshold = 1e20
+let clause_act_rescale_divisor = 1e20
+
+let add_clause_activity t ~clause_idx =
+  let clause = Vec.Value.get t.clauses clause_idx in
+  let new_act = clause.activity +. t.clause_act_inc in
+  clause.activity <- new_act;
+  Float.(new_act > clause_act_rescale_threshold)
+;;
+
+let rescale_clause_activities t =
+  Vec.Value.iter t.clauses ~f:(fun clause ->
+    clause.activity <- clause.activity /. clause_act_rescale_divisor);
+  t.clause_act_inc <- t.clause_act_inc /. clause_act_rescale_divisor
+;;
+
+let decay_clause_activities t =
+  t.clause_act_inc <- t.clause_act_inc /. clause_act_decay_factor
+;;
+
+let mark_literal t ~seen ~literal ~(local_ path_count) ~learned_literals =
+  let var = Int.abs literal in
+  if not (Stamp_set.is_seen seen ~var)
+  then (
+    Stamp_set.mark_seen seen ~var;
+    let var = literal_var t ~literal in
+    match var.assignment with
+    | Null -> ()
+    | This _ ->
+      (match%optional_u (var.trail_entry : Trail_entry.Option_u.t) with
+       | None -> ()
+       | Some trail_entry ->
+         let dl = trail_entry.#decision_level in
+         if dl = 0 && t.decision_level <> 0
+         then ()
+         else (
+           Vsids.add_activity t.vsids ~literal;
+           if dl = t.decision_level
+           then incr path_count
+           else Vec.Value.push learned_literals literal)))
+;;
+
+let simplify_learned_clause t ~learned_literals ~uip_literal ~seen =
+  (* just don't add redundant literals
+
+     redundant if the learned clause is implied by the literals we've already
+     seen *)
+  let backjump_level = ref 0 in
+  let new_learned_literals =
+    Vec.Value.of_array_taking_ownership [| uip_literal |]
+  in
+  let rec go i =
+    if i >= Vec.Value.length learned_literals
+    then ()
+    else (
+      let literal = Vec.Value.get learned_literals i in
+      let var = literal_var t ~literal in
+      match%optional_u (var.trail_entry : Trail_entry.Option_u.t) with
+      | None -> go (i + 1)
+      | Some trail_entry ->
+        let skip =
+          match trail_entry.#reason with
+          | T #(Decision, ()) -> false
+          | T #(Clause_idx, clause_idx) ->
+            let reason = Vec.Value.get t.clauses clause_idx in
+            let all_marked = ref (Vec.Value.length reason.clause > 1) in
+            Vec.Value.iter reason.clause ~f:(fun literal ->
+              if Int.abs literal = Int.abs uip_literal
+              then ()
+              else if not (Stamp_set.is_seen seen ~var:(Int.abs literal))
+              then all_marked := false);
+            !all_marked
+        in
+        if skip
+        then ()
+        else (
+          let dl = trail_entry.#decision_level in
+          Vec.Value.push new_learned_literals literal;
+          if !backjump_level < dl
+          then (
+            backjump_level := dl;
+            Vec.Value.swap
+              new_learned_literals
+              1
+              (Vec.Value.length new_learned_literals - 1)));
+        go (i + 1))
+  in
+  go 1;
+  #(~learned_literals:new_learned_literals, ~backjump_level:!backjump_level)
+;;
+
+let analyze_conflict t ~(failed_clause : Clause.t) ~failed_clause_idx =
+  let seen = t.analyze_conflict_stamp_set in
+  Stamp_set.reset seen;
+  let learned_literals = t.analyze_conflict_scratch_literals in
+  Vec.Value.clear learned_literals;
+  let path_count = stack_ (ref 0) in
+  let needs_rescale = ref false in
+  let mark_literal literal =
+    mark_literal t ~seen ~literal ~learned_literals ~path_count
+  in
+  needs_rescale
+  := add_clause_activity t ~clause_idx:failed_clause_idx || !needs_rescale;
+  Vec.Value.iter failed_clause.clause ~f:mark_literal;
+  let failed_clause_with_assignments =
+    clause_with_assignments t ~clause:failed_clause
+  in
+  if t.debug
+  then
+    print_s
+      [%message
+        "analyze_conflict"
+          ~failed_clause:(clause_to_array failed_clause : int array)
+          (failed_clause_with_assignments : (int * bool or_null) array)];
+  let found_uip = ref false in
+  let uip_literal = ref 0 in
+  let i = ref (Trail_entry.Vec.length t.trail - 1) in
+  while !i >= 0 && not !found_uip do
+    let trail_entry = Trail_entry.Vec.get t.trail !i in
+    let literal = trail_entry.#literal in
+    if Stamp_set.is_seen seen ~var:(Int.abs literal)
+       && trail_entry.#decision_level = t.decision_level
+    then (
+      Stamp_set.clear_seen seen ~var:(Int.abs literal);
+      decr path_count;
+      if !path_count = 0
+      then (
+        found_uip := true;
+        uip_literal := -literal)
+      else (
+        match trail_entry.#reason with
+        | T #(Decision, ()) -> failwith "found decision before reaching UIP"
+        | T #(Clause_idx, clause_idx) ->
+          needs_rescale := add_clause_activity t ~clause_idx || !needs_rescale;
+          let clause = Vec.Value.get t.clauses clause_idx in
+          if t.debug
+          then
+            print_s
+              [%message
+                "analyze_conflict"
+                  ~learned:(Vec.Value.to_array learned_literals : int array)
+                  ~see:(clause_to_array clause : int array)
+                  (literal : int)
+                  (!path_count : int)];
+          Vec.Value.iter clause.clause ~f:(fun reason_literal ->
+            if Int.abs reason_literal <> Int.abs literal
+            then mark_literal reason_literal)));
+    decr i
+  done;
+  if not !found_uip then failwith "conflict analysis failed to find UIP";
+  if !needs_rescale then rescale_clause_activities t;
+  let uip_literal = !uip_literal in
+  if Vec.Value.length learned_literals = 0
+  then Vec.Value.push learned_literals uip_literal
+  else (
+    Vec.Value.push learned_literals (Vec.Value.get learned_literals 0);
+    Vec.Value.set learned_literals 0 uip_literal);
+  simplify_learned_clause ~learned_literals ~uip_literal ~seen t
+;;
+
+let rec luby_value i =
+  let rec find_k k = if (1 lsl k) - 1 < i then find_k (k + 1) else k in
+  let k = find_k 1 in
+  if i = (1 lsl k) - 1
+  then 1 lsl (k - 1)
+  else (
+    let prev_block = (1 lsl (k - 1)) - 1 in
+    luby_value (i - prev_block))
+;;
+
+let compute_lbd t ~literals =
+  let seen = t.lbd_stamp_set in
+  Stamp_set.reset seen;
+  let lbd = ref 0 in
+  Vec.Value.iter literals ~f:(fun literal ->
+    let var = literal_var t ~literal in
+    match%optional_u (var.trail_entry : Trail_entry.Option_u.t) with
+    | None -> ()
+    | Some trail_entry ->
+      let dl = trail_entry.#decision_level in
+      if not (Stamp_set.is_seen seen ~var:dl)
+      then (
+        Stamp_set.mark_seen seen ~var:dl;
+        incr lbd));
+  !lbd
+;;
+
+let reduce_db t =
+  let n = Vec.Value.length t.clauses in
+  let candidates =
+    Array.init n ~f:(fun i ->
+      let c = Vec.Value.get t.clauses i in
+      if c.Clause.learned
+         && c.lbd >= 4
+         && Vec.Value.length c.clause > 3
+         && (not c.deleted)
+         && not c.has_unit
+      then Some (i, c.activity)
+      else None)
+    |> Array.filter_opt
+  in
+  (* sort ascending by activity: lowest activity deleted first *)
+  Array.sort candidates ~compare:(fun (_, a) (_, b) -> Float.compare a b);
+  let n_delete = Array.length candidates / 2 in
+  for i = 0 to n_delete - 1 do
+    let clause_idx, _ = candidates.(i) in
+    let clause = Vec.Value.get t.clauses clause_idx in
+    clause.deleted <- true
+  done;
+  Vec.Value.iter t.vars ~f:(fun (var : Var.t) ->
+    if var.exists
+    then (
+      let filter_wl wl =
+        Watched_clause.Vec.filter_inplace wl ~f:(fun wc ->
+          not (Vec.Value.get t.clauses wc.#clause_idx).deleted)
+      in
+      filter_wl (Tf_pair.get var.watched_clauses true);
+      filter_wl (Tf_pair.get var.watched_clauses false)));
+  t.stats
+  <- #{ t.stats with deleted_clauses = t.stats.#deleted_clauses + n_delete }
+;;
+
+let restart t = exclave_
+  t.decision_level <- 0;
+  while
+    Trail_entry.Vec.length t.trail <> 0
+    && (Trail_entry.Vec.last_exn t.trail).#decision_level
+       > t.decision_level_of_last_assumption
+  do
+    pop_from_trail_exn t
+  done;
+  t.trail_processed_till
+  <- Int.min t.trail_processed_till (Trail_entry.Vec.length t.trail);
+  Vec.Value.iteri t.clauses ~f:(fun clause_idx (clause : Clause.t) ->
+    if (not clause.deleted) && not clause.has_unit
+    then (
+      let lits = clause.clause in
+      let len = Vec.Value.length lits in
+      let candidate = ref None in
+      let ok = ref true in
+      let i = ref 0 in
+      while !ok && !i < len do
+        let literal = Vec.Value.get lits !i in
+        let var = literal_var t ~literal in
+        (match var.assignment with
+         | This b when Bool.equal b (literal > 0) -> ok := false (* satisfied *)
+         | This _ -> () (* false, skip *)
+         | Null ->
+           (match !candidate with
+            | None -> candidate := Some literal
+            | Some _ -> ok := false (* two unset, not unit *)));
+        incr i
+      done;
+      if !ok
+      then (
+        match !candidate with
+        | None -> () (* all false = conflict, will be caught elsewhere *)
+        | Some literal ->
+          (match push_unit_trail_entry t ~literal ~clause_idx with
+           | Null | This _ -> ()))))
+;;
+
+let backtrack t ~failed_clause ~failed_clause_idx =
+  let #(~learned_literals, ~backjump_level) =
+    analyze_conflict t ~failed_clause ~failed_clause_idx
+  in
+  let lbd = compute_lbd t ~literals:learned_literals in
+  t.stats
+  <- #{ t.stats with
+        learned_clauses = t.stats.#learned_clauses + 1
+      ; learned_clause_literals =
+          Vec.Value.length learned_literals + t.stats.#learned_clause_literals
+      };
   if t.debug
   then
     print_s
       [%message
         "backtrack"
-          ~learned_clause:(Clause.literals_list learned_clause : int list)];
+          ~learned_clause:(Vec.Value.to_list learned_literals : int list)];
+  t.conflicts_since_restart <- t.conflicts_since_restart + 1;
   Vsids.decay t.vsids;
-  (* This is correct because we backtrack to the previous decision level, where
-     all unit clauses had been applied. Learned clause is set to unit after
-     adding here. *)
-  clear_pending_units t;
   remove_greater_than_decision_level t ~decision_level:backjump_level;
-  Clause.set_learnt learned_clause true;
-  Clause.set_lbd learned_clause (clause_lbd t ~clause:learned_clause);
-  ignore (push_clause t ~clause:learned_clause)
+  let result = add_clause t ~literals:learned_literals ~learned:true in
+  (match result with
+   | `Ok ->
+     let clause = Vec.Value.get t.clauses (Vec.Value.length t.clauses - 1) in
+     clause.lbd <- lbd;
+     clause.activity <- t.clause_act_inc
+   | `Conflict _ -> ());
+  let luby_threshold = 32 * luby_value t.luby_index in
+  if t.conflicts_since_restart >= luby_threshold
+     && t.decision_level > t.decision_level_of_last_assumption
+  then (
+    t.stats <- #{ t.stats with restarts = t.stats.#restarts + 1 };
+    t.conflicts_since_restart <- 0;
+    t.luby_index <- t.luby_index + 1;
+    restart t);
+  result
 ;;
 
-let%template make_decision' ~is_assumption t ~literal : _ @ m =
-  if t.debug then print_s [%message "make_decision" (literal : Literal.t)];
-  t.decision_level <- I64.O.(t.decision_level + #1L);
-  t.max_decision_level
-  <- Int.max t.max_decision_level (I64.to_int_trunc t.decision_level);
-  if not is_assumption then t.decisions <- t.decisions + 1;
+let unsat_core t failed_clause_idx =
+  let failed_clause = Vec.Value.get t.clauses failed_clause_idx in
+  let #(~learned_literals, ~backjump_level:_) =
+    analyze_conflict t ~failed_clause ~failed_clause_idx
+  in
+  Vec.Value.map_inplace learned_literals ~f:(fun x -> -x);
+  Vec.Value.to_array learned_literals
+;;
+
+let%template unsat t failed_clause_idx : Sat_result.t @ m =
+  let unsat_core = unsat_core t failed_clause_idx in
+  Unsat { unsat_core } [@exclave_if_stack a]
+[@@alloc a @ m = (stack_local, heap_global)]
+;;
+
+let make_decision' ~is_assumption t ~literal =
+  if t.debug
+  then print_s [%message "make_decision" (is_assumption : bool) (literal : int)];
+  t.decision_level <- t.decision_level + 1;
+  if not is_assumption
+  then
+    t.stats
+    <- #{ t.stats with
+          decisions = t.stats.#decisions + 1
+        ; max_decision_level =
+            Int.max t.decision_level t.stats.#max_decision_level
+        }
+  else
+    t.stats
+    <- #{ t.stats with
+          max_decision_level =
+            Int.max t.decision_level t.stats.#max_decision_level
+        };
   if is_assumption then t.decision_level_of_last_assumption <- t.decision_level;
   let trail_entry : Trail_entry.t =
-    #{ reason = Reason.decision literal
-     ; literal
-     ; decision_level = t.decision_level
-     }
+    #{ reason = Reason.decision (); literal; decision_level = t.decision_level }
   in
-  match add_to_trail t ~trail_entry with
-  | Null -> `Continue
-  | This i -> `Failed_clause i
-[@@exclave_if_stack] [@@alloc a @ m = (stack_local, heap_global)]
+  let var = literal_var t ~literal in
+  assert (Or_null.is_null var.assignment);
+  match push_trail_entry t ~trail_entry with
+  | `Conflict_in_trail | `Duplicate_in_trail ->
+    Error.raise_s [%message "[make_decision'] conflicting with trail"]
+  | `Added_to_trail -> propagate t
 ;;
 
 let%template make_decision t : _ @ m =
-  match%optional_u (Vsids.choose_literal t.vsids : Literal.Option.t) with
-  | None ->
-    `Done
-      (Sat_result.Sat
-         { assignments = Clause.of_int_array (assignments_array t) })
-  | Some literal ->
-    (make_decision' [@alloc a])
-      ~is_assumption:false
-      t
-      ~literal [@exclave_if_stack a]
+  match Vsids.choose_literal t.vsids with
+  | Null -> `Done (Sat_result.Sat { assignments = assignments_array t })
+  | This literal ->
+    (match[@exclave_if_stack a]
+       make_decision' ~is_assumption:false t ~literal
+     with
+     | Null -> `Continue
+     | This clause_idx -> `Failed_clause clause_idx)
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
 let%template check_sat_result t ~(sat_result : _ @ m) : _ @ m =
   match (sat_result : Sat_result.t) with
   | Unsat _ -> sat_result
-  | Sat _ ->
+  | Sat { assignments } ->
     if t.debug
     then
-      Clause.Pool.iter t.clauses ~f:(fun ptr ->
-        let clause = Clause.Pool.get t.clauses ptr in
-        if not (Clause.is_satisfied clause ~assignments:t.assignments)
-        then
-          Error.raise_s
-            [%message
-              "BUG: clause isn't satisfied in result"
-                ~clause:(Clause.to_int_array clause : int array)]);
+      Vec.Value.iter t.clauses ~f:(fun clause ->
+        if not clause.deleted
+        then (
+          let is_satisfied = ref false in
+          Vec.Value.iter clause.clause ~f:(fun literal ->
+            is_satisfied
+            := !is_satisfied
+               || [%equal: bool option]
+                    assignments.(Int.abs literal)
+                    (Some (literal > 0)));
+          if not !is_satisfied
+          then
+            Error.raise_s
+              [%message
+                "BUG: clause isn't satisfied in result"
+                  (clause.clause : int Vec.Value.t)]));
     sat_result
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
-let%template can_trim_clause t ~clause_idx =
-  let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
-  (not (Int.H_set.mem t.clauses_with_active_unit clause_idx))
-  && Clause.length clause > 3
-  && Clause.lbd clause >= 4
-;;
+let simplify_clauses_every = 2500
 
-let simplify_clauses t =
-  Vec.Value.clear t.clause_sorting_buckets;
-  Clause.Pool.iter t.clauses ~f:(fun ptr ->
-    let clause_idx = Ptr.to_int ptr in
-    let clause = Clause.Pool.get t.clauses ptr in
-    if Clause.learnt clause
-       && (not (Int.H_set.mem t.clauses_with_active_unit clause_idx))
-       && can_trim_clause t ~clause_idx
-    then Vec.Value.push t.clause_sorting_buckets clause_idx);
-  let compare_by_score a b =
-    F64.compare
-      (Clause.activity (Clause.Pool.get t.clauses (Ptr.of_int a)))
-      (Clause.activity (Clause.Pool.get t.clauses (Ptr.of_int b)))
-  in
-  Vec.Value.sort t.clause_sorting_buckets ~compare:compare_by_score;
-  let num_to_drop = Vec.Value.length t.clause_sorting_buckets / 2 in
-  for i = 0 to num_to_drop - 1 do
-    let clause_idx = Vec.Value.get t.clause_sorting_buckets i in
-    if t.debug
-    then (
-      let clause = Clause.Pool.get t.clauses (Ptr.of_int clause_idx) in
-      print_s
-        [%message
-          "Deleting clause"
-            (clause_idx : int)
-            ~clause:(Clause.to_int_array clause : int array)]);
-    free_clause t (Ptr.of_int clause_idx)
-  done
-;;
-
-let rec try_unit_propagate t = exclave_
-  match Vec.Value.last t.pending_units with
-  | None -> None
-  | Some pending_unit ->
-    ignore (Vec.Value.pop_exn t.pending_units);
-    let clause =
-      Clause.Pool.get t.clauses (Ptr.of_int pending_unit.clause_idx)
-    in
-    if Clause.pending_unit_generation clause = pending_unit.clause_generation
-    then Clause.set_pending_unit_generation clause (-1);
-    if Clause.deleted clause
-       || Clause.generation clause <> pending_unit.clause_generation
-    then try_unit_propagate t
-    else (
-      let literal = Literal.of_int pending_unit.unit_literal in
-      match assignment t ~var:(Literal.var literal) with
-      | Some value ->
-        if Bool.equal value (Literal.value literal)
-        then try_unit_propagate t
-        else Some pending_unit.clause_idx
-      | None ->
-        if t.debug
-        then
-          print_s
-            [%message
-              "try_unit_propagate: found unit"
-                ~clause:(Clause.to_int_array clause : int array)
-                ~assignments:(assignments_array t : int array)
-                (literal : Literal.t)];
-        t.propagations <- t.propagations + 1;
-        (match
-           add_to_trail
-             t
-             ~trail_entry:
-               #{ decision_level = t.decision_level
-                ; literal
-                ; reason = Reason.clause_idx pending_unit.clause_idx
-                }
-         with
-         | Null -> try_unit_propagate t
-         | This failed_clause_idx -> Some failed_clause_idx))
-;;
-
-let restart t = exclave_
-  t.conflicts <- #0L;
-  t.decision_level <- #0L;
-  clear_pending_units t;
-  while
-    Trail_entry.Vec.length t.trail <> 0
-    && I64.O.(
-         (Trail_entry.Vec.last_exn t.trail).#decision_level
-         > t.decision_level_of_last_assumption)
-  do
-    undo_entry t ~trail_entry:(Trail_entry.Vec.pop_exn t.trail)
-  done;
-  Clause.Pool.iter t.clauses ~f:(fun ptr ->
-    let clause = Clause.Pool.get t.clauses ptr in
-    match%optional_u
-      (Clause.unit_literal clause ~assignments:t.assignments : Literal.Option.t)
-    with
-    | None -> ()
-    | Some literal -> queue_pending_unit t ~clause_idx:(Ptr.to_int ptr) ~literal)
-;;
-
-let%template unsat t failed_clause_idx : Sat_result.t @ m =
-  (let failed_clause =
-     Clause.Pool.get t.clauses (Ptr.of_int failed_clause_idx)
-   in
-   let learned_clause =
-     (* TODO: this is jank, and idk why we die sometimes *)
-     (* raise when it's conflicts from a unit clause we deduced. *)
-     try
-       let #(~learned_clause:clause, ~backjump_level:_) =
-         analyze_conflict t ~failed_clause
-       in
-       Clause.negate clause;
-       clause
-     with
-     | _ -> Clause.copy failed_clause
-   in
-   Unsat { unsat_core = learned_clause })
-  [@exclave_if_stack a]
-[@@alloc a @ m = (stack_local, heap_global)]
-;;
-
-let%template rec solve' t : Sat_result.t @ m =
-  (t.iterations <- t.iterations + 1;
-   if t.iterations mod t.simplify_clauses_every = 0
+let%template rec solve' t ~timer : Sat_result.t @ m =
+  (t.stats <- #{ t.stats with iterations = t.stats.#iterations + 1 };
+   t.iterations <- t.iterations + 1;
+   Timer.check timer;
+   if t.iterations mod simplify_clauses_every = 0
    then (
-     if t.debug
-     then
-       print_s
-         [%message
-           "simplifying clauses"
-             (t.iterations : int)
-             ~num_clauses:(Clause.Pool.outstanding t.clauses : int)
-             (t.decision_level : I64.t)];
-     simplify_clauses t;
+     reduce_db t;
      decay_clause_activities t);
-   let learn_from_failure failed_clause_idx : Sat_result.t @ m =
-     match[@exclave_if_stack a]
-       I64.O.(
-         t.decision_level = #0L
-         || t.decision_level < t.decision_level_of_last_assumption)
-     with
-     | true -> (unsat [@alloc a]) t failed_clause_idx
-     | false ->
-       let failed_clause =
-         Clause.Pool.get t.clauses (Ptr.of_int failed_clause_idx)
-       in
-       backtrack t ~failed_clause;
-       t.conflicts <- I64.O.(t.conflicts + #1L);
-       t.total_conflicts <- t.total_conflicts + 1;
-       if I64.O.(
-            t.conflicts >= Luby.value t.luby
-            && I64.O.(t.decision_level <> t.decision_level_of_last_assumption))
-       then (
-         ignore (Luby.next t.luby);
-         restart t);
-       (solve' [@alloc a]) t
-   in
-   match try_unit_propagate t with
-   | Some failed_clause_idx -> learn_from_failure failed_clause_idx
-   | None ->
+   match propagate t with
+   | This failed_clause_idx -> learn_from_failure t ~failed_clause_idx ~timer
+   | Null ->
      (match (make_decision [@alloc a]) t with
-      | `Continue -> (solve' [@alloc a]) t
-      | `Failed_clause failed_clause_idx -> learn_from_failure failed_clause_idx
+      | `Continue -> (solve' [@alloc a]) t ~timer
+      | `Failed_clause failed_clause_idx ->
+        (learn_from_failure [@alloc a]) t ~failed_clause_idx ~timer
       | `Done sat_result -> (check_sat_result [@alloc a]) t ~sat_result))
   [@exclave_if_stack a]
 [@@alloc a @ m = (stack_local, heap_global)]
+
+and learn_from_failure t ~failed_clause_idx ~timer : Sat_result.t @ m =
+  pop_trail_after_conflict t ~failed_clause_idx;
+  match[@exclave_if_stack a]
+    t.decision_level = 0
+    || t.decision_level <= t.decision_level_of_last_assumption
+  with
+  | true -> (unsat [@alloc a]) t failed_clause_idx
+  | false ->
+    let failed_clause = Vec.Value.get t.clauses failed_clause_idx in
+    t.stats <- #{ t.stats with conflicts = t.stats.#conflicts + 1 };
+    (match backtrack t ~failed_clause ~failed_clause_idx with
+     | `Ok -> (solve' [@alloc a]) t ~timer
+     | `Conflict failed_clause_idx ->
+       (learn_from_failure [@alloc a]) t ~failed_clause_idx ~timer)
+[@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
-let add_assumptions ~(local_ assumptions) t = exclave_
+let add_assumptions ~(local_ assumptions) t ~timer = exclave_
   let rec go i = exclave_
     if i = Array.length assumptions
     then `Continue
     else (
-      t.iterations <- t.iterations + 1;
-      let literal = Literal.of_int assumptions.(i) in
-      match try_unit_propagate t with
-      | Some failed_clause_idx -> `Failed_clause failed_clause_idx
-      | None ->
-        (match assignment t ~var:(Literal.var literal) with
-         | None ->
-           (match
-              (make_decision' [@alloc stack]) ~is_assumption:true t ~literal
-            with
-            | `Failed_clause _ as res -> res
-            | `Continue -> go (i + 1))
-         | Some b ->
-           if Bool.equal b (Literal.value literal)
-           then go (i + 1)
-           else (
-             let trail_entry_idx =
-               I64.Option.Vec.get t.trail_entry_idx_by_var (Literal.var literal)
-               |> I64.Option.value ~default:#0L (* always [some] *)
-             in
-             let trail_entry =
-               Trail_entry.Vec.get t.trail (I64.to_int_trunc trail_entry_idx)
-             in
-             match trail_entry.#reason with
-             | T #(Decision, _, _) -> failwith "invalid assumptions"
-             | T #(Clause_idx, failed_clause_idx, _) ->
-               `Failed_clause failed_clause_idx)))
+      t.stats <- #{ t.stats with iterations = t.stats.#iterations + 1 };
+      Timer.check timer;
+      let literal = assumptions.(i) in
+      ensure_literal t ~literal;
+      let var = literal_var t ~literal in
+      match var.assignment with
+      | Null ->
+        (match make_decision' ~is_assumption:true t ~literal with
+         | This failed_clause_idx -> `Failed_clause failed_clause_idx
+         | Null -> go (i + 1))
+      | This b ->
+        if Bool.equal b (literal > 0)
+        then go (i + 1)
+        else (
+          let trail_entry = Trail_entry.Option_u.value_exn var.trail_entry in
+          match trail_entry.#reason with
+          | T #(Decision, ()) ->
+            `Failed_assumptions (trail_entry.#literal, literal)
+          | T #(Clause_idx, failed_clause_idx) ->
+            `Failed_clause failed_clause_idx))
   in
   go 0
 ;;
 
-let%template solve ?(local_ assumptions = [||]) t : Sat_result.t @ m =
-  t.decision_level_of_last_assumption <- #0L;
+let maybe_clear_past_solve_state t =
+  let has_run_before = t.stats.#iterations > 0 in
+  t.stats <- Stats.empty ();
+  t.luby_index <- 1;
+  t.conflicts_since_restart <- 0;
+  t.iterations <- 0;
+  t.clause_act_inc <- 1.0;
+  if has_run_before
+  then (
+    if t.debug then print_endline "restarting";
+    restart t)
+;;
+
+let%template solve ?(time_bound = `Unlimited) ?(local_ assumptions = [||]) t
+  : Sat_result.t @ m
+  =
+  t.decision_level_of_last_assumption <- 0;
+  let timer = Timer.create time_bound in
   if t.debug
   then
     print_s
       [%message
         "solve" ~assumptions:([%globalize: int array] assumptions : int array)];
-  let has_run_before = t.iterations > 0 in
-  reset_stats t;
-  if has_run_before then restart t;
+  maybe_clear_past_solve_state t;
   if t.has_empty_clause
-  then Unsat { unsat_core = Clause.of_int_array [||] }
+  then Unsat { unsat_core = [||] }
   else (
-    match[@exclave_if_stack a] add_assumptions ~assumptions t with
-    | `Continue -> (solve' [@alloc a]) t
-    | `Failed_clause failed_clause_idx -> (unsat [@alloc a]) t failed_clause_idx)
+    match[@exclave_if_stack a] add_assumptions ~assumptions t ~timer with
+    | `Continue -> (solve' [@alloc a]) t ~timer
+    | `Failed_clause failed_clause_idx ->
+      pop_trail_after_conflict t ~failed_clause_idx;
+      (unsat [@alloc a]) t failed_clause_idx
+    | `Failed_assumptions (previous_assumption, assumption) ->
+      Unsat { unsat_core = [| previous_assumption; assumption |] })
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
-let create ?(debug = false) () =
-  { has_empty_clause = false
-  ; decision_level = #0L
-  ; decision_level_of_last_assumption = #0L
-  ; iterations = 0
-  ; decisions = 0
-  ; propagations = 0
-  ; total_conflicts = 0
-  ; learned_clauses = 0
-  ; learned_clause_literals = 0
-  ; max_decision_level = 0
-  ; assignments = Tf_pair.create (fun (_ : bool) -> Bitset.create ())
-  ; trail = Trail_entry.Vec.create ()
-  ; clauses = Clause.Pool.create ~chunk_size:4096 ()
-  ; pending_units = Vec.Value.create ()
-  ; clauses_with_active_unit = Int.H_set.create ()
-  ; clause_adjusting_score = Adjusting_score.default ()
-  ; trail_entry_idx_by_var = I64.Option.Vec.create ()
-  ; watched_clauses_by_literal =
-      Tf_pair.create (fun (_ : bool) -> Vec.Value.create ())
-  ; vsids = Vsids.create ()
-  ; simplify_clauses_every = 2500
-  ; clause_sorting_buckets = Vec.Value.create ()
-  ; lbd_seen_at_level = Vec.Value.create ()
-  ; lbd_stamp = 0
-  ; conflict_analysis_state = Conflict_analysis_state.create ()
-  ; luby = Luby.create ~unit_run:#32L
-  ; conflicts = #0L
+let create ?(random_state = Random.State.make [| 1; 2; 3 |]) ?(debug = false) ()
+  =
+  { trail = Trail_entry.Vec.create ()
+  ; trail_processed_till = 0
+  ; decision_level = 0
+  ; decision_level_of_last_assumption = 0
+  ; clauses = Vec.Value.create ()
+  ; vars = Vec.Value.create ()
+  ; unassigned_literals = Literal_set.create ~random_state
+  ; has_empty_clause = false
+  ; stats = Stats.empty ()
+  ; analyze_conflict_stamp_set = Stamp_set.create ()
+  ; analyze_conflict_scratch_literals = Vec.Value.create ()
   ; debug
+  ; vsids = Vsids.create ()
+  ; luby_index = 1
+  ; conflicts_since_restart = 0
+  ; lbd_stamp_set = Stamp_set.create ()
+  ; clause_act_inc = 1.0
+  ; iterations = 0
   }
 ;;
 
 let add_clause t ~clause =
-  ignore (push_clause t ~clause);
-  t
+  maybe_clear_past_solve_state t;
+  match
+    add_clause
+      t
+      ~literals:(Vec.Value.of_array_taking_ownership clause)
+      ~learned:false
+  with
+  | `Ok -> `Ok
+  | `Conflict failed_clause_idx -> `Unsat (unsat_core t failed_clause_idx)
 ;;
 
-let add_clause' t ~clause = add_clause t ~clause:(Clause.of_int_array clause)
-
-let create_with_formula ?debug formula =
+let create_with_formula ?(local_ debug) formula =
   let t = create ?debug () in
-  Array.fold formula ~init:t ~f:(fun t clause -> add_clause' t ~clause)
+  let unsat_core = stack_ (ref Null) in
+  Array.iter formula ~f:(fun clause ->
+    match !unsat_core with
+    | This _ -> ()
+    | Null ->
+      (match add_clause t ~clause with
+       | `Ok -> ()
+       | `Unsat core -> unsat_core := This core));
+  match !unsat_core with
+  | Null -> `Ok t
+  | This core -> `Unsat core
 ;;

@@ -12,7 +12,7 @@ end
 let solve_instance clauses =
   let solver = Solver.create () in
   Array.iter clauses ~f:(fun clause ->
-    ignore (Solver.add_clause' solver ~clause : Solver.t));
+    ignore (Solver.add_clause solver ~clause : [ `Ok | `Unsat of _ ]));
   match Solver.solve solver with
   | Sat _ | Unsat _ -> ()
 ;;
