@@ -17,7 +17,8 @@ let%expect_test "solve times out when bounded timer is exhausted" =
     (timeout
      (stats
       ((iterations 1) (decisions 0) (propagations 0) (conflicts 0)
-       (learned_clauses 0) (learned_clause_literals 0) (max_decision_level 0))))
+       (learned_clauses 0) (learned_clause_literals 0) (max_decision_level 0)
+       (deleted_clauses 0) (restarts 0))))
     |}]
 ;;
 
@@ -278,7 +279,7 @@ let%expect_test "succ dimacs" =
 
 let%expect_test "fail dimacs" =
   run_dimacs Examples.Dimacs.fail_eg;
-  [%expect {| (UNSAT (unsat_core (-112))) |}]
+  [%expect {| (UNSAT (unsat_core (106))) |}]
 ;;
 
 let%expect_test "assumptions" =
