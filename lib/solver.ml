@@ -726,34 +726,7 @@ let restart t = exclave_
     pop_from_trail_exn t
   done;
   t.trail_processed_till
-  <- Int.min t.trail_processed_till (Trail_entry.Vec.length t.trail);
-  Vec.Value.iteri t.clauses ~f:(fun clause_idx (clause : Clause.t) ->
-    if (not clause.deleted) && not clause.has_unit
-    then (
-      let lits = clause.clause in
-      let len = Vec.Value.length lits in
-      let candidate = ref None in
-      let ok = ref true in
-      let i = ref 0 in
-      while !ok && !i < len do
-        let literal = Vec.Value.get lits !i in
-        let var = literal_var t ~literal in
-        (match var.assignment with
-         | This b when Bool.equal b (literal > 0) -> ok := false (* satisfied *)
-         | This _ -> () (* false, skip *)
-         | Null ->
-           (match !candidate with
-            | None -> candidate := Some literal
-            | Some _ -> ok := false (* two unset, not unit *)));
-        incr i
-      done;
-      if !ok
-      then (
-        match !candidate with
-        | None -> () (* all false = conflict, will be caught elsewhere *)
-        | Some literal ->
-          (match push_unit_trail_entry t ~literal ~clause_idx with
-           | Null | This _ -> ()))))
+  <- Int.min t.trail_processed_till (Trail_entry.Vec.length t.trail)
 ;;
 
 let backtrack t ~failed_clause ~failed_clause_idx =
