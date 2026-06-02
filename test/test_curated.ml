@@ -4,23 +4,36 @@ open! Ds
 
 [@@@warning "-69"]
 
+let assignments_to_int_array assignments =
+  let literals = ref [] in
+  for var = 1 to Array.length assignments - 1 do
+    match assignments.(var) with
+    | None -> ()
+    | Some true -> literals := var :: !literals
+    | Some false -> literals := -var :: !literals
+  done;
+  Array.of_list_rev !literals
+;;
+
 let%expect_test "small assumptions" =
   let solver =
-    Solver.create_with_formula [| [| 1; 2 |]; [| -1; 3 |]; [| -3 |] |]
+    match Solver.create_with_formula [| [| 1; 2 |]; [| -1; 3 |]; [| -3 |] |] with
+    | `Ok t -> t
+    | `Unsat _ -> failwith "unexpected unsat during creation"
   in
   let solve assumptions =
     match Solver.solve ~assumptions solver with
     | Sat { assignments } ->
-      print_s [%message "SAT" (Clause.to_int_array assignments : int array)]
+      print_s [%message "SAT" (assignments_to_int_array assignments : int array)]
     | Unsat { unsat_core } ->
-      print_s [%message "UNSAT" (Clause.to_int_array unsat_core : int array)]
+      print_s [%message "UNSAT" (unsat_core : int array)]
   in
   solve [| 2 |];
   solve [| -2 |];
   [%expect
     {|
-    (SAT ("Clause.to_int_array assignments" (2 -1 -3)))
-    (UNSAT ("Clause.to_int_array unsat_core" (1 2)))
+    (SAT ("assignments_to_int_array assignments" (-1 2 -3)))
+    (UNSAT (unsat_core (-2)))
     |}]
 ;;
 
@@ -688,15 +701,19 @@ let%expect_test "regalloc" =
      -27 -261 -300 -287 -157 -144 -79 -14 -105 -66)
 |})
   in
-  let solver = Solver.create_with_formula ~debug:false formula in
+  let solver =
+    match Solver.create_with_formula ~debug:false formula with
+    | `Ok t -> t
+    | `Unsat _ -> failwith "unexpected unsat during creation"
+  in
   let res = Solver.solve ~assumptions solver in
-  print_s [%message (res : Solver.Sat_result.t)];
+  print_s [%message (res : Sat_result.t)];
   [%expect
     {|
     (res
      (Unsat
       (unsat_core
-       (181 -80 -81 -82 -83 -84 -86 -87 -88 -89 -91 -105 -106 -107 -108 -109 -110
-        -112 -113 -114 -115 -117 -79))))
+       (167 -82 -81 -84 -80 -86 -87 -88 -85 -90 -83 -1 -6 -4 -3 -12 -7 -10 -5 -9
+        -8 -2 -79))))
     |}]
 ;;

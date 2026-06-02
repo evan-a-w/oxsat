@@ -29,13 +29,13 @@ let command =
        in
        let solver = Feel.Solver.create () in
        Array.iter instance.clauses ~f:(fun clause ->
-         ignore (Feel.Solver.add_clause' solver ~clause));
+         ignore (Feel.Solver.add_clause solver ~clause : [ `Ok | `Unsat of _ ]));
        let start = Time_ns.now () in
        let result = Feel.Solver.solve solver in
        let elapsed = Time_ns.diff (Time_ns.now ()) start in
        let result =
          match result with
-         | Sat _ -> "sat"
+         | Feel.Sat_result.Sat _ -> "sat"
          | Unsat _ -> "unsat"
        in
        print_s
@@ -44,7 +44,7 @@ let command =
              (instance.name : string)
              (result : string)
              (elapsed : Time_ns.Span.t)];
-       print_s [%sexp (Feel.Solver.stats solver : Feel.Solver.Stats.t)])
+       print_s [%sexp (Feel.Solver.stats solver : Feel.Stats.t)])
 ;;
 
 let () = Command_unix.run command

@@ -1,36 +1,28 @@
 open! Core
 open! Import
 
-module Sat_result : sig
-  type t =
-    | Sat of { assignments : Clause.t }
-    | Unsat of { global_ unsat_core : Clause.t }
-  [@@deriving sexp]
-end
-
 type t
 
-module Stats : sig
-  type t =
-    { iterations : int
-    ; decisions : int
-    ; propagations : int
-    ; conflicts : int
-    ; learned_clauses : int
-    ; learned_clause_literals : int
-    ; max_decision_level : int
-    }
-  [@@deriving sexp]
-end
+type time_bound =
+  [ `Unlimited
+  | `Bounded of int
+  ]
 
-val%template solve : ?assumptions:int array @ local -> t -> Sat_result.t @ m
+exception Timeout
+
+val%template solve
+  :  ?time_bound:time_bound
+  -> ?assumptions:int array @ local
+  -> t
+  -> Sat_result.t @ m
 [@@alloc a @ m = (heap_global, stack_local)]
 
-val create : ?debug:bool @ local -> unit -> t
-val create_with_formula : ?debug:bool @ local -> int array array -> t
+val create : ?random_state:Random.State.t -> ?debug:bool @ local -> unit -> t
 
-(** mutate [t], but just return it for convenience sake *)
-val add_clause : t -> clause:Clause.t -> t
+val create_with_formula
+  :  ?debug:bool @ local
+  -> int array array
+  -> [ `Ok of t | `Unsat of int array ]
 
-val add_clause' : t -> clause:int array -> t
+val add_clause : t -> clause:int array -> [ `Ok | `Unsat of int array ]
 val stats : t -> Stats.t

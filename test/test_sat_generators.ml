@@ -4,6 +4,31 @@ open! Ds
 
 [@@@warning "-69"]
 
+let assignments_to_int_array assignments =
+  let literals = ref [] in
+  for var = 1 to Array.length assignments - 1 do
+    match assignments.(var) with
+    | None -> ()
+    | Some true -> literals := var :: !literals
+    | Some false -> literals := -var :: !literals
+  done;
+  Array.of_list_rev !literals
+;;
+
+let solve_clauses clauses =
+  let solver = Solver.create () in
+  let early_unsat = ref None in
+  Array.iter clauses ~f:(fun clause ->
+    if Option.is_none !early_unsat
+    then (
+      match Solver.add_clause solver ~clause with
+      | `Ok -> ()
+      | `Unsat core -> early_unsat := Some core));
+  match !early_unsat with
+  | Some core -> Sat_result.Unsat { unsat_core = core }
+  | None -> Solver.solve solver
+;;
+
 (** Example tests demonstrating the SAT generators *)
 
 let%expect_test "uniform random 3-SAT small instance" =
@@ -90,10 +115,7 @@ let%expect_test "solve simple planted 3-SAT instance" =
     Sat_generators.easy_planted_3_sat ~num_vars:5 ~num_clauses:10
   in
   let clauses, _solution = Quickcheck.random_value generator in
-  let solver = Solver.create () in
-  Array.iter clauses ~f:(fun clause ->
-    ignore (Solver.add_clause' solver ~clause : Solver.t));
-  let result = Solver.solve solver in
+  let result = solve_clauses clauses in
   (match result with
    | Sat _ -> print_endline "SAT (as expected for planted solution)"
    | Unsat _ -> print_endline "UNSAT (unexpected!)");
@@ -193,13 +215,10 @@ let%test_unit "solver finds solutions for planted SAT instances" =
        ~k:3
        ~min_satisfied:1)
     ~f:(fun (clauses, _planted_solution) ->
-      let solver = Solver.create () in
-      Array.iter clauses ~f:(fun clause ->
-        ignore (Solver.add_clause' solver ~clause : Solver.t));
-      match Solver.solve solver with
+      match solve_clauses clauses with
       | Sat { assignments } ->
         (* Verify the solution actually satisfies all clauses *)
-        let assignments_array = Clause.to_int_array assignments in
+        let assignments_array = assignments_to_int_array assignments in
         assert (verify_solution ~clauses ~assignments:assignments_array)
       | Unsat _ ->
         (* Planted solutions should always be satisfiable *)
@@ -212,13 +231,10 @@ let%test_unit "solver solutions are valid for uniform random 3-SAT" =
     ~trials:30
     (Sat_generators.uniform_random_k_sat ~num_vars:8 ~num_clauses:15 ~k:3)
     ~f:(fun clauses ->
-      let solver = Solver.create () in
-      Array.iter clauses ~f:(fun clause ->
-        ignore (Solver.add_clause' solver ~clause : Solver.t));
-      match Solver.solve solver with
+      match solve_clauses clauses with
       | Sat { assignments } ->
         (* If solver claims SAT, verify the solution is correct *)
-        let assignments_array = Clause.to_int_array assignments in
+        let assignments_array = assignments_to_int_array assignments in
         assert (verify_solution ~clauses ~assignments:assignments_array)
       | Unsat _ ->
         (* If solver claims UNSAT, we can't easily verify, but at least it terminated *)
@@ -235,12 +251,9 @@ let%test_unit "solver handles scale-free instances" =
        ~k:3
        ~alpha:2.5)
     ~f:(fun clauses ->
-      let solver = Solver.create () in
-      Array.iter clauses ~f:(fun clause ->
-        ignore (Solver.add_clause' solver ~clause : Solver.t));
-      match Solver.solve solver with
+      match solve_clauses clauses with
       | Sat { assignments } ->
-        let assignments_array = Clause.to_int_array assignments in
+        let assignments_array = assignments_to_int_array assignments in
         assert (verify_solution ~clauses ~assignments:assignments_array)
       | Unsat _ -> ())
 ;;
@@ -255,12 +268,9 @@ let%test_unit "solver respects backbone constraints" =
        ~k:3
        ~backbone_size:3)
     ~f:(fun (clauses, backbone) ->
-      let solver = Solver.create () in
-      Array.iter clauses ~f:(fun clause ->
-        ignore (Solver.add_clause' solver ~clause : Solver.t));
-      match Solver.solve solver with
+      match solve_clauses clauses with
       | Sat { assignments } ->
-        let assignments_array = Clause.to_int_array assignments in
+        let assignments_array = assignments_to_int_array assignments in
         (* Verify solution satisfies all clauses *)
         assert (verify_solution ~clauses ~assignments:assignments_array);
         (* Verify backbone constraints are respected *)
@@ -291,12 +301,9 @@ let%test_unit "solver handles variable length clauses (k-CNF)" =
     ~trials:30
     (Sat_generators.random_k_cnf ~num_vars:10 ~num_clauses:25 ~max_k:4)
     ~f:(fun clauses ->
-      let solver = Solver.create () in
-      Array.iter clauses ~f:(fun clause ->
-        ignore (Solver.add_clause' solver ~clause : Solver.t));
-      match Solver.solve solver with
+      match solve_clauses clauses with
       | Sat { assignments } ->
-        let assignments_array = Clause.to_int_array assignments in
+        let assignments_array = assignments_to_int_array assignments in
         assert (verify_solution ~clauses ~assignments:assignments_array)
       | Unsat _ -> ())
 ;;
@@ -307,13 +314,10 @@ let%test_unit "solver handles easy SAT instances quickly" =
     ~trials:50
     (Sat_generators.easy_planted_3_sat ~num_vars:15 ~num_clauses:40)
     ~f:(fun (clauses, _solution) ->
-      let solver = Solver.create () in
-      Array.iter clauses ~f:(fun clause ->
-        ignore (Solver.add_clause' solver ~clause : Solver.t));
       (* These should all be SAT since they're planted *)
-      match Solver.solve solver with
+      match solve_clauses clauses with
       | Sat { assignments } ->
-        let assignments_array = Clause.to_int_array assignments in
+        let assignments_array = assignments_to_int_array assignments in
         assert (verify_solution ~clauses ~assignments:assignments_array)
       | Unsat _ -> failwith "Solver returned UNSAT for easy planted instance")
 ;;
@@ -325,14 +329,8 @@ let%test_unit "solver determinism: same instance gives same result" =
     (Sat_generators.uniform_random_k_sat ~num_vars:8 ~num_clauses:20 ~k:3)
     ~f:(fun clauses ->
       (* Solve the same instance twice *)
-      let solve_instance () =
-        let solver = Solver.create () in
-        Array.iter clauses ~f:(fun clause ->
-          ignore (Solver.add_clause' solver ~clause : Solver.t));
-        Solver.solve solver
-      in
-      let result1 = solve_instance () in
-      let result2 = solve_instance () in
+      let result1 = solve_clauses clauses in
+      let result2 = solve_clauses clauses in
       (* Both results should be the same (SAT or UNSAT) *)
       match result1, result2 with
       | Sat _, Sat _ -> ()
@@ -347,20 +345,14 @@ let%test_unit "solver handles contradictory clauses correctly" =
     (Int.gen_incl 1 10)
     ~f:(fun var ->
       (* Create a contradiction: x and -x *)
-      let solver = Solver.create () in
-      ignore (Solver.add_clause' solver ~clause:[| var |] : Solver.t);
-      ignore (Solver.add_clause' solver ~clause:[| -var |] : Solver.t);
-      match Solver.solve solver with
+      let result = solve_clauses [| [| var |]; [| -var |] |] in
+      match result with
       | Sat _ -> failwith "Solver returned SAT for contradictory clauses"
-      | Unsat _ ->
-        (* Expected *)
-        ())
+      | Unsat _ -> ())
 ;;
 
 let%test_unit "empty clause is always UNSAT" =
-  let solver = Solver.create () in
-  ignore (Solver.add_clause' solver ~clause:[||] : Solver.t);
-  match Solver.solve solver with
+  match solve_clauses [| [||] |] with
   | Sat _ -> failwith "Solver returned SAT for empty clause"
   | Unsat _ -> ()
 ;;
@@ -375,12 +367,9 @@ let%test_unit "solver handles large planted instances" =
        ~k:3
        ~min_satisfied:2)
     ~f:(fun (clauses, _solution) ->
-      let solver = Solver.create () in
-      Array.iter clauses ~f:(fun clause ->
-        ignore (Solver.add_clause' solver ~clause : Solver.t));
-      match Solver.solve solver with
+      match solve_clauses clauses with
       | Sat { assignments } ->
-        let assignments_array = Clause.to_int_array assignments in
+        let assignments_array = assignments_to_int_array assignments in
         assert (verify_solution ~clauses ~assignments:assignments_array)
       | Unsat _ -> failwith "Solver returned UNSAT for large planted instance")
 ;;
