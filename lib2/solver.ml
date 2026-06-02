@@ -176,6 +176,21 @@ let is_satisfied t ~literal =
   [%equal: bool or_null] var.assignment (This (literal > 0))
 ;;
 
+let update_blocker_for_watcher t ~watched_literal ~clause_idx ~blocking_literal =
+  let var = literal_var t ~literal:watched_literal in
+  let watched_clauses = Tf_pair.get var.watched_clauses (watched_literal > 0) in
+  Watched_clause.Vec.iteri watched_clauses ~f:(fun i watched_clause ->
+    if watched_clause.#clause_idx = clause_idx
+    then
+      Watched_clause.Vec.set
+        watched_clauses
+        i
+        (Watched_clause.create
+           ~clause_idx
+           ~blocking_literal
+           ~is_binary:watched_clause.#is_binary))
+;;
+
 let replace_watched_literal' t ~clause_idx ~nullified_literal = exclave_
   let clause = Vec.Value.get t.clauses clause_idx in
   assert (
@@ -230,6 +245,11 @@ let replace_watched_literal' t ~clause_idx ~nullified_literal = exclave_
       | `Replacement (~var:{ global = var }, ~literal, ~i) ->
         assert (literal <> nullified_literal);
         Vec.Value.swap clause.clause 1 i;
+        update_blocker_for_watcher
+          t
+          ~watched_literal:other_literal
+          ~clause_idx
+          ~blocking_literal:literal;
         (* guaranteed non binary *)
         Watched_clause.Vec.push
           (Tf_pair.get var.watched_clauses (literal > 0))
@@ -701,7 +721,7 @@ let reduce_db t =
 ;;
 
 let restart t = exclave_
-  t.decision_level <- t.decision_level_of_last_assumption;
+  t.decision_level <- 0;
   while
     Trail_entry.Vec.length t.trail <> 0
     && (Trail_entry.Vec.last_exn t.trail).#decision_level
@@ -880,7 +900,7 @@ let%template check_sat_result t ~(sat_result : _ @ m) : _ @ m =
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
-let simplify_clauses_every = 100_000
+let simplify_clauses_every = 2500
 
 let%template rec solve' t ~timer : Sat_result.t @ m =
   (t.stats <- #{ t.stats with iterations = t.stats.#iterations + 1 };

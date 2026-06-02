@@ -144,37 +144,44 @@ to determine if the gap matters in practice.
 
 ## Follow-up Debugging Notes
 
-Additional experiments after the above:
+The gap was much larger than a heuristic tuning issue: solver1 solves the
+regalloc case in roughly the 10ms range / 129 conflicts, while solver2 was
+timing out at hundreds of thousands of conflicts. Two major differences were
+found after the earlier investigation:
 
-1. **Binary watcher special-casing was tested and reverted.**
-   Setting `Watched_clause.is_binary = true` for length-2 clauses made the
-   regalloc timeout path worse: ~374K conflicts in 60s, max DL 189. The fast
-   path avoids clause literal swapping for binary clauses, which changes the
-   search path unfavorably here.
+1. **Restart decision levels under assumptions were different.**
+   Solver1 keeps assumption literals on the trail after restart, but resets the
+   current `decision_level` to 0. Solver2 instead reset to
+   `decision_level_of_last_assumption`. With 26 assumptions in the regalloc
+   case, this shifted all post-restart decision levels upward and changed
+   conflict analysis/search behavior substantially. Making solver2 match
+   solver1 changed the regalloc result from timeout to UNSAT in 64 conflicts.
 
-2. **A pending-unit stack was tested and reverted.**
-   Queueing watcher-discovered units and revalidating them before trail push
-   also worsened the timeout path: ~357K conflicts in 60s. A small queue
-   wrapper is not enough to reproduce solver1's propagation behavior.
+2. **Solver2 had stale watcher blocker literals.**
+   Solver1 updates the other watcher's cached blocker when a watched literal is
+   replaced. Solver2 did not, so blocker checks often missed the cheap
+   "already satisfied" path and fell through to clause scanning. Updating the
+   other watcher blocker reduced the timeout path substantially before the
+   restart-level fix (to ~27K conflicts / ~2.0M learned literals in 60s), but
+   was not sufficient by itself.
 
-3. **Level-0 literals are now skipped for non-root conflict learning.**
-   Solver1 already ignores decision-level 0 literals during conflict analysis.
-   Solver2 had that check commented out. Re-enabling it for non-root conflicts
-   reduced learned literal volume on regalloc:
-   - before: ~27.1M learned literals in 60s
-   - after:  ~24.2M learned literals in 60s
-   It did not solve the instance, but it removes noise from learned clauses.
-   Root-level conflicts still include level-0 literals so unsat-core generation
-   can find a UIP.
+Other experiments:
+- Binary watcher special-casing was tested and reverted; it made the regalloc
+  timeout path worse (~374K conflicts in 60s, max DL 189).
+- A small pending-unit stack wrapper was tested and reverted; it also worsened
+  the timeout path (~357K conflicts in 60s). It did not reproduce solver1's
+  actual pending-unit machinery.
+- Skipping decision-level 0 literals during non-root conflict learning was kept.
+  It matches solver1 and reduces learned-clause noise. Root-level conflicts
+  still include level-0 literals so unsat-core generation can find a UIP.
+- Clause deletion frequency looked important before the restart-level fix, but
+  after the fix the regalloc case solves in 212 iterations, before reduction
+  triggers. The reduce interval is back to 2,500.
 
-4. **Clause deletion frequency is a major lever.**
-   The 2,500-iteration reduce interval is too aggressive for solver2 on the
-   regalloc case. Measured with the level-0 literal fix:
-   - no deletion: 43,810 conflicts, 0 deleted clauses, timeout
-   - reduce every 25,000 iterations: 70,952 conflicts, 45,853 deleted, timeout
-   - reduce every 50,000 iterations: 76,813 conflicts, 50,899 deleted, timeout
-   - reduce every 100,000 iterations: 57,376 conflicts, 23,307 deleted, timeout
-
-   Current code uses 100,000. This is still not a fix, but it keeps solver2 in
-   a much lower-conflict regime than the previous 2,500 interval (~325K
-   conflicts).
+Current measured regalloc result with solver2:
+- UNSAT
+- 64 conflicts
+- 156 decisions
+- 1,540 propagations
+- 2 restarts
+- max decision level 53
