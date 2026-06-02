@@ -34,6 +34,3 @@ val add_clause : t -> clause:Clause.t -> t
 
 val add_clause' : t -> clause:int array -> t
 val stats : t -> Stats.t
-val conflict_log_limit : int ref
-val decision_log : int Queue.t
-val decision_override : int Queue.t

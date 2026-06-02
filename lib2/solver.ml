@@ -654,10 +654,6 @@ let analyze_conflict t ~(failed_clause : Clause.t) ~failed_clause_idx =
   simplify_learned_clause ~learned_literals ~uip_literal ~seen t
 ;;
 
-let conflict_log_limit = ref 0
-let decision_log : int Queue.t = Queue.create ()
-let decision_override : int Queue.t = Queue.create ()
-
 let rec luby_value i =
   let rec find_k k = if (1 lsl k) - 1 < i then find_k (k + 1) else k in
   let k = find_k 1 in
@@ -748,7 +744,7 @@ let restart t = exclave_
          | Null ->
            (match !candidate with
             | None -> candidate := Some literal
-            | Some _ -> ok := false (* two unset → not unit *)));
+            | Some _ -> ok := false (* two unset, not unit *)));
         incr i
       done;
       if !ok
@@ -771,19 +767,6 @@ let backtrack t ~failed_clause ~failed_clause_idx =
       ; learned_clause_literals =
           Vec.Value.length learned_literals + t.stats.#learned_clause_literals
       };
-  if !conflict_log_limit > 0
-  then (
-    decr conflict_log_limit;
-    Printf.eprintf
-      "solver2 conflict %d: len=%d lbd=%d bjlevel=%d dl=%d lits=%s\n%!"
-      t.stats.#learned_clauses
-      (Vec.Value.length learned_literals)
-      lbd
-      backjump_level
-      t.decision_level
-      (Vec.Value.to_list learned_literals
-       |> List.map ~f:Int.to_string
-       |> String.concat ~sep:" "));
   if t.debug
   then
     print_s
@@ -857,17 +840,9 @@ let make_decision' ~is_assumption t ~literal =
 ;;
 
 let%template make_decision t : _ @ m =
-  let literal_opt =
-    match Queue.dequeue decision_override with
-    | Some lit_int ->
-      Vsids.remove_from_pool t.vsids ~var:(Int.abs lit_int);
-      This lit_int
-    | None -> Vsids.choose_literal t.vsids
-  in
-  match literal_opt with
+  match Vsids.choose_literal t.vsids with
   | Null -> `Done (Sat_result.Sat { assignments = assignments_array t })
   | This literal ->
-    Queue.enqueue decision_log literal;
     (match[@exclave_if_stack a]
        make_decision' ~is_assumption:false t ~literal
      with
