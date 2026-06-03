@@ -55,3 +55,14 @@ Forced-backbone 3-SAT (n=80, m=304, backbone=10): Mean: 261.89 μs  StdDev: 10.6
 Random k-CNF (n=50, m=200, max_k=5): Mean: 124.79 μs  StdDev: 4.04 μs  p50: 126.62 μs  p75: 126.66 μs  p90: 127.33 μs  p95: 127.33 μs  p99: 127.33 μs  (n=5)
 Random k-CNF (n=80, m=320, max_k=5): Mean: 153.26 μs  StdDev: 4.28 μs  p50: 155.12 μs  p75: 155.92 μs  p90: 156.23 μs  p95: 156.23 μs  p99: 156.23 μs  (n=5)
 dune exec --profile=release bench/feel_bench.exe -- -bench sat -sat-max-n 80  78.74s user 0.41s system 99% cpu 1:19.16 total
+
+Simple sat 
+$ time dune exec --profile=release bench/feel_bench.exe -- -bench dimacs-sat-js-ocaml
+DIMACS example benchmarks with OCaml sat.js equivalent:
+SUDOKU: Mean: 11.37 ms  StdDev: 275.59 μs  p50: 11.28 ms  p75: 11.32 ms  p90: 11.89 ms  p95: 11.89 ms  p99: 11.89 ms  (n=5)
+SUCC_EG: Mean: 55.60 μs  StdDev: 3.18 μs  p50: 57.28 μs  p75: 58.32 μs  p90: 58.72 μs  p95: 58.72 μs  p99: 58.72 μs  (n=5)
+FACTOR_1234321: Mean: 100.48 ms  StdDev: 32.13 ms  p50: 105.09 ms  p75: 107.69 ms  p90: 141.97 ms  p95: 141.97 ms  p99: 141.97 ms  (n=5)
+FACTOR_1235321: Mean: 109.98 ms  StdDev: 6.45 ms  p50: 111.77 ms  p75: 112.17 ms  p90: 119.99 ms  p95: 119.99 ms  p99: 119.99 ms  (n=5)
+FAIL_EG: Mean: 341.26 ms  StdDev: 206.08 ms  p50: 279.64 ms  p75: 449.98 ms  p90: 672.16 ms  p95: 672.16 ms  p99: 672.16 ms  (n=5)
+SUBSETS_100: Mean: 604.09 ms  StdDev: 321.72 ms  p50: 617.62 ms  p75: 678.38 ms  p90: 1.15 s  p95: 1.15 s  p99: 1.15 s  (n=5)
+dune exec --profile=release bench/feel_bench.exe -- -bench dimacs-sat-js-ocam  40.39s user 0.06s system 99% cpu 40.590 total
