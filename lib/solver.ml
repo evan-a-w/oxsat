@@ -144,7 +144,10 @@ let push_trail_entry t ~(trail_entry : Trail_entry.t) =
        (Vec.Value.get t.clauses clause_idx).has_unit <- true
      | T #(Theory_clause_idx, _) -> ());
     Option.iter t.theory ~f:(fun theory ->
-      Theory.Packed.assert_literal theory trail_entry.#literal);
+      Theory.Packed.assert_literal
+        theory
+        ~decision_level:trail_entry.#decision_level
+        trail_entry.#literal);
     `Added_to_trail
 ;;
 

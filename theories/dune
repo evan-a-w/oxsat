@@ -3,6 +3,7 @@
  (public_name theories)
  (preprocess
   (pps ppx_jane ppx_optional))
- (libraries feel)
+ (inline_tests)
+ (libraries core feel ds)
  (flags
   (:standard -extension-universe beta)))

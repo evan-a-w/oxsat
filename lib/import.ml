@@ -154,6 +154,8 @@ end
 module Int = struct
   include Int
 
+  module Table = Core.Int.Table
+
   module Rb_set =
     Rb.Make [@kind value value]
       (struct
