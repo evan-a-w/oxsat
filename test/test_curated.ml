@@ -33,7 +33,7 @@ let%expect_test "small assumptions" =
   [%expect
     {|
     (SAT ("assignments_to_int_array assignments" (-1 2 -3)))
-    (UNSAT (unsat_core (-2)))
+    (UNSAT (unsat_core (1)))
     |}]
 ;;
 

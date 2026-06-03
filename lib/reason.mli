@@ -4,6 +4,7 @@ open! Import
 type (_ : value mod external_) tag : value mod external_ =
   | Decision : unit tag
   | Clause_idx : int tag
+  | Theory_clause_idx : int tag
 
 type t : (value & value) mod external_ = T : #('a tag * 'a) -> t
 [@@unboxed]
@@ -16,3 +17,4 @@ type t : (value & value) mod external_ = T : #('a tag * 'a) -> t
 
 val decision : unit -> t
 val clause_idx : int -> t
+val theory_clause_idx : int -> t

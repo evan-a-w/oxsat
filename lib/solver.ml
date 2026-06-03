@@ -20,6 +20,8 @@ type t =
   ; lbd_stamp_set : Stamp_set.t
   ; mutable clause_act_inc : float
   ; mutable iterations : int
+  ; theory : Theory.Packed.t option
+  ; theory_clauses : int array Vec.Value.t
   }
 
 type time_bound =
@@ -109,6 +111,7 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
   | T #(Decision, ()) -> ()
   | T #(Clause_idx, clause_idx) ->
     (Vec.Value.get t.clauses clause_idx).has_unit <- false
+  | T #(Theory_clause_idx, _) -> ()
 ;;
 
 let pop_from_trail_exn t =
@@ -138,8 +141,26 @@ let push_trail_entry t ~(trail_entry : Trail_entry.t) =
     (match trail_entry.#reason with
      | T #(Decision, ()) -> ()
      | T #(Clause_idx, clause_idx) ->
-       (Vec.Value.get t.clauses clause_idx).has_unit <- true);
+       (Vec.Value.get t.clauses clause_idx).has_unit <- true
+     | T #(Theory_clause_idx, _) -> ());
+    Option.iter t.theory ~f:(fun theory ->
+      Theory.Packed.assert_literal theory trail_entry.#literal);
     `Added_to_trail
+;;
+
+let push_theory_unit_trail_entry t ~literal ~theory_clause_idx =
+  match
+    push_trail_entry
+      t
+      ~trail_entry:
+        (#{ decision_level = t.decision_level
+          ; literal
+          ; reason = Reason.theory_clause_idx theory_clause_idx
+          }
+         : Trail_entry.t)
+  with
+  | `Added_to_trail | `Duplicate_in_trail -> Null
+  | `Conflict_in_trail -> This theory_clause_idx
 ;;
 
 let push_unit_trail_entry t ~literal ~clause_idx =
@@ -426,6 +447,8 @@ let ensure_literal t ~literal =
   if not var.exists
   then (
     Vsids.on_new_var t.vsids ~var:(Int.abs literal);
+    Option.iter t.theory ~f:(fun theory ->
+      Theory.Packed.on_new_var theory ~var:(Int.abs literal));
     var.exists <- true)
 ;;
 
@@ -559,6 +582,15 @@ let simplify_learned_clause t ~learned_literals ~uip_literal ~seen =
               else if not (Stamp_set.is_seen seen ~var:(Int.abs literal))
               then all_marked := false);
             !all_marked
+          | T #(Theory_clause_idx, theory_clause_idx) ->
+            let reason = Vec.Value.get t.theory_clauses theory_clause_idx in
+            let all_marked = ref (Array.length reason > 1) in
+            Array.iter reason ~f:(fun literal ->
+              if Int.abs literal = Int.abs uip_literal
+              then ()
+              else if not (Stamp_set.is_seen seen ~var:(Int.abs literal))
+              then all_marked := false);
+            !all_marked
         in
         if skip
         then ()
@@ -632,6 +664,11 @@ let analyze_conflict t ~(failed_clause : Clause.t) ~failed_clause_idx =
                   (literal : int)
                   (!path_count : int)];
           Vec.Value.iter clause.clause ~f:(fun reason_literal ->
+            if Int.abs reason_literal <> Int.abs literal
+            then mark_literal reason_literal)
+        | T #(Theory_clause_idx, theory_clause_idx) ->
+          let clause = Vec.Value.get t.theory_clauses theory_clause_idx in
+          Array.iter clause ~f:(fun reason_literal ->
             if Int.abs reason_literal <> Int.abs literal
             then mark_literal reason_literal)));
     decr i
@@ -719,7 +756,10 @@ let restart t = exclave_
     pop_from_trail_exn t
   done;
   t.trail_processed_till
-  <- Int.min t.trail_processed_till (Trail_entry.Vec.length t.trail)
+  <- Int.min t.trail_processed_till (Trail_entry.Vec.length t.trail);
+  Vec.Value.clear t.theory_clauses;
+  Option.iter t.theory ~f:(fun theory ->
+    Theory.Packed.pop theory ~to_decision_level:t.decision_level_of_last_assumption)
 ;;
 
 let backtrack t ~failed_clause ~failed_clause_idx =
@@ -742,6 +782,8 @@ let backtrack t ~failed_clause ~failed_clause_idx =
   t.conflicts_since_restart <- t.conflicts_since_restart + 1;
   Vsids.decay t.vsids;
   remove_greater_than_decision_level t ~decision_level:backjump_level;
+  Option.iter t.theory ~f:(fun theory ->
+    Theory.Packed.pop theory ~to_decision_level:backjump_level);
   let result = add_clause t ~literals:learned_literals ~learned:true in
   (match result with
    | `Ok ->
@@ -845,6 +887,50 @@ let%template check_sat_result t ~(sat_result : _ @ m) : _ @ m =
 
 let simplify_clauses_every = 2500
 
+(* Returns [Null] if the theory is consistent (or absent), [This failed_clause_idx]
+   on a theory conflict, or re-enters propagation by returning [Null] after
+   pushing T-propagated literals (the caller loops back via [solve']). The
+   [did_propagate] ref is set to [true] when literals were added so the caller
+   knows to re-run Boolean propagation before making a decision. *)
+let check_theory t ~did_propagate =
+  match t.theory with
+  | None -> Null
+  | Some theory ->
+    (match Theory.Packed.check_consistent theory with
+     | `Consistent -> Null
+     | `Conflict conflict_clause ->
+       (match
+          add_clause
+            t
+            ~literals:(Vec.Value.of_array_taking_ownership conflict_clause)
+            ~learned:true
+        with
+        | `Ok -> This (Vec.Value.length t.clauses - 1)
+        | `Conflict failed_clause_idx -> This failed_clause_idx)
+     | `Propagate propagations ->
+       let failed = ref Null in
+       List.iter propagations ~f:(fun (literal, expl_clause) ->
+         if Or_null.is_null !failed
+         then (
+           let theory_clause_idx = Vec.Value.length t.theory_clauses in
+           Vec.Value.push t.theory_clauses expl_clause;
+           ensure_literal t ~literal;
+           match push_theory_unit_trail_entry t ~literal ~theory_clause_idx with
+           | Null -> did_propagate := true
+           | This _ ->
+             (* conflict: add the explanation to the main clause DB so
+                learn_from_failure can index it via a normal clause_idx *)
+             (match
+                add_clause
+                  t
+                  ~literals:(Vec.Value.of_array_taking_ownership expl_clause)
+                  ~learned:true
+              with
+              | `Ok -> failed := This (Vec.Value.length t.clauses - 1)
+              | `Conflict idx -> failed := This idx)));
+       !failed)
+;;
+
 let%template rec solve' t ~timer : Sat_result.t @ m =
   (t.stats <- #{ t.stats with iterations = t.stats.#iterations + 1 };
    t.iterations <- t.iterations + 1;
@@ -856,11 +942,18 @@ let%template rec solve' t ~timer : Sat_result.t @ m =
    match propagate t with
    | This failed_clause_idx -> learn_from_failure t ~failed_clause_idx ~timer
    | Null ->
-     (match (make_decision [@alloc a]) t with
-      | `Continue -> (solve' [@alloc a]) t ~timer
-      | `Failed_clause failed_clause_idx ->
-        (learn_from_failure [@alloc a]) t ~failed_clause_idx ~timer
-      | `Done sat_result -> (check_sat_result [@alloc a]) t ~sat_result))
+     let did_propagate = ref false in
+     (match check_theory t ~did_propagate with
+      | This failed_clause_idx -> learn_from_failure t ~failed_clause_idx ~timer
+      | Null ->
+        if !did_propagate
+        then (solve' [@alloc a]) t ~timer
+        else (
+          match (make_decision [@alloc a]) t with
+          | `Continue -> (solve' [@alloc a]) t ~timer
+          | `Failed_clause failed_clause_idx ->
+            (learn_from_failure [@alloc a]) t ~failed_clause_idx ~timer
+          | `Done sat_result -> (check_sat_result [@alloc a]) t ~sat_result)))
   [@exclave_if_stack a]
 [@@alloc a @ m = (stack_local, heap_global)]
 
@@ -905,7 +998,9 @@ let add_assumptions ~(local_ assumptions) t ~timer = exclave_
           | T #(Decision, ()) ->
             `Failed_assumptions (trail_entry.#literal, literal)
           | T #(Clause_idx, failed_clause_idx) ->
-            `Failed_clause failed_clause_idx))
+            `Failed_clause failed_clause_idx
+          | T #(Theory_clause_idx, _) ->
+            `Failed_assumptions (trail_entry.#literal, literal)))
   in
   go 0
 ;;
@@ -947,7 +1042,11 @@ let%template solve ?(time_bound = `Unlimited) ?(local_ assumptions = [||]) t
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
-let create ?(random_state = Random.State.make [| 1; 2; 3 |]) ?(debug = false) ()
+let create
+  ?(random_state = Random.State.make [| 1; 2; 3 |])
+  ?(debug = false)
+  ?theory
+  ()
   =
   let _ = random_state in
   { trail = Trail_entry.Vec.create ()
@@ -967,6 +1066,8 @@ let create ?(random_state = Random.State.make [| 1; 2; 3 |]) ?(debug = false) ()
   ; lbd_stamp_set = Stamp_set.create ()
   ; clause_act_inc = 1.0
   ; iterations = 0
+  ; theory
+  ; theory_clauses = Vec.Value.create ()
   }
 ;;
 

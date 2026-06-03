@@ -31,4 +31,12 @@
  (tags
   ("add topics" "to describe" your project)))
 
+(package
+ (name theories)
+ (synopsis "SAT theory implementations for DPLL(T)")
+ (description "Theory plugins for use with the Feel DPLL(T) solver")
+ (depends ocaml dune core feel)
+ (tags
+  ("sat" "dpll" "theories")))
+
 ; See the complete stanza docs at https://dune.readthedocs.io/en/stable/reference/dune-project/index.html

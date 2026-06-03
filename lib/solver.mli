@@ -17,7 +17,12 @@ val%template solve
   -> Sat_result.t @ m
 [@@alloc a @ m = (heap_global, stack_local)]
 
-val create : ?random_state:Random.State.t -> ?debug:bool @ local -> unit -> t
+val create
+  :  ?random_state:Random.State.t
+  -> ?debug:bool @ local
+  -> ?theory:Theory.Packed.t
+  -> unit
+  -> t
 
 val create_with_formula
   :  ?debug:bool @ local

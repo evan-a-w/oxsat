@@ -1,0 +1,8 @@
+(library
+ (name theories)
+ (public_name theories)
+ (preprocess
+  (pps ppx_jane ppx_optional))
+ (libraries feel)
+ (flags
+  (:standard -extension-universe beta)))
