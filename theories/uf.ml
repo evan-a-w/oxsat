@@ -4,29 +4,33 @@ open! Ds
 
 module Term_id = Int
 
-type term_def =
-  | Const
-  | App of { func : int; args : Term_id.t array }
-
-type term =
-  { id : Term_id.t
-  ; def : term_def
-  ; mutable parent : Term_id.t
-  ; mutable rank : int
-  ; mutable class_list_next : Term_id.t
-  }
-
-module Atom = struct
-  module T = struct
+module Term = struct
+  module Def = struct
     type t =
-      | Eq of Term_id.t * Term_id.t
-      | Neq of Term_id.t * Term_id.t
-    [@@deriving compare, sexp, hash]
+      | Const
+      | App of
+          { func : int
+          ; args : Term_id.t array
+          }
   end
 
-  include T
-  include Comparable.Make (T)
-  include Hashable.Make (T)
+  type t =
+    { id : Term_id.t
+    ; def : Def.t
+    ; mutable parent : Term_id.t
+    ; mutable rank : int
+    ; mutable class_list_next : Term_id.t
+    }
+end
+
+module Atom = struct
+  type t =
+    | Eq of Term_id.t * Term_id.t
+    | Neq of Term_id.t * Term_id.t
+  [@@deriving compare, sexp, hash]
+
+  include functor Comparable.Make
+  include functor Hashable.Make
 
   let create_unregistered () = None
 end
@@ -39,21 +43,30 @@ end
 
 module Registry = Atom_registry.Make (Atom) (Atom_data)
 
-type undo_entry =
-  { decision_level : int
-  ; kind : undo_kind
-  }
+module Undo = struct
+  type kind =
+    | Merge of
+        { child : Term_id.t
+        ; old_parent : Term_id.t
+        ; old_rank : int
+        }
+    | Class_list of
+        { term : Term_id.t
+        ; old_next : Term_id.t
+        }
 
-and undo_kind =
-  | Merge of { child : Term_id.t; old_parent : Term_id.t; old_rank : int }
-  | Class_list of { term : Term_id.t; old_next : Term_id.t }
+  type t =
+    { decision_level : int
+    ; kind : kind
+    }
+end
 
 type t =
-  { terms : term Vec.Value.t
+  { terms : Term.t Vec.Value.t
   ; registry : Registry.t
   ; mutable asserted_eqs : (Term_id.t * Term_id.t * int) list
   ; mutable asserted_neqs : (Term_id.t * Term_id.t * int) list
-  ; mutable undo_trail : undo_entry list
+  ; mutable undo_trail : Undo.t list
   }
 
 let create () =
@@ -67,7 +80,9 @@ let create () =
 
 let new_term t ~def =
   let id = Vec.Value.length t.terms in
-  Vec.Value.push t.terms { id; def; parent = id; rank = 0; class_list_next = id };
+  Vec.Value.push
+    t.terms
+    { Term.id; def; parent = id; rank = 0; class_list_next = id };
   id
 ;;
 
@@ -92,16 +107,18 @@ let rec find t id =
 let same_class t a b = Term_id.equal (find t a) (find t b)
 
 let record_undo t ~decision_level kind =
-  t.undo_trail <- { decision_level; kind } :: t.undo_trail
+  t.undo_trail <- { Undo.decision_level; kind } :: t.undo_trail
 ;;
 
 let union t ~decision_level a b =
-  let ra = find t a and rb = find t b in
+  let ra = find t a
+  and rb = find t b in
   if Term_id.equal ra rb
   then false
   else (
     let root, child =
-      let ta = get_term t ra and tb = get_term t rb in
+      let ta = get_term t ra
+      and tb = get_term t rb in
       if ta.rank >= tb.rank then ra, rb else rb, ra
     in
     let child_term = get_term t child in
@@ -122,7 +139,7 @@ let union t ~decision_level a b =
     true)
 ;;
 
-let apply_undo t { decision_level = _; kind } =
+let apply_undo t ({ Undo.decision_level = _; kind } : Undo.t) =
   match kind with
   | Merge { child; old_parent; old_rank } ->
     let child_term = get_term t child in
@@ -137,7 +154,7 @@ let on_new_var t ~var = Registry.on_new_var t.registry var
 
 let pop t ~to_decision_level =
   let rec go = function
-    | entry :: rest when entry.decision_level > to_decision_level ->
+    | entry :: rest when entry.Undo.decision_level > to_decision_level ->
       apply_undo t entry;
       go rest
     | remaining -> t.undo_trail <- remaining
@@ -182,7 +199,7 @@ let find_eq_atom t lhs rhs =
 ;;
 
 let congruent t ta tb =
-  match ta.def, tb.def with
+  match ta.Term.def, tb.Term.def with
   | App { func = fa; args = aa }, App { func = fb; args = ab } ->
     Int.equal fa fb
     && Array.length aa = Array.length ab
@@ -208,25 +225,25 @@ let check_consistent t =
     let propagations = ref [] in
     for i = 0 to n - 1 do
       let ti = get_term t i in
-      (match ti.def with
-       | Const -> ()
-       | App _ ->
-         for j = i + 1 to n - 1 do
-           let tj = get_term t j in
-           if congruent t ti tj && not (same_class t i j)
-           then (
-             match find_eq_atom t i j with
-             | None -> ()
-             | Some lit when lit > 0 ->
-               let reason =
-                 Array.of_list
-                   (lit
-                    :: List.filter_map t.asserted_eqs ~f:(fun (_a, _b, eq_var) ->
-                      Some (-eq_var)))
-               in
-               propagations := (lit, reason) :: !propagations
-             | Some _ -> ())
-         done)
+      match ti.Term.def with
+      | Const -> ()
+      | App _ ->
+        for j = i + 1 to n - 1 do
+          let tj = get_term t j in
+          if congruent t ti tj && not (same_class t i j)
+          then (
+            match find_eq_atom t i j with
+            | None -> ()
+            | Some lit when lit > 0 ->
+              let reason =
+                Array.of_list
+                  (lit
+                   :: List.filter_map t.asserted_eqs ~f:(fun (_a, _b, eq_var) ->
+                     Some (-eq_var)))
+              in
+              propagations := (lit, reason) :: !propagations
+            | Some _ -> ())
+        done
     done;
     (match !propagations with
      | [] -> `Consistent
