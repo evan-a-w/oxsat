@@ -1,3 +1,15 @@
+UF theory benchmarks (DPLL(T) with union-find, release profile)
+$ dune exec --profile release bench/feel_bench.exe -- -bench uf
+UF transitivity chain (n=50): Mean: 28.06 μs  StdDev: 210.07 ns  p50: 28.10 μs  p75: 28.11 μs  p90: 28.40 μs  p95: 28.40 μs  p99: 28.40 μs  (n=5)
+UF transitivity chain (n=200): Mean: 158.86 μs  StdDev: 673.55 ns  p50: 159.05 μs  p75: 159.23 μs  p90: 159.65 μs  p95: 159.65 μs  p99: 159.65 μs  (n=5)
+UF transitivity chain (n=500): Mean: 585.90 μs  StdDev: 239.20 μs  p50: 696.66 μs  p75: 706.70 μs  p90: 721.70 μs  p95: 721.70 μs  p99: 721.70 μs  (n=5)
+UF wide congruence conflict (width=10): Mean: 6.91 μs  StdDev: 25.02 ns  p50: 6.90 μs  p75: 6.91 μs  p90: 6.96 μs  p95: 6.96 μs  p99: 6.96 μs  (n=5)
+UF wide congruence conflict (width=50): Mean: 30.92 μs  StdDev: 122.33 ns  p50: 30.94 μs  p75: 30.96 μs  p90: 31.12 μs  p95: 31.12 μs  p99: 31.12 μs  (n=5)
+UF backtrack stress (n=20, k=3): Mean: 339.77 μs  StdDev: 2.93 μs  p50: 338.17 μs  p75: 341.81 μs  p90: 344.53 μs  p95: 344.53 μs  p99: 344.53 μs  (n=5)
+UF backtrack stress (n=50, k=3): Mean: 2.74 ms  StdDev: 12.01 μs  p50: 2.74 ms  p75: 2.74 ms  p90: 2.76 ms  p95: 2.76 ms  p99: 2.76 ms  (n=5)
+UF backtrack stress (n=20, k=4): Mean: 543.21 μs  StdDev: 3.48 μs  p50: 543.25 μs  p75: 546.68 μs  p90: 546.79 μs  p95: 546.79 μs  p99: 546.79 μs  (n=5)
+UF backtrack stress (n=100, k=3): Mean: 17.74 ms  StdDev: 26.30 μs  p50: 17.74 ms  p75: 17.76 ms  p90: 17.77 ms  p95: 17.77 ms  p99: 17.77 ms  (n=5)
+
 Same, more iterations
 $ time dune exec --profile=release bench/feel_bench.exe -- -bench dimacs -min-iterations 1 -max-iterations 1 -sample-runs 5  && time dune exec --profile=release bench/feel_bench.exe -- -bench sat -sat-max-n 80
 DIMACS example benchmarks:

@@ -147,6 +147,20 @@ let run_dimacs_sat_js_ocaml ?min_iterations ?max_iterations ?sample_runs () =
   ()
 ;;
 
+let run_uf ?min_iterations ?max_iterations ?sample_runs () =
+  print_endline "UF theory benchmarks:";
+  let config =
+    Benchmark.Config.create
+      ?min_iterations
+      ?max_iterations
+      ~warmup_runs:1
+      ~sample_runs:(Option.value sample_runs ~default:5)
+      ~target_time_ns:1_000_000_000
+      ()
+  in
+  Uf_bench.run_benchmark ~config ()
+;;
+
 let command =
   Command.basic
     ~summary:"Run benchmarks"
@@ -216,11 +230,12 @@ let command =
          run_dimacs_sat_js ?min_iterations ?max_iterations ?sample_runs ()
        | Some "dimacs-sat-js-ocaml" ->
          run_dimacs_sat_js_ocaml ?min_iterations ?max_iterations ?sample_runs ()
+       | Some "uf" -> run_uf ?min_iterations ?max_iterations ?sample_runs ()
        | Some other ->
          eprintf "Unknown benchmark: %s\n" other;
          eprintf
            "Valid options: examples, rb, map, sat, dimacs, dimacs-sat-js, \
-            dimacs-sat-js-ocaml, all\n";
+            dimacs-sat-js-ocaml, uf, all\n";
          exit 1)
 ;;
 

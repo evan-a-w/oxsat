@@ -64,6 +64,23 @@ let%expect_test "theory pop: backtrack restores consistency" =
   [%expect {| (Sat (assignments (() (false) (true) (true)))) |}]
 ;;
 
+(* Many terms forced into one equivalence class, then a disequality added
+   at the end. The solver must backtrack repeatedly through many theory
+   merges before concluding UNSAT, exercising pop on deep undo trails. *)
+let%expect_test "deep undo trail: long chain then disequality is unsat" =
+  solve_with_uf ~build:(fun uf solver ->
+    let n = 30 in
+    let xs = Array.init n ~f:(fun _ -> Uf.new_const uf) in
+    let chain_eqs =
+      Array.init (n - 1) ~f:(fun i -> Uf.register_eq uf ~lhs:xs.(i) ~rhs:xs.(i + 1))
+    in
+    let neq = Uf.register_neq uf ~lhs:xs.(0) ~rhs:xs.(n - 1) in
+    Array.iter chain_eqs ~f:(fun eq ->
+      ignore (Solver.add_clause solver ~clause:[| eq |] : [ `Ok | `Unsat of _ ]));
+    ignore (Solver.add_clause solver ~clause:[| neq |] : [ `Ok | `Unsat of _ ]));
+  [%expect {| (Unsat (unsat_core (1))) |}]
+;;
+
 let%expect_test "congruence propagation triggers conflict" =
   solve_with_uf ~build:(fun uf solver ->
     let x = Uf.new_const uf in
