@@ -18,7 +18,6 @@ module Term = struct
     ; def : Def.t
     ; mutable parent : Term_id.t
     ; mutable rank : int
-    ; mutable class_list_next : Term_id.t
     }
 end
 
@@ -36,6 +35,16 @@ module Atom = struct
   let neq a b = if Term_id.( <= ) a b then Neq (a, b) else Neq (b, a)
 end
 
+module App_signature = struct
+  type t =
+    { func : int
+    ; args : Term_id.t list
+    }
+  [@@deriving compare, sexp, hash]
+
+  include functor Hashable.Make
+end
+
 module Atom_data = struct
   type t = unit
 end
@@ -49,10 +58,6 @@ module Undo = struct
         ; old_parent : Term_id.t
         ; old_rank : int
         ; reason_literals : int list
-        }
-    | Class_list of
-        { term : Term_id.t
-        ; old_next : Term_id.t
         }
 
   type t =
@@ -87,14 +92,15 @@ let create () =
 
 let new_term t ~def =
   let id = Vec.Value.length t.terms in
-  Vec.Value.push
-    t.terms
-    { Term.id; def; parent = id; rank = 0; class_list_next = id };
+  Vec.Value.push t.terms { Term.id; def; parent = id; rank = 0 };
   id
 ;;
 
 let new_const t = new_term t ~def:Const
-let new_app t ~func ~args = new_term t ~def:(App { func; args })
+
+let new_app t ~func ~args =
+  new_term t ~def:(App { func; args = Array.copy args })
+;;
 
 let register_eq t ~lhs ~rhs =
   Registry.register t.registry ~atom:(Atom.eq lhs rhs) ~data:()
@@ -130,15 +136,6 @@ let union t ~decision_level ~reason_literals a b =
     in
     let child_term = get_term t child in
     let root_term = get_term t root in
-    (* Class_list must be pushed before Merge so that on undo (LIFO) the
-       class list is restored first, then the parent pointer and rank. *)
-    record_undo
-      t
-      ~decision_level
-      (Class_list { term = root; old_next = root_term.class_list_next });
-    let old_root_next = root_term.class_list_next in
-    root_term.class_list_next <- child_term.class_list_next;
-    child_term.class_list_next <- old_root_next;
     record_undo
       t
       ~decision_level
@@ -154,17 +151,6 @@ let union t ~decision_level ~reason_literals a b =
     true)
 ;;
 
-let apply_undo t ({ Undo.decision_level = _; kind } : Undo.t) =
-  match kind with
-  | Merge { child; old_parent; old_rank; reason_literals = _ } ->
-    let child_term = get_term t child in
-    let root_term = get_term t child_term.parent in
-    root_term.rank <- old_rank;
-    child_term.parent <- old_parent
-  | Class_list { term; old_next } ->
-    (get_term t term).class_list_next <- old_next
-;;
-
 let on_new_var t ~var = Registry.on_new_var t.registry var
 
 let drop_above_level list ~to_decision_level =
@@ -177,17 +163,18 @@ let drop_above_level list ~to_decision_level =
   go list
 ;;
 
-let pop t ~to_decision_level =
-  let rec go = function
-    | entry :: rest when entry.Undo.decision_level > to_decision_level ->
-      apply_undo t entry;
-      go rest
-    | remaining -> t.undo_trail <- remaining
-  in
-  go t.undo_trail;
-  t.asserted_as_equal <- drop_above_level t.asserted_as_equal ~to_decision_level;
-  t.asserted_as_disequal
-  <- drop_above_level t.asserted_as_disequal ~to_decision_level
+let reset_equivalence_state t =
+  Vec.Value.iteri t.terms ~f:(fun id term ->
+    term.parent <- id;
+    term.rank <- 0);
+  t.undo_trail <- []
+;;
+
+let rebuild_equivalence_state t =
+  reset_equivalence_state t;
+  List.rev t.asserted_as_equal
+  |> List.iter ~f:(fun { a; b; literal; decision_level } ->
+    ignore (union t ~decision_level ~reason_literals:[ literal ] a b : bool))
 ;;
 
 let assert_literal t ~decision_level literal =
@@ -215,6 +202,13 @@ let assert_literal t ~decision_level literal =
        (* eq-var is false, i.e. ¬(a=b): a ≠ b *)
        t.asserted_as_disequal
        <- { a; b; literal; decision_level } :: t.asserted_as_disequal)
+;;
+
+let pop t ~to_decision_level =
+  t.asserted_as_equal <- drop_above_level t.asserted_as_equal ~to_decision_level;
+  t.asserted_as_disequal
+  <- drop_above_level t.asserted_as_disequal ~to_decision_level;
+  rebuild_equivalence_state t
 ;;
 
 let decision_level_of_literal t literal =
@@ -270,7 +264,7 @@ let explain_path_to_root t id root =
 let explain_eq t a b =
   let root = find t a in
   assert (Term_id.equal root (find t b));
-  (explain_path_to_root t a root @ explain_path_to_root t b root)
+  explain_path_to_root t a root @ explain_path_to_root t b root
   |> unique_literals
 ;;
 
@@ -280,15 +274,6 @@ let registered_eq_var t lhs rhs =
 
 let registered_neq_var t lhs rhs =
   Or_null.to_option (Registry.var t.registry ~atom:(Atom.neq lhs rhs))
-;;
-
-let congruent t ta tb =
-  match ta.Term.def, tb.Term.def with
-  | App { func = fa; args = aa }, App { func = fb; args = ab } ->
-    Int.equal fa fb
-    && Array.length aa = Array.length ab
-    && Array.for_all2_exn aa ab ~f:(fun a b -> same_class t a b)
-  | _ -> false
 ;;
 
 let congruence_reason t ti tj =
@@ -305,19 +290,27 @@ let close_congruence t =
   let changed = ref true in
   while !changed do
     changed := false;
+    let signatures = App_signature.Table.create () in
     for i = 0 to n - 1 do
       let ti = get_term t i in
       match ti.Term.def with
       | Const -> ()
-      | App _ ->
-        for j = i + 1 to n - 1 do
-          let tj = get_term t j in
-          if congruent t ti tj && not (same_class t i j)
-          then (
-            let reason_literals = congruence_reason t ti tj in
-            let decision_level = decision_level_of_premises t reason_literals in
-            if union t ~decision_level ~reason_literals i j then changed := true)
-        done
+      | App { func; args } ->
+        let signature : App_signature.t =
+          { func; args = Array.to_list (Array.map args ~f:(find t)) }
+        in
+        (match Hashtbl.find signatures signature with
+         | None -> Hashtbl.set signatures ~key:signature ~data:i
+         | Some j ->
+           if not (same_class t i j)
+           then (
+             let tj = get_term t j in
+             let reason_literals = congruence_reason t ti tj in
+             let decision_level =
+               decision_level_of_premises t reason_literals
+             in
+             if union t ~decision_level ~reason_literals i j
+             then changed := true))
     done
   done
 ;;
@@ -336,9 +329,10 @@ let propagation_clause ~literal ~premises =
 ;;
 
 let var_is_asserted t ~var =
-  List.exists t.asserted_as_equal ~f:(fun e -> Int.equal (Int.abs e.literal) var)
+  List.exists t.asserted_as_equal ~f:(fun e ->
+    Int.equal (Int.abs e.literal) var)
   || List.exists t.asserted_as_disequal ~f:(fun e ->
-       Int.equal (Int.abs e.literal) var)
+    Int.equal (Int.abs e.literal) var)
 ;;
 
 let check_consistent t =

@@ -204,3 +204,66 @@ let%expect_test "congruence propagation triggers conflict" =
       (Solver.add_clause solver ~clause:[| -eq_fxfy |] : [ `Ok | `Unsat of _ ]));
   [%expect {| (Unsat (unsat_core (1))) |}]
 ;;
+
+let%expect_test "registering the same atom reuses the same variable" =
+  let uf = Uf.create () in
+  let x = Uf.new_const uf in
+  let y = Uf.new_const uf in
+  let eq1 = Uf.register_eq uf ~lhs:x ~rhs:y in
+  let eq2 = Uf.register_eq uf ~lhs:y ~rhs:x in
+  let neq1 = Uf.register_neq uf ~lhs:x ~rhs:y in
+  let neq2 = Uf.register_neq uf ~lhs:y ~rhs:x in
+  print_s [%message (eq1 : int) (eq2 : int) (neq1 : int) (neq2 : int)];
+  [%expect {| ((eq1 1) (eq2 1) (neq1 2) (neq2 2)) |}]
+;;
+
+let%expect_test "new_app copies argument arrays" =
+  solve_with_uf ~build:(fun uf solver ->
+    let x = Uf.new_const uf in
+    let y = Uf.new_const uf in
+    let args = [| x |] in
+    let fx = Uf.new_app uf ~func:0 ~args in
+    args.(0) <- y;
+    let fy = Uf.new_app uf ~func:0 ~args:[| y |] in
+    let neq_fxfy = Uf.register_neq uf ~lhs:fx ~rhs:fy in
+    ignore
+      (Solver.add_clause solver ~clause:[| neq_fxfy |] : [ `Ok | `Unsat of _ ]));
+  [%expect {| (Sat (assignments (() (true)))) |}]
+;;
+
+let%expect_test "pop removes congruence merges from retracted levels" =
+  let uf = Uf.create () in
+  let a = Uf.new_const uf in
+  let b = Uf.new_const uf in
+  let c = Uf.new_const uf in
+  let d = Uf.new_const uf in
+  let fa = Uf.new_app uf ~func:0 ~args:[| a |] in
+  let fb = Uf.new_app uf ~func:0 ~args:[| b |] in
+  let gc = Uf.new_app uf ~func:1 ~args:[| c |] in
+  let gd = Uf.new_app uf ~func:1 ~args:[| d |] in
+  ignore (gc, gd);
+  let eq_cd = Uf.register_eq uf ~lhs:c ~rhs:d in
+  let eq_ab = Uf.register_eq uf ~lhs:a ~rhs:b in
+  let neq_fafb = Uf.register_neq uf ~lhs:fa ~rhs:fb in
+  Uf.assert_literal uf ~decision_level:1 eq_cd;
+  Uf.assert_literal uf ~decision_level:2 eq_ab;
+  print_s
+    [%sexp
+      (Uf.check_consistent uf
+       : [ `Consistent
+         | `Conflict of int array
+         | `Propagate of (int * int array) list
+         ])];
+  Uf.pop uf ~to_decision_level:1;
+  Uf.assert_literal uf ~decision_level:1 neq_fafb;
+  print_s
+    [%sexp
+      (Uf.check_consistent uf
+       : [ `Consistent
+         | `Conflict of int array
+         | `Propagate of (int * int array) list
+         ])];
+  [%expect {|
+    (Propagate ((-3 (-3 -2))))
+    Consistent |}]
+;;
