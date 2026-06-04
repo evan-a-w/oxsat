@@ -23,9 +23,13 @@ let transitivity_chain ~n =
           Array.init (n - 1) ~f:(fun i ->
             Uf.register_eq uf ~lhs:xs.(i) ~rhs:xs.(i + 1))
         in
-        ignore (Solver.add_clause solver ~clause:[| neq_fxfxn |] : [ `Ok | `Unsat of _ ]);
+        ignore
+          (Solver.add_clause solver ~clause:[| neq_fxfxn |]
+           : [ `Ok | `Unsat of _ ]);
         Array.iter chain_eqs ~f:(fun eq ->
-          ignore (Solver.add_clause solver ~clause:[| eq |] : [ `Ok | `Unsat of _ ]))) )
+          ignore
+            (Solver.add_clause solver ~clause:[| eq |] : [ `Ok | `Unsat of _ ])))
+  )
 ;;
 
 let wide_congruence ~width =
@@ -39,11 +43,16 @@ let wide_congruence ~width =
         let _eq_fxfy = Uf.register_eq uf ~lhs:fx ~rhs:fy in
         let neq_fxfy = Uf.register_neq uf ~lhs:fx ~rhs:fy in
         let arg_eqs =
-          Array.init width ~f:(fun i -> Uf.register_eq uf ~lhs:xs.(i) ~rhs:ys.(i))
+          Array.init width ~f:(fun i ->
+            Uf.register_eq uf ~lhs:xs.(i) ~rhs:ys.(i))
         in
-        ignore (Solver.add_clause solver ~clause:[| neq_fxfy |] : [ `Ok | `Unsat of _ ]);
+        ignore
+          (Solver.add_clause solver ~clause:[| neq_fxfy |]
+           : [ `Ok | `Unsat of _ ]);
         Array.iter arg_eqs ~f:(fun eq ->
-          ignore (Solver.add_clause solver ~clause:[| eq |] : [ `Ok | `Unsat of _ ]))) )
+          ignore
+            (Solver.add_clause solver ~clause:[| eq |] : [ `Ok | `Unsat of _ ])))
+  )
 ;;
 
 let backtrack_stress ~n ~k =
@@ -62,17 +71,24 @@ let backtrack_stress ~n ~k =
         for c1 = 0 to k - 2 do
           for c2 = c1 + 1 to k - 1 do
             let neq = Uf.register_neq uf ~lhs:colors.(c1) ~rhs:colors.(c2) in
-            ignore (Solver.add_clause solver ~clause:[| neq |] : [ `Ok | `Unsat of _ ])
+            ignore
+              (Solver.add_clause solver ~clause:[| neq |]
+               : [ `Ok | `Unsat of _ ])
           done
         done;
         for i = 0 to n - 2 do
           let e = Uf.register_eq uf ~lhs:terms.(i) ~rhs:terms.(i + 1) in
-          ignore (Solver.add_clause solver ~clause:[| e |] : [ `Ok | `Unsat of _ ])
+          ignore
+            (Solver.add_clause solver ~clause:[| e |] : [ `Ok | `Unsat of _ ])
         done) )
 ;;
 
 let default_config =
-  Benchmark.Config.create ~warmup_runs:1 ~sample_runs:5 ~target_time_ns:1_000_000_000 ()
+  Benchmark.Config.create
+    ~warmup_runs:1
+    ~sample_runs:5
+    ~target_time_ns:1_000_000_000
+    ()
 ;;
 
 let run_benchmark ?(config = default_config) () =

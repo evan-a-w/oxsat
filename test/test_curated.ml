@@ -17,14 +17,17 @@ let assignments_to_int_array assignments =
 
 let%expect_test "small assumptions" =
   let solver =
-    match Solver.create_with_formula [| [| 1; 2 |]; [| -1; 3 |]; [| -3 |] |] with
+    match
+      Solver.create_with_formula [| [| 1; 2 |]; [| -1; 3 |]; [| -3 |] |]
+    with
     | `Ok t -> t
     | `Unsat _ -> failwith "unexpected unsat during creation"
   in
   let solve assumptions =
     match Solver.solve ~assumptions solver with
     | Sat { assignments } ->
-      print_s [%message "SAT" (assignments_to_int_array assignments : int array)]
+      print_s
+        [%message "SAT" (assignments_to_int_array assignments : int array)]
     | Unsat { unsat_core } ->
       print_s [%message "UNSAT" (unsat_core : int array)]
   in

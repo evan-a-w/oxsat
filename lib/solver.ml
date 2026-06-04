@@ -21,7 +21,6 @@ type t =
   ; mutable clause_act_inc : float
   ; mutable iterations : int
   ; theory : Theory.Packed.t option
-  ; theory_clauses : int array Vec.Value.t
   }
 
 type time_bound =
@@ -111,7 +110,6 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
   | T #(Decision, ()) -> ()
   | T #(Clause_idx, clause_idx) ->
     (Vec.Value.get t.clauses clause_idx).has_unit <- false
-  | T #(Theory_clause_idx, _) -> ()
 ;;
 
 let pop_from_trail_exn t =
@@ -141,29 +139,13 @@ let push_trail_entry t ~(trail_entry : Trail_entry.t) =
     (match trail_entry.#reason with
      | T #(Decision, ()) -> ()
      | T #(Clause_idx, clause_idx) ->
-       (Vec.Value.get t.clauses clause_idx).has_unit <- true
-     | T #(Theory_clause_idx, _) -> ());
+       (Vec.Value.get t.clauses clause_idx).has_unit <- true);
     Option.iter t.theory ~f:(fun theory ->
       Theory.Packed.assert_literal
         theory
         ~decision_level:trail_entry.#decision_level
         trail_entry.#literal);
     `Added_to_trail
-;;
-
-let push_theory_unit_trail_entry t ~literal ~theory_clause_idx =
-  match
-    push_trail_entry
-      t
-      ~trail_entry:
-        (#{ decision_level = t.decision_level
-          ; literal
-          ; reason = Reason.theory_clause_idx theory_clause_idx
-          }
-         : Trail_entry.t)
-  with
-  | `Added_to_trail | `Duplicate_in_trail -> Null
-  | `Conflict_in_trail -> This theory_clause_idx
 ;;
 
 let push_unit_trail_entry t ~literal ~clause_idx =
@@ -585,15 +567,6 @@ let simplify_learned_clause t ~learned_literals ~uip_literal ~seen =
               else if not (Stamp_set.is_seen seen ~var:(Int.abs literal))
               then all_marked := false);
             !all_marked
-          | T #(Theory_clause_idx, theory_clause_idx) ->
-            let reason = Vec.Value.get t.theory_clauses theory_clause_idx in
-            let all_marked = ref (Array.length reason > 1) in
-            Array.iter reason ~f:(fun literal ->
-              if Int.abs literal = Int.abs uip_literal
-              then ()
-              else if not (Stamp_set.is_seen seen ~var:(Int.abs literal))
-              then all_marked := false);
-            !all_marked
         in
         if skip
         then ()
@@ -667,11 +640,6 @@ let analyze_conflict t ~(failed_clause : Clause.t) ~failed_clause_idx =
                   (literal : int)
                   (!path_count : int)];
           Vec.Value.iter clause.clause ~f:(fun reason_literal ->
-            if Int.abs reason_literal <> Int.abs literal
-            then mark_literal reason_literal)
-        | T #(Theory_clause_idx, theory_clause_idx) ->
-          let clause = Vec.Value.get t.theory_clauses theory_clause_idx in
-          Array.iter clause ~f:(fun reason_literal ->
             if Int.abs reason_literal <> Int.abs literal
             then mark_literal reason_literal)));
     decr i
@@ -760,9 +728,10 @@ let restart t = exclave_
   done;
   t.trail_processed_till
   <- Int.min t.trail_processed_till (Trail_entry.Vec.length t.trail);
-  Vec.Value.clear t.theory_clauses;
   Option.iter t.theory ~f:(fun theory ->
-    Theory.Packed.pop theory ~to_decision_level:t.decision_level_of_last_assumption)
+    Theory.Packed.pop
+      theory
+      ~to_decision_level:t.decision_level_of_last_assumption)
 ;;
 
 let backtrack t ~failed_clause ~failed_clause_idx =
@@ -890,46 +859,63 @@ let%template check_sat_result t ~(sat_result : _ @ m) : _ @ m =
 
 let simplify_clauses_every = 2500
 
-(* Returns [Null] if the theory is consistent (or absent), [This failed_clause_idx]
-   on a theory conflict, or re-enters propagation by returning [Null] after
-   pushing T-propagated literals (the caller loops back via [solve']). The
-   [did_propagate] ref is set to [true] when literals were added so the caller
-   knows to re-run Boolean propagation before making a decision. *)
+(* Returns [Null] if the theory is consistent (or absent),
+   [This failed_clause_idx] on a theory conflict, or re-enters propagation by
+   returning [Null] after pushing T-propagated literals (the caller loops back
+   via [solve']). The [did_propagate] ref is set to [true] when literals were
+   added so the caller knows to re-run Boolean propagation before making a
+   decision. *)
 let check_theory t ~did_propagate =
   match t.theory with
   | None -> Null
   | Some theory ->
+    let add_theory_clause clause =
+      add_clause
+        t
+        ~literals:(Vec.Value.of_array_taking_ownership clause)
+        ~learned:true
+    in
     (match Theory.Packed.check_consistent theory with
      | `Consistent -> Null
      | `Conflict conflict_clause ->
-       (match
-          add_clause
-            t
-            ~literals:(Vec.Value.of_array_taking_ownership conflict_clause)
-            ~learned:true
-        with
-        | `Ok -> This (Vec.Value.length t.clauses - 1)
+       (match add_theory_clause conflict_clause with
+        | `Ok ->
+          Error.raise_s
+            [%message
+              "BUG: theory returned non-conflicting conflict explanation"
+                (conflict_clause : int array)]
         | `Conflict failed_clause_idx -> This failed_clause_idx)
      | `Propagate propagations ->
        let failed = ref Null in
        List.iter propagations ~f:(fun (literal, expl_clause) ->
          if Or_null.is_null !failed
          then (
-           let theory_clause_idx = Vec.Value.length t.theory_clauses in
-           Vec.Value.push t.theory_clauses expl_clause;
            ensure_literal t ~literal;
-           match push_theory_unit_trail_entry t ~literal ~theory_clause_idx with
-           | Null -> did_propagate := true
+           let var = literal_var t ~literal in
+           match var.assignment with
+           | This b when Bool.equal b (literal > 0) -> ()
+           | Null ->
+             (match add_theory_clause expl_clause with
+              | `Ok ->
+                let var = literal_var t ~literal in
+                (match var.assignment with
+                 | This b when Bool.equal b (literal > 0) ->
+                   did_propagate := true
+                 | This _ | Null ->
+                   Error.raise_s
+                     [%message
+                       "BUG: theory propagation explanation did not propagate"
+                         (literal : int)
+                         (expl_clause : int array)])
+              | `Conflict idx -> failed := This idx)
            | This _ ->
-             (* conflict: add the explanation to the main clause DB so
-                learn_from_failure can index it via a normal clause_idx *)
-             (match
-                add_clause
-                  t
-                  ~literals:(Vec.Value.of_array_taking_ownership expl_clause)
-                  ~learned:true
-              with
-              | `Ok -> failed := This (Vec.Value.length t.clauses - 1)
+             (match add_theory_clause expl_clause with
+              | `Ok ->
+                Error.raise_s
+                  [%message
+                    "BUG: theory propagation explanation did not conflict"
+                      (literal : int)
+                      (expl_clause : int array)]
               | `Conflict idx -> failed := This idx)));
        !failed)
 ;;
@@ -1001,9 +987,7 @@ let add_assumptions ~(local_ assumptions) t ~timer = exclave_
           | T #(Decision, ()) ->
             `Failed_assumptions (trail_entry.#literal, literal)
           | T #(Clause_idx, failed_clause_idx) ->
-            `Failed_clause failed_clause_idx
-          | T #(Theory_clause_idx, _) ->
-            `Failed_assumptions (trail_entry.#literal, literal)))
+            `Failed_clause failed_clause_idx))
   in
   go 0
 ;;
@@ -1070,7 +1054,6 @@ let create
   ; clause_act_inc = 1.0
   ; iterations = 0
   ; theory
-  ; theory_clauses = Vec.Value.create ()
   }
 ;;
 

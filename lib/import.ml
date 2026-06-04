@@ -153,7 +153,6 @@ end
 
 module Int = struct
   include Int
-
   module Table = Core.Int.Table
 
   module Rb_set =

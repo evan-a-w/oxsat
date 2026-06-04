@@ -1,7 +1,6 @@
 open! Core
 open! Feel
 open! Ds
-
 module Term_id = Int
 
 module Term = struct
@@ -53,8 +52,7 @@ module Undo = struct
         { child : Term_id.t
         ; old_parent : Term_id.t
         ; old_rank : int
-        (* The eq var that caused this merge, for conflict explanation. *)
-        ; reason_var : int
+        ; reason_literals : int list
         }
     | Class_list of
         { term : Term_id.t
@@ -70,7 +68,7 @@ end
 type asserted =
   { a : Term_id.t
   ; b : Term_id.t
-  ; var : int
+  ; literal : int
   ; decision_level : int
   }
 
@@ -93,7 +91,9 @@ let create () =
 
 let new_term t ~def =
   let id = Vec.Value.length t.terms in
-  Vec.Value.push t.terms { Term.id; def; parent = id; rank = 0; class_list_next = id };
+  Vec.Value.push
+    t.terms
+    { Term.id; def; parent = id; rank = 0; class_list_next = id };
   id
 ;;
 
@@ -121,7 +121,7 @@ let record_undo t ~decision_level kind =
   t.undo_trail <- { Undo.decision_level; kind } :: t.undo_trail
 ;;
 
-let union t ~decision_level ~reason_var a b =
+let union t ~decision_level ~reason_literals a b =
   let ra = find t a
   and rb = find t b in
   if Term_id.equal ra rb
@@ -137,9 +137,15 @@ let union t ~decision_level ~reason_var a b =
     record_undo
       t
       ~decision_level
-      (Merge { child; old_parent = child_term.parent; old_rank = root_term.rank; reason_var });
+      (Merge
+         { child
+         ; old_parent = child_term.parent
+         ; old_rank = root_term.rank
+         ; reason_literals
+         });
     child_term.parent <- root;
-    if root_term.rank = child_term.rank then root_term.rank <- root_term.rank + 1;
+    if root_term.rank = child_term.rank
+    then root_term.rank <- root_term.rank + 1;
     record_undo
       t
       ~decision_level
@@ -152,7 +158,7 @@ let union t ~decision_level ~reason_var a b =
 
 let apply_undo t ({ Undo.decision_level = _; kind } : Undo.t) =
   match kind with
-  | Merge { child; old_parent; old_rank; reason_var = _ } ->
+  | Merge { child; old_parent; old_rank; reason_literals = _ } ->
     let child_term = get_term t child in
     let root_term = get_term t child_term.parent in
     root_term.rank <- old_rank;
@@ -172,9 +178,11 @@ let pop t ~to_decision_level =
   in
   go t.undo_trail;
   t.asserted_eqs
-  <- List.filter t.asserted_eqs ~f:(fun e -> e.decision_level <= to_decision_level);
+  <- List.filter t.asserted_eqs ~f:(fun e ->
+       e.decision_level <= to_decision_level);
   t.asserted_neqs
-  <- List.filter t.asserted_neqs ~f:(fun e -> e.decision_level <= to_decision_level)
+  <- List.filter t.asserted_neqs ~f:(fun e ->
+       e.decision_level <= to_decision_level)
 ;;
 
 let assert_literal t ~decision_level literal =
@@ -185,42 +193,58 @@ let assert_literal t ~decision_level literal =
   | This atom ->
     (match atom, is_positive with
      | Atom.Eq (a, b), true ->
-       t.asserted_eqs <- { a; b; var; decision_level } :: t.asserted_eqs;
-       ignore (union t ~decision_level ~reason_var:var a b : bool)
+       t.asserted_eqs <- { a; b; literal; decision_level } :: t.asserted_eqs;
+       ignore (union t ~decision_level ~reason_literals:[ literal ] a b : bool)
      | Atom.Neq (a, b), false ->
-       t.asserted_eqs <- { a; b; var; decision_level } :: t.asserted_eqs;
-       ignore (union t ~decision_level ~reason_var:var a b : bool)
+       t.asserted_eqs <- { a; b; literal; decision_level } :: t.asserted_eqs;
+       ignore (union t ~decision_level ~reason_literals:[ literal ] a b : bool)
      | Atom.Neq (a, b), true ->
-       t.asserted_neqs <- { a; b; var; decision_level } :: t.asserted_neqs
+       t.asserted_neqs <- { a; b; literal; decision_level } :: t.asserted_neqs
      | Atom.Eq (a, b), false ->
-       t.asserted_neqs <- { a; b; var; decision_level } :: t.asserted_neqs)
+       t.asserted_neqs <- { a; b; literal; decision_level } :: t.asserted_neqs)
 ;;
 
-(* Walk the undo trail to collect the reason vars for all merges that put
-   [a] and [b] into the same class. Returns a list of eq vars. *)
+let decision_level_of_literal t literal =
+  let matching (asserted : asserted) = asserted.literal = literal in
+  match List.find t.asserted_eqs ~f:matching with
+  | Some asserted -> asserted.decision_level
+  | None ->
+    (match List.find t.asserted_neqs ~f:matching with
+     | Some asserted -> asserted.decision_level
+     | None ->
+       Error.raise_s
+         [%message
+           "BUG: UF explanation references a literal that is not asserted"
+             (literal : int)])
+;;
+
+let decision_level_of_premises t literals =
+  List.fold literals ~init:0 ~f:(fun acc literal ->
+    Int.max acc (decision_level_of_literal t literal))
+;;
+
+let unique_literals literals = Set.to_list (Int.Set.of_list literals)
+
+(* Walk the undo trail to collect true premise literals for merges that put [a]
+   and [b] into the same class. This is deliberately over-approximate: all merge
+   premises for the current class imply every equality inside it. *)
 let explain_eq t a b =
-  (* We need the vars on the merge path. The undo trail records every merge
-     in reverse chronological order; the merges that matter are those whose
-     child's current root is the same as find(a) or find(b). A simple
-     sound (but possibly over-approximate) approach: collect all Merge
-     reason_vars for the two roots involved. For soundness we include all
-     merges that contributed to the current class of find(a). *)
   let root = find t a in
   assert (Term_id.equal root (find t b));
-  List.filter_map t.undo_trail ~f:(fun { Undo.kind; _ } ->
+  List.concat_map t.undo_trail ~f:(fun { Undo.kind; _ } ->
     match kind with
-    | Merge { child; reason_var; _ } ->
-      if Term_id.equal (find t child) root then Some reason_var else None
-    | Class_list _ -> None)
+    | Merge { child; reason_literals; _ } ->
+      if Term_id.equal (find t child) root then reason_literals else []
+    | Class_list _ -> [])
+  |> unique_literals
 ;;
 
-let find_eq_var t lhs rhs =
-  match Registry.var t.registry ~atom:(Atom.eq lhs rhs) with
-  | This v -> Some v
-  | Null ->
-    (match Registry.var t.registry ~atom:(Atom.neq lhs rhs) with
-     | This v -> Some (-v)
-     | Null -> None)
+let registered_eq_var t lhs rhs =
+  Or_null.to_option (Registry.var t.registry ~atom:(Atom.eq lhs rhs))
+;;
+
+let registered_neq_var t lhs rhs =
+  Or_null.to_option (Registry.var t.registry ~atom:(Atom.neq lhs rhs))
 ;;
 
 let congruent t ta tb =
@@ -232,20 +256,20 @@ let congruent t ta tb =
   | _ -> false
 ;;
 
-let check_consistent t =
-  let conflict =
-    List.find_map t.asserted_neqs ~f:(fun { a; b; var = neq_var; _ } ->
-      if same_class t a b
-      then (
-        let path_vars = explain_eq t a b in
-        Some (Array.of_list (neq_var :: List.map path_vars ~f:(fun v -> -v))))
-      else None)
-  in
-  match conflict with
-  | Some clause -> `Conflict clause
-  | None ->
-    let n = Vec.Value.length t.terms in
-    let propagations = ref [] in
+let congruence_reason t ti tj =
+  match ti.Term.def, tj.Term.def with
+  | App { args = aa; _ }, App { args = ab; _ } ->
+    Array.to_list aa
+    |> List.concat_mapi ~f:(fun k arg_i -> explain_eq t arg_i ab.(k))
+    |> unique_literals
+  | _ -> []
+;;
+
+let close_congruence t =
+  let n = Vec.Value.length t.terms in
+  let changed = ref true in
+  while !changed do
+    changed := false;
     for i = 0 to n - 1 do
       let ti = get_term t i in
       match ti.Term.def with
@@ -255,21 +279,48 @@ let check_consistent t =
           let tj = get_term t j in
           if congruent t ti tj && not (same_class t i j)
           then (
-            match find_eq_var t i j with
-            | None -> ()
-            | Some lit when lit > 0 ->
-              let arg_eq_vars =
-                match ti.Term.def, tj.Term.def with
-                | App { args = aa; _ }, App { args = ab; _ } ->
-                  Array.to_list aa
-                  |> List.concat_mapi ~f:(fun k arg_i ->
-                    explain_eq t arg_i ab.(k) |> List.map ~f:(fun v -> -v))
-                | _ -> []
-              in
-              let reason = Array.of_list (lit :: arg_eq_vars) in
-              propagations := (lit, reason) :: !propagations
-            | Some _ -> ())
+            let reason_literals = congruence_reason t ti tj in
+            let decision_level = decision_level_of_premises t reason_literals in
+            if union t ~decision_level ~reason_literals i j then changed := true)
         done
+    done
+  done
+;;
+
+let conflict_for_asserted_disequality t =
+  List.find_map t.asserted_neqs ~f:(fun { a; b; literal; _ } ->
+    if same_class t a b
+    then (
+      let premises = explain_eq t a b in
+      Some (Array.of_list (-literal :: List.map premises ~f:(fun lit -> -lit))))
+    else None)
+;;
+
+let propagation_clause ~literal ~premises =
+  Array.of_list (literal :: List.map premises ~f:(fun premise -> -premise))
+;;
+
+let check_consistent t =
+  close_congruence t;
+  match conflict_for_asserted_disequality t with
+  | Some clause -> `Conflict clause
+  | None ->
+    let n = Vec.Value.length t.terms in
+    let propagations = ref [] in
+    for i = 0 to n - 1 do
+      for j = i + 1 to n - 1 do
+        if same_class t i j
+        then (
+          let premises = explain_eq t i j in
+          Option.iter (registered_eq_var t i j) ~f:(fun var ->
+            let lit = var in
+            propagations
+            := (lit, propagation_clause ~literal:lit ~premises) :: !propagations);
+          Option.iter (registered_neq_var t i j) ~f:(fun var ->
+            let lit = -var in
+            propagations
+            := (lit, propagation_clause ~literal:lit ~premises) :: !propagations))
+      done
     done;
     (match !propagations with
      | [] -> `Consistent

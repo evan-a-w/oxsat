@@ -1404,12 +1404,10 @@ let debug = false
 let run_solver ~assumptions =
   match Solver.create_with_formula ~debug formula with
   | `Unsat unsat_core ->
-    print_s
-      [%message ((Unsat { unsat_core } : Sat_result.t) : Sat_result.t)]
+    print_s [%message ((Unsat { unsat_core } : Sat_result.t) : Sat_result.t)]
   | `Ok solver ->
     let res = Solver.solve ~assumptions solver in
-    print_s
-      [%message (res : Sat_result.t) (Solver.stats solver : Stats.t)]
+    print_s [%message (res : Sat_result.t) (Solver.stats solver : Stats.t)]
 ;;
 
 let () = run_solver ~assumptions:assumptions_unsat

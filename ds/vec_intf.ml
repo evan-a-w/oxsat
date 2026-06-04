@@ -26,8 +26,8 @@ module type%template [@kind k = (value & value)] Elt = sig
   val create_for_vec : unit -> t
 end
 
-(* ppx_template cannot spell right-nested products in [@kind ...], so types whose
-   concrete layout is nested must use the corresponding flattened surface
+(* ppx_template cannot spell right-nested products in [@kind ...], so types
+   whose concrete layout is nested must use the corresponding flattened surface
    product here. Keep this case non-[external_] so concrete types like
    [lib2/var.ml] can instantiate it directly. *)
 module type%template
