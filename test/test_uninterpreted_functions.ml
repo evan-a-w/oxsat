@@ -25,7 +25,7 @@ let%expect_test "transitivity conflict is unsat" =
       (Solver.add_clause solver ~clause:[| eq_yz |] : [ `Ok | `Unsat of _ ]);
     ignore
       (Solver.add_clause solver ~clause:[| neq_xz |] : [ `Ok | `Unsat of _ ]));
-  [%expect {| (Unsat (unsat_core (1))) |}]
+  [%expect {| (Unsat (unsat_core (2))) |}]
 ;;
 
 let%expect_test "consistent equality and disequality is sat" =
@@ -187,7 +187,7 @@ let%expect_test "deep undo trail: long chain then disequality is unsat" =
     Array.iter chain_eqs ~f:(fun eq ->
       ignore (Solver.add_clause solver ~clause:[| eq |] : [ `Ok | `Unsat of _ ]));
     ignore (Solver.add_clause solver ~clause:[| neq |] : [ `Ok | `Unsat of _ ]));
-  [%expect {| (Unsat (unsat_core (1))) |}]
+  [%expect {| (Unsat (unsat_core (29))) |}]
 ;;
 
 let%expect_test "congruence propagation triggers conflict" =

@@ -3,16 +3,12 @@ open! Core
 module type Atom = sig
   type t
 
-  val create_unregistered : unit -> t option
-
   include Hashable.S with type t := t
   include Comparable.S with type t := t
 end
 
 module type Data = sig
   type t
-
-  val create_unregistered : unit -> t
 end
 
 module type S = sig

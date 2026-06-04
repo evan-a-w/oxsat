@@ -32,19 +32,7 @@ module Make (Atom : Atom) (Data : Data) = struct
   let on_new_var t var =
     if var < Vec.Value.length t.var_to_atom
     then ()
-    else
-      Vec.Value.fill_to_length
-        t.var_to_atom
-        ~length:(var + 1)
-        ~f:(fun (_ : int) ->
-          match Atom.create_unregistered () with
-          | None -> None
-          | Some atom as res ->
-            let data = Data.create_unregistered () in
-            Vec.Value.push t.var_to_atom (Some atom);
-            Hashtbl.set t.atom_to_var ~key:atom ~data:var;
-            Hashtbl.set t.atom_to_data ~key:atom ~data;
-            res)
+    else Vec.Value.fill_to_length t.var_to_atom ~length:(var + 1) ~f:(fun _ -> None)
   ;;
 
   let var t ~atom =

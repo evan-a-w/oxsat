@@ -886,28 +886,31 @@ let check_theory t ~did_propagate =
                 (conflict_clause : int array)]
         | `Conflict failed_clause_idx -> This failed_clause_idx)
      | `Propagate propagations ->
-       let failed = ref Null in
-       List.iter propagations ~f:(fun (literal, expl_clause) ->
-         if Or_null.is_null !failed
-         then (
+       List.fold_until
+         propagations
+         ~init:()
+         ~f:(fun () (literal, expl_clause) ->
            ensure_literal t ~literal;
            let var = literal_var t ~literal in
            match var.assignment with
-           | This b when Bool.equal b (literal > 0) -> ()
+           | This b when Bool.equal b (literal > 0) ->
+             (* Already assigned the right value; nothing to do. *)
+             Continue ()
            | Null ->
              (match add_theory_clause expl_clause with
               | `Ok ->
                 let var = literal_var t ~literal in
                 (match var.assignment with
                  | This b when Bool.equal b (literal > 0) ->
-                   did_propagate := true
+                   did_propagate := true;
+                   Continue ()
                  | This _ | Null ->
                    Error.raise_s
                      [%message
                        "BUG: theory propagation explanation did not propagate"
                          (literal : int)
                          (expl_clause : int array)])
-              | `Conflict idx -> failed := This idx)
+              | `Conflict idx -> Stop (This idx))
            | This _ ->
              (match add_theory_clause expl_clause with
               | `Ok ->
@@ -916,8 +919,8 @@ let check_theory t ~did_propagate =
                     "BUG: theory propagation explanation did not conflict"
                       (literal : int)
                       (expl_clause : int array)]
-              | `Conflict idx -> failed := This idx)));
-       !failed)
+              | `Conflict idx -> Stop (This idx)))
+         ~finish:(fun () -> Null))
 ;;
 
 let%template rec solve' t ~timer : Sat_result.t @ m =
