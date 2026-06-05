@@ -114,6 +114,17 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
 
 let pop_from_trail_exn t =
   let trail_entry = Trail_entry.Vec.pop_exn t.trail in
+  let to_decision_level =
+    match Trail_entry.Vec.length t.trail with
+    | 0 -> 0
+    | l -> (Trail_entry.Vec.get t.trail (l - 1)).#decision_level
+  in
+  if to_decision_level <> trail_entry.#decision_level
+  then (
+    match t.theory with
+    | Null -> ()
+    | This (T ((module Theory), theory)) ->
+      Theory.undo theory ~to_decision_level);
   undo_entry t ~trail_entry
 ;;
 
@@ -132,6 +143,13 @@ let push_trail_entry t ~(trail_entry : Trail_entry.t) =
             (trail_entry.#literal : int)
             (trail_entry.#decision_level : int)
             (t.decision_level : int)];
+    (match t.theory with
+     | Null -> ()
+     | This (T ((module Theory), theory)) ->
+       Theory.assert_literal
+         theory
+         ~decision_level:trail_entry.#decision_level
+         ~literal);
     var.assignment <- This (trail_entry.#literal > 0);
     var.trail_entry <- Trail_entry.Option_u.some trail_entry;
     Trail_entry.Vec.push t.trail trail_entry;
