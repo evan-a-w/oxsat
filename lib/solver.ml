@@ -20,6 +20,7 @@ type t =
   ; lbd_stamp_set : Stamp_set.t
   ; mutable clause_act_inc : float
   ; mutable iterations : int
+  ; theory : Theory.Packed.t or_null
   }
 
 type time_bound =
@@ -343,26 +344,6 @@ let rec remove_greater_than_decision_level t ~decision_level =
     remove_greater_than_decision_level t ~decision_level)
 ;;
 
-let rec propagate t : int or_null =
-  match t.trail_processed_till < Trail_entry.Vec.length t.trail with
-  | false -> Null
-  | true ->
-    let trail_entry = Trail_entry.Vec.get t.trail t.trail_processed_till in
-    t.trail_processed_till <- t.trail_processed_till + 1;
-    let var = Vec.Value.get t.vars (Int.abs trail_entry.#literal) in
-    if t.debug
-    then
-      print_s
-        [%message "propagate: trying assignment" (trail_entry.#literal : int)];
-    (match
-       update_watches_for_assignment t ~var ~literal:trail_entry.#literal
-     with
-     | `Conflict clause_idx -> This clause_idx
-     | `No_conflict ->
-       t.stats <- #{ t.stats with propagations = t.stats.#propagations + 1 };
-       propagate t)
-;;
-
 let trail_index_of_var_exn t ~var =
   let rec go i =
     if i < 0
@@ -425,6 +406,10 @@ let ensure_literal t ~literal =
   let var = literal_var t ~literal in
   if not var.exists
   then (
+    (match t.theory with
+     | Null -> ()
+     | This (T ((module Theory), theory)) ->
+       Theory.on_new_var theory ~var:(Int.abs literal));
     Vsids.on_new_var t.vsids ~var:(Int.abs literal);
     var.exists <- true)
 ;;
@@ -527,6 +512,53 @@ let mark_literal t ~seen ~literal ~(local_ path_count) ~learned_literals =
            if dl = t.decision_level
            then incr path_count
            else Vec.Value.push learned_literals literal)))
+;;
+
+let propagate_theory t = exclave_
+  match t.theory with
+  | Null -> `Consistent
+  | This (T ((module Theory), theory)) ->
+    (match Theory.maybe_get_lemma theory with
+     | `Consistent -> `Consistent
+     | `Lemma { global = clause } ->
+       (match
+          add_clause
+            t
+            ~literals:(Vec.Value.of_array_taking_ownership clause)
+            ~learned:true
+        with
+        | `Ok -> `Continue
+        | `Conflict _ as res -> res))
+;;
+
+let rec propagate' t : int or_null =
+  match t.trail_processed_till < Trail_entry.Vec.length t.trail with
+  | false -> Null
+  | true ->
+    let trail_entry = Trail_entry.Vec.get t.trail t.trail_processed_till in
+    t.trail_processed_till <- t.trail_processed_till + 1;
+    let var = Vec.Value.get t.vars (Int.abs trail_entry.#literal) in
+    if t.debug
+    then
+      print_s
+        [%message "propagate: trying assignment" (trail_entry.#literal : int)];
+    (match
+       update_watches_for_assignment t ~var ~literal:trail_entry.#literal
+     with
+     | `Conflict clause_idx -> This clause_idx
+     | `No_conflict ->
+       t.stats <- #{ t.stats with propagations = t.stats.#propagations + 1 };
+       propagate' t)
+;;
+
+let rec propagate t =
+  match propagate' t with
+  | This _ as res -> res
+  | Null ->
+    (match propagate_theory t with
+     | `Conflict clause_idx -> This clause_idx
+     | `Consistent -> Null
+     | `Continue -> propagate t)
 ;;
 
 let simplify_learned_clause t ~learned_literals ~uip_literal ~seen =
@@ -947,7 +979,11 @@ let%template solve ?(time_bound = `Unlimited) ?(local_ assumptions = [||]) t
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
-let create ?(random_state = Random.State.make [| 1; 2; 3 |]) ?(debug = false) ()
+let create
+  ?theory
+  ?(random_state = Random.State.make [| 1; 2; 3 |])
+  ?(debug = false)
+  ()
   =
   let _ = random_state in
   { trail = Trail_entry.Vec.create ()
@@ -967,6 +1003,11 @@ let create ?(random_state = Random.State.make [| 1; 2; 3 |]) ?(debug = false) ()
   ; lbd_stamp_set = Stamp_set.create ()
   ; clause_act_inc = 1.0
   ; iterations = 0
+  ; theory =
+      (match theory with
+       | None -> Null
+       | Some (module T : Theory.S) ->
+         This (Theory.pack (module T) (T.create ())))
   }
 ;;
 
@@ -982,8 +1023,8 @@ let add_clause t ~clause =
   | `Conflict failed_clause_idx -> `Unsat (unsat_core t failed_clause_idx)
 ;;
 
-let create_with_formula ?(local_ debug) formula =
-  let t = create ?debug () in
+let create_with_formula ?theory ?(local_ debug) formula =
+  let t = create ?theory ?debug () in
   let unsat_core = stack_ (ref Null) in
   Array.iter formula ~f:(fun clause ->
     match !unsat_core with

@@ -17,10 +17,16 @@ val%template solve
   -> Sat_result.t @ m
 [@@alloc a @ m = (heap_global, stack_local)]
 
-val create : ?random_state:Random.State.t -> ?debug:bool @ local -> unit -> t
+val create
+  :  ?theory:(module Theory.S)
+  -> ?random_state:Random.State.t
+  -> ?debug:bool @ local
+  -> unit
+  -> t
 
 val create_with_formula
-  :  ?debug:bool @ local
+  :  ?theory:(module Theory.S)
+  -> ?debug:bool @ local
   -> int array array
   -> [ `Ok of t | `Unsat of int array ]
 
