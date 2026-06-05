@@ -187,7 +187,7 @@ let update_blocker_for_watcher t ~watched_literal ~clause_idx ~blocking_literal 
            ~is_binary:watched_clause.#is_binary))
 ;;
 
-let replace_watched_literal' t ~clause_idx ~nullified_literal = exclave_
+let replace_watched_literal t ~clause_idx ~nullified_literal = exclave_
   let clause = Vec.Value.get t.clauses clause_idx in
   assert (
     nullified_literal = Vec.Value.get clause.clause 0
@@ -254,24 +254,6 @@ let replace_watched_literal' t ~clause_idx ~nullified_literal = exclave_
              ~blocking_literal:other_literal
              ~is_binary:false);
         `Replaced literal))
-;;
-
-let replace_watched_literal t ~clause_idx ~nullified_literal = exclave_
-  let res = replace_watched_literal' t ~clause_idx ~nullified_literal in
-  (* if t.debug *)
-  (* then ( *)
-  (* let clause = Vec.Value.get t.clauses clause_idx in *)
-  (* print_s *)
-  (*     [%message *)
-  (*       "replaced_watched_literal" *)
-  (* (nullified_literal : int) *)
-  (* (clause_with_assignments t ~clause : (int * bool or_null) array) *)
-  (* (res *)
-  (*          : [ `Not_replaced_not_conflict *)
-  (* | `Not_replaced_conflict of int *)
-  (* | `Replaced of int *)
-  (*            ])]); *)
-  res
 ;;
 
 let update_watches_for_assignment t ~(var : Var.t) ~literal = exclave_
