@@ -14,6 +14,7 @@ include struct
   module Rb = Rb
   module Hash_table = Hash_table
   module Option_u = Option_u
+  module Interned = Interned
 end
 
 include struct
