@@ -2,12 +2,11 @@ open! Core
 
 type t [@@deriving sexp_of]
 
-(** Opaque marker returned by [save]; pass to [restore] to undo unions. *)
-type level [@@deriving sexp_of]
+module Level : sig
+  type t [@@deriving sexp_of]
+end
 
 val create : ?capacity:int -> unit -> t
-
-(** Add a new element and return its id. *)
 val add : t -> int
 
 (** [find t x] returns the representative of [x]'s class. O(log n). Auto-expands
@@ -25,7 +24,7 @@ val same_class : t -> int -> int -> bool
 val size : t -> int
 
 (** Mark the current union history. *)
-val save : t -> level
+val save : t -> Level.t
 
 (** Undo all unions performed since [level] was saved. *)
-val restore : t -> level -> unit
+val restore : t -> Level.t -> unit

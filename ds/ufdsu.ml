@@ -1,20 +1,24 @@
 open! Core
 
-type undo_entry =
-  { child : int
-  ; new_root : int
-  ; rank_incremented : bool
-  }
-[@@deriving sexp_of]
+module Undo_entry = struct
+  type t =
+    { child : int
+    ; new_root : int
+    ; rank_incremented : bool
+    }
+  [@@deriving sexp_of]
+end
+
+module Level = struct
+  type t = int [@@deriving sexp_of]
+end
 
 type t =
   { parent : int Vec.Value.t
   ; rank : int Vec.Value.t
-  ; trail : undo_entry Vec.Value.t
+  ; trail : Undo_entry.t Vec.Value.t
   }
 [@@deriving sexp_of]
-
-type level = int [@@deriving sexp_of]
 
 let create ?(capacity = 16) () =
   { parent = Vec.Value.create ~capacity ()
@@ -68,7 +72,7 @@ let union t x y =
     Vec.Value.set t.parent child new_root;
     if rank_incremented
     then Vec.Value.set t.rank new_root (Vec.Value.get t.rank new_root + 1);
-    Vec.Value.push t.trail { child; new_root; rank_incremented };
+    Vec.Value.push t.trail { Undo_entry.child; new_root; rank_incremented };
     true)
 ;;
 
@@ -79,11 +83,13 @@ let same_class t x y =
 ;;
 
 let size t = Vec.Value.length t.parent
-let save t = Vec.Value.length t.trail
+let save t : Level.t = Vec.Value.length t.trail
 
-let restore t level =
+let restore t (level : Level.t) =
   while Vec.Value.length t.trail > level do
-    let { child; new_root; rank_incremented } = Vec.Value.pop_exn t.trail in
+    let { Undo_entry.child; new_root; rank_incremented } =
+      Vec.Value.pop_exn t.trail
+    in
     Vec.Value.set t.parent child child;
     if rank_incremented
     then Vec.Value.set t.rank new_root (Vec.Value.get t.rank new_root - 1)
