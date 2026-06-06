@@ -1,6 +1,6 @@
 open! Core
 
-type t [@@deriving sexp, equal, hash, compare]
+type t = private int [@@deriving sexp, equal, hash, compare]
 
 val of_string : string -> t
 val to_string : t -> string

@@ -7,7 +7,7 @@ module type Arg = sig
 end
 
 module type S = sig
-  type t [@@deriving sexp, equal, hash, compare]
+  type t = private int [@@deriving sexp, equal, hash, compare]
 
   module Arg : Arg
 
