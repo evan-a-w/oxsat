@@ -20,6 +20,10 @@ val union : t -> int -> int -> bool
 
 val same_class : t -> int -> int -> bool
 
+(** [iter_class t x ~f] calls [f] on every element in the same class as [x],
+    including [x] itself. Order is unspecified. *)
+val iter_class : t -> int -> f:(int -> unit) @ local -> unit
+
 (** Number of elements added so far. *)
 val size : t -> int
 

@@ -16,6 +16,7 @@ end
 type t =
   { parent : int Vec.Value.t
   ; rank : int Vec.Value.t
+  ; next : int Vec.Value.t (* circular linked list per class *)
   ; trail : Undo_entry.t Vec.Value.t
   }
 [@@deriving sexp_of]
@@ -23,6 +24,7 @@ type t =
 let create ?(capacity = 16) () =
   { parent = Vec.Value.create ~capacity ()
   ; rank = Vec.Value.create ~capacity ()
+  ; next = Vec.Value.create ~capacity ()
   ; trail = Vec.Value.create ()
   }
 ;;
@@ -31,7 +33,8 @@ let ensure t i =
   let old_len = Vec.Value.length t.parent in
   for j = old_len to i do
     Vec.Value.push t.parent j;
-    Vec.Value.push t.rank 0
+    Vec.Value.push t.rank 0;
+    Vec.Value.push t.next j
   done
 ;;
 
@@ -41,7 +44,6 @@ let add t =
   id
 ;;
 
-(* No path compression — required for undo correctness. *)
 let rec find_root t x =
   let p = Vec.Value.get t.parent x in
   if p = x then x else find_root t p
@@ -50,6 +52,14 @@ let rec find_root t x =
 let find t x =
   ensure t x;
   find_root t x
+;;
+
+let splice t a b =
+  (* Swap next[a] and next[b], merging or splitting two circular lists. *)
+  let a_next = Vec.Value.get t.next a in
+  let b_next = Vec.Value.get t.next b in
+  Vec.Value.set t.next a b_next;
+  Vec.Value.set t.next b a_next
 ;;
 
 let union t x y =
@@ -72,6 +82,7 @@ let union t x y =
     Vec.Value.set t.parent child new_root;
     if rank_incremented
     then Vec.Value.set t.rank new_root (Vec.Value.get t.rank new_root + 1);
+    splice t child new_root;
     Vec.Value.push t.trail { Undo_entry.child; new_root; rank_incremented };
     true)
 ;;
@@ -90,8 +101,19 @@ let restore t (level : Level.t) =
     let { Undo_entry.child; new_root; rank_incremented } =
       Vec.Value.pop_exn t.trail
     in
+    splice t child new_root;
     Vec.Value.set t.parent child child;
     if rank_incremented
     then Vec.Value.set t.rank new_root (Vec.Value.get t.rank new_root - 1)
+  done
+;;
+
+let iter_class t x ~f =
+  ensure t x;
+  f x;
+  let cur = ref (Vec.Value.get t.next x) in
+  while !cur <> x do
+    f !cur;
+    cur := Vec.Value.get t.next !cur
   done
 ;;

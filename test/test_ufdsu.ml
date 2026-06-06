@@ -85,6 +85,50 @@ let%expect_test "restore to save with no unions is a no-op" =
   [%expect {| ("Ufdsu.same_class t a b" true) |}]
 ;;
 
+let class_members t x =
+  let members = ref [] in
+  Ufdsu.iter_class t x ~f:(fun m -> members := m :: !members);
+  List.sort !members ~compare:Int.compare
+;;
+
+let%expect_test "iter_class basic" =
+  let t = Ufdsu.create () in
+  let a = Ufdsu.add t in
+  let b = Ufdsu.add t in
+  let c = Ufdsu.add t in
+  ignore (Ufdsu.union t a b : bool);
+  ignore (Ufdsu.union t b c : bool);
+  print_s [%message (class_members t a : int list)];
+  print_s [%message (class_members t b : int list)];
+  [%expect
+    {|
+    ("class_members t a" (0 1 2))
+    ("class_members t b" (0 1 2))
+    |}]
+;;
+
+let%expect_test "iter_class restore splits lists correctly" =
+  let t = Ufdsu.create () in
+  let a = Ufdsu.add t in
+  let b = Ufdsu.add t in
+  let c = Ufdsu.add t in
+  ignore (Ufdsu.union t a b : bool);
+  let level = Ufdsu.save t in
+  ignore (Ufdsu.union t b c : bool);
+  print_s [%message "before restore" ~members:(class_members t a : int list)];
+  Ufdsu.restore t level;
+  print_s
+    [%message
+      "after restore"
+        ~ab_class:(class_members t a : int list)
+        ~c_class:(class_members t c : int list)];
+  [%expect
+    {|
+    ("before restore" (members (0 1 2)))
+    ("after restore" (ab_class (0 1)) (c_class (2)))
+    |}]
+;;
+
 (* Reference implementation: naive graph reachability, snapshot-based undo. *)
 module Reference = struct
   type t =
@@ -162,7 +206,6 @@ let%test_unit "quickcheck matches reference" =
           if Bool.( <> ) ours theirs
           then
             failwith (sprintf "union(%d,%d): ours=%b theirs=%b" x y ours theirs);
-          (* also cross-check same_class *)
           let sc_ours = Ufdsu.same_class t x y in
           let sc_theirs = Reference.same_class ref_ x y in
           if Bool.( <> ) sc_ours sc_theirs
@@ -173,7 +216,23 @@ let%test_unit "quickcheck matches reference" =
                  x
                  y
                  sc_ours
-                 sc_theirs)
+                 sc_theirs);
+          (* check iter_class is consistent with same_class for all elements
+             seen so far *)
+          let class_x = class_members t x in
+          List.iter (List.init 10 ~f:Fun.id) ~f:(fun m ->
+            let in_iter = List.mem class_x m ~equal:Int.equal in
+            let in_same = Ufdsu.same_class t x m in
+            if Bool.( <> ) in_iter in_same
+            then
+              failwith
+                (sprintf
+                   "iter_class/same_class mismatch x=%d m=%d in_iter=%b \
+                    in_same=%b"
+                   x
+                   m
+                   in_iter
+                   in_same))
         | Push ->
           Stack.push levels (Ufdsu.save t);
           Reference.push ref_
