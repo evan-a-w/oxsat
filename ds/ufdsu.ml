@@ -9,10 +9,6 @@ module Undo_entry = struct
   [@@deriving sexp_of]
 end
 
-module Level = struct
-  type t = int [@@deriving sexp_of]
-end
-
 type t =
   { parent : int Vec.Value.t
   ; rank : int Vec.Value.t
@@ -68,7 +64,7 @@ let union t x y =
   let rx = find_root t x
   and ry = find_root t y in
   if rx = ry
-  then false
+  then Null
   else (
     let rank_rx = Vec.Value.get t.rank rx
     and rank_ry = Vec.Value.get t.rank ry in
@@ -83,8 +79,7 @@ let union t x y =
     if rank_incremented
     then Vec.Value.set t.rank new_root (Vec.Value.get t.rank new_root + 1);
     splice t child new_root;
-    Vec.Value.push t.trail { Undo_entry.child; new_root; rank_incremented };
-    true)
+    This { Undo_entry.child; new_root; rank_incremented })
 ;;
 
 let same_class t x y =
@@ -94,18 +89,12 @@ let same_class t x y =
 ;;
 
 let size t = Vec.Value.length t.parent
-let save t : Level.t = Vec.Value.length t.trail
 
-let restore t (level : Level.t) =
-  while Vec.Value.length t.trail > level do
-    let { Undo_entry.child; new_root; rank_incremented } =
-      Vec.Value.pop_exn t.trail
-    in
-    splice t child new_root;
-    Vec.Value.set t.parent child child;
-    if rank_incremented
-    then Vec.Value.set t.rank new_root (Vec.Value.get t.rank new_root - 1)
-  done
+let undo t ~undo_entry:{ Undo_entry.child; new_root; rank_incremented } =
+  splice t child new_root;
+  Vec.Value.set t.parent child child;
+  if rank_incremented
+  then Vec.Value.set t.rank new_root (Vec.Value.get t.rank new_root - 1)
 ;;
 
 let iter_class t x ~f =

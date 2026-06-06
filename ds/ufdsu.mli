@@ -2,8 +2,13 @@ open! Core
 
 type t [@@deriving sexp_of]
 
-module Level : sig
-  type t [@@deriving sexp_of]
+module Undo_entry : sig
+  type t =
+    { child : int
+    ; new_root : int
+    ; rank_incremented : bool
+    }
+  [@@deriving sexp_of]
 end
 
 val create : ?capacity:int -> unit -> t
@@ -16,7 +21,7 @@ val find : t -> int -> int
 (** [union t x y] merges the classes of [x] and [y] and records the merge on the
     internal trail. Returns [true] if they were in different classes.
     Auto-expands as needed. *)
-val union : t -> int -> int -> bool
+val union : t -> int -> int -> Undo_entry.t or_null
 
 val same_class : t -> int -> int -> bool
 
@@ -27,8 +32,5 @@ val iter_class : t -> int -> f:(int -> unit) @ local -> unit
 (** Number of elements added so far. *)
 val size : t -> int
 
-(** Mark the current union history. *)
-val save : t -> Level.t
-
-(** Undo all unions performed since [level] was saved. *)
-val restore : t -> Level.t -> unit
+(** needs to be in lifo order of undo entry returns from union *)
+val undo : t -> undo_entry:Undo_entry.t -> unit

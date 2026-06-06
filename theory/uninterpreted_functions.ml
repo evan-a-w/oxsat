@@ -46,16 +46,14 @@ let create ~atoms =
   ; ufdsu = Ufdsu.create ()
   ; atoms =
       List.map atoms ~f:(fun (atom, sat_var) : (Atom.t * Atom_data.t) ->
-          let atom = Atom.normalize atom in
-          atom, { atom; sat_var; assignment = Null })
+        let atom = Atom.normalize atom in
+        atom, { atom; sat_var; assignment = Null })
       |> Atom.Table.of_alist_exn
   }
 ;;
 
-let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
-  let atom = Atom.normalize atom in
-  match atom, value with
-  | `Eq (term1, term2), true -> 
-
-
-
+(* let assert_atom t ~decision_level ~(atom : Atom.t) ~value = *)
+(* let atom = Atom.normalize atom in *)
+(* match atom, value with *)
+(* | `Eq (term1, term2), true -> () *)
+(* ;; *)
