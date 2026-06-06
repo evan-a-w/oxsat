@@ -4,11 +4,14 @@ type t [@@deriving sexp_of]
 
 module Undo_entry : sig
   type t =
-    { child : int
-    ; new_root : int
-    ; rank_incremented : bool
-    }
+    #{ child : int
+     ; new_root : int
+     ; rank_incremented : bool
+     }
   [@@deriving sexp_of]
+
+  module Option_u :
+    Option_u.S [@kind value & value & value] with type Elt.t := t
 end
 
 val create : ?capacity:int -> unit -> t
@@ -21,7 +24,7 @@ val find : t -> int -> int
 (** [union t x y] merges the classes of [x] and [y] and records the merge on the
     internal trail. Returns [true] if they were in different classes.
     Auto-expands as needed. *)
-val union : t -> int -> int -> Undo_entry.t or_null
+val union : t -> int -> int -> Undo_entry.Option_u.t
 
 val same_class : t -> int -> int -> bool
 

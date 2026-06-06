@@ -2,18 +2,23 @@ open! Core
 
 module Undo_entry = struct
   type t =
-    { child : int
-    ; new_root : int
-    ; rank_incremented : bool
-    }
+    #{ child : int
+     ; new_root : int
+     ; rank_incremented : bool
+     }
   [@@deriving sexp_of]
+
+  let trivial_create_for_none () =
+    #{ child = 0; new_root = 0; rank_incremented = false }
+  ;;
+
+  include functor Option_u.Make' [@kind value & value & value]
 end
 
 type t =
   { parent : int Vec.Value.t
   ; rank : int Vec.Value.t
   ; next : int Vec.Value.t (* circular linked list per class *)
-  ; trail : Undo_entry.t Vec.Value.t
   }
 [@@deriving sexp_of]
 
@@ -21,7 +26,6 @@ let create ?(capacity = 16) () =
   { parent = Vec.Value.create ~capacity ()
   ; rank = Vec.Value.create ~capacity ()
   ; next = Vec.Value.create ~capacity ()
-  ; trail = Vec.Value.create ()
   }
 ;;
 
@@ -64,7 +68,7 @@ let union t x y =
   let rx = find_root t x
   and ry = find_root t y in
   if rx = ry
-  then Null
+  then Undo_entry.Option_u.none ()
   else (
     let rank_rx = Vec.Value.get t.rank rx
     and rank_ry = Vec.Value.get t.rank ry in
@@ -79,7 +83,7 @@ let union t x y =
     if rank_incremented
     then Vec.Value.set t.rank new_root (Vec.Value.get t.rank new_root + 1);
     splice t child new_root;
-    This { Undo_entry.child; new_root; rank_incremented })
+    Undo_entry.Option_u.some #{ Undo_entry.child; new_root; rank_incremented })
 ;;
 
 let same_class t x y =
@@ -90,7 +94,7 @@ let same_class t x y =
 
 let size t = Vec.Value.length t.parent
 
-let undo t ~undo_entry:{ Undo_entry.child; new_root; rank_incremented } =
+let undo t ~undo_entry:#{ Undo_entry.child; new_root; rank_incremented } =
   splice t child new_root;
   Vec.Value.set t.parent child child;
   if rank_incremented
