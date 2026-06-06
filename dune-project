@@ -16,6 +16,14 @@
 (documentation https://url/to/documentation)
 
 (package
+ (name feel_theory)
+ (synopsis "A short synopsis")
+ (description "A longer description")
+ (depends ocaml dune core)
+ (tags
+  ("add topics" "to describe" your project)))
+
+(package
  (name feel)
  (synopsis "A short synopsis")
  (description "A longer description")

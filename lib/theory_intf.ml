@@ -3,7 +3,6 @@ open! Core
 module type S = sig
   type t
 
-  val create : unit -> t
   val assert_literal : t -> decision_level:int -> literal:int -> unit
 
   val maybe_get_lemma

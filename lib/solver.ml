@@ -1006,8 +1006,7 @@ let create
   ; theory =
       (match theory with
        | None -> Null
-       | Some (module T : Theory.S) ->
-         This (Theory.pack (module T) (T.create ())))
+       | Some packed -> This packed)
   }
 ;;
 

@@ -18,14 +18,14 @@ val%template solve
 [@@alloc a @ m = (heap_global, stack_local)]
 
 val create
-  :  ?theory:(module Theory.S)
+  :  ?theory:Theory.Packed.t
   -> ?random_state:Random.State.t
   -> ?debug:bool @ local
   -> unit
   -> t
 
 val create_with_formula
-  :  ?theory:(module Theory.S)
+  :  ?theory:Theory.Packed.t
   -> ?debug:bool @ local
   -> int array array
   -> [ `Ok of t | `Unsat of int array ]
