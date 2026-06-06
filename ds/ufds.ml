@@ -10,7 +10,9 @@ let sexp_of_t t =
 ;;
 
 let create ?(capacity = 16) () =
-  { parent = Vec.Value.create ~capacity (); rank = Vec.Value.create ~capacity () }
+  { parent = Vec.Value.create ~capacity ()
+  ; rank = Vec.Value.create ~capacity ()
+  }
 ;;
 
 let ensure t i =
@@ -53,13 +55,13 @@ let union t x y =
   else (
     let rank_rx = Vec.Value.get t.rank rx
     and rank_ry = Vec.Value.get t.rank ry in
-    (if rank_rx < rank_ry
-     then Vec.Value.set t.parent rx ry
-     else if rank_rx > rank_ry
-     then Vec.Value.set t.parent ry rx
-     else (
-       Vec.Value.set t.parent ry rx;
-       Vec.Value.set t.rank rx (rank_rx + 1)));
+    if rank_rx < rank_ry
+    then Vec.Value.set t.parent rx ry
+    else if rank_rx > rank_ry
+    then Vec.Value.set t.parent ry rx
+    else (
+      Vec.Value.set t.parent ry rx;
+      Vec.Value.set t.rank rx (rank_rx + 1));
     true)
 ;;
 

@@ -71,10 +71,7 @@ let%expect_test "auto-resize via find and union" =
   let t = Ufds.create ~capacity:4 () in
   (* access elements well beyond initial capacity without calling add *)
   ignore (Ufds.union t 0 99 : bool);
-  print_s
-    [%message
-      (Ufds.same_class t 0 99 : bool)
-      (Ufds.size t : int)];
+  print_s [%message (Ufds.same_class t 0 99 : bool) (Ufds.size t : int)];
   [%expect {| (("Ufds.same_class t 0 99" true) ("Ufds.size t" 100)) |}]
 ;;
 
@@ -93,9 +90,9 @@ let%expect_test "size tracks elements" =
 
 (* Quickcheck: compare against a naive reference union-find *)
 module Reference = struct
-  type t = (int, int) Hashtbl.t
+  type t = int Int.Table.t
 
-  let create () : t = Hashtbl.create (module Int)
+  let create () : t = Int.Table.create ()
 
   let ensure (t : t) i =
     for j = Hashtbl.length t to i do
@@ -111,7 +108,8 @@ module Reference = struct
   let union (t : t) x y =
     ensure t x;
     ensure t y;
-    let rx = find t x and ry = find t y in
+    let rx = find t x
+    and ry = find t y in
     if rx = ry
     then false
     else (
@@ -135,8 +133,12 @@ let quickcheck_generator_operation =
   let open Quickcheck.Generator.Let_syntax in
   let gen_elem = Int.gen_incl 0 15 in
   Quickcheck.Generator.union
-    [ (let%map x = gen_elem and y = gen_elem in Union (x, y))
-    ; (let%map x = gen_elem and y = gen_elem in Same_class (x, y))
+    [ (let%map x = gen_elem
+       and y = gen_elem in
+       Union (x, y))
+    ; (let%map x = gen_elem
+       and y = gen_elem in
+       Same_class (x, y))
     ]
 ;;
 
@@ -156,8 +158,7 @@ let%test_unit "quickcheck matches reference" =
           (* both should agree on whether it was a new merge *)
           if Bool.( <> ) ours theirs
           then
-            failwith
-              (sprintf "union(%d,%d): ours=%b theirs=%b" x y ours theirs)
+            failwith (sprintf "union(%d,%d): ours=%b theirs=%b" x y ours theirs)
         | Same_class (x, y) ->
           let ours = Ufds.same_class t x y in
           let theirs = Reference.same_class ref_ x y in
