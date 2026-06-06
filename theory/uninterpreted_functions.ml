@@ -35,10 +35,17 @@ module Atom_data = struct
   [@@deriving hash, compare, sexp]
 end
 
+(* module Trail_entry = struct *)
+(* type t = *)
+(*     #{ undo_entry : Ufdsu.Undo_entry.t *)
+(* ; decision_level : int *)
+(*      } *)
+(* end *)
+
 type t =
   { ufds_var_by_term : int Term.Table.t
   ; ufdsu : Ufdsu.t
-  ; atoms : Atom_data.t Atom.Table.t
+  ; atoms : Atom_data.t Atom.Table.t (* ; trail : Trail_entry.Vec.t *)
   }
 
 let create ~atoms =

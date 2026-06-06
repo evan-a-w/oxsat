@@ -1,21 +1,51 @@
 open! Core
 open! Ds
 
+(* Helpers for managing an external trail, mirroring how
+   uninterpreted_functions.ml will use this. Undo_entry.t has an unboxed product
+   layout so we box it as a tuple for list storage. *)
+
+type trail = (int * int * bool) list ref
+
+let trail_save (trail : trail) = List.length !trail
+
+let trail_restore t (trail : trail) level =
+  while List.length !trail > level do
+    match !trail with
+    | [] -> ()
+    | (child, new_root, rank_incremented) :: rest ->
+      Ufdsu.undo
+        t
+        ~undo_entry:#{ Ufdsu.Undo_entry.child; new_root; rank_incremented };
+      trail := rest
+  done
+;;
+
+let do_union t (trail : trail) x y =
+  match%optional_u (Ufdsu.union t x y : Ufdsu.Undo_entry.Option_u.t) with
+  | None -> false
+  | Some entry ->
+    let #{ Ufdsu.Undo_entry.child; new_root; rank_incremented } = entry in
+    trail := (child, new_root, rank_incremented) :: !trail;
+    true
+;;
+
 let%expect_test "basic save and restore" =
   let t = Ufdsu.create () in
+  let trail = ref [] in
   let a = Ufdsu.add t in
   let b = Ufdsu.add t in
   let c = Ufdsu.add t in
-  ignore (Ufdsu.union t a b : bool);
-  let level = Ufdsu.save t in
-  ignore (Ufdsu.union t b c : bool);
+  ignore (do_union t trail a b : bool);
+  let level = trail_save trail in
+  ignore (do_union t trail b c : bool);
   print_s
     [%message
       "before restore"
         ~ab:(Ufdsu.same_class t a b : bool)
         ~bc:(Ufdsu.same_class t b c : bool)
         ~ac:(Ufdsu.same_class t a c : bool)];
-  Ufdsu.restore t level;
+  trail_restore t trail level;
   print_s
     [%message
       "after restore"
@@ -31,24 +61,25 @@ let%expect_test "basic save and restore" =
 
 let%expect_test "nested save and restore" =
   let t = Ufdsu.create () in
+  let trail = ref [] in
   let a = Ufdsu.add t in
   let b = Ufdsu.add t in
   let c = Ufdsu.add t in
   let d = Ufdsu.add t in
-  let l0 = Ufdsu.save t in
-  ignore (Ufdsu.union t a b : bool);
-  let l1 = Ufdsu.save t in
-  ignore (Ufdsu.union t c d : bool);
-  ignore (Ufdsu.union t a c : bool);
+  let l0 = trail_save trail in
+  ignore (do_union t trail a b : bool);
+  let l1 = trail_save trail in
+  ignore (do_union t trail c d : bool);
+  ignore (do_union t trail a c : bool);
   print_s [%message "all merged" ~abcd:(Ufdsu.same_class t a d : bool)];
-  Ufdsu.restore t l1;
+  trail_restore t trail l1;
   print_s
     [%message
       "after restore to l1"
         ~ab:(Ufdsu.same_class t a b : bool)
         ~cd:(Ufdsu.same_class t c d : bool)
         ~ac:(Ufdsu.same_class t a c : bool)];
-  Ufdsu.restore t l0;
+  trail_restore t trail l0;
   print_s
     [%message
       "after restore to l0"
@@ -62,25 +93,27 @@ let%expect_test "nested save and restore" =
     |}]
 ;;
 
-let%expect_test "union after restore returns true again" =
+let%expect_test "union after restore returns This again" =
   let t = Ufdsu.create () in
+  let trail = ref [] in
   let a = Ufdsu.add t in
   let b = Ufdsu.add t in
-  let level = Ufdsu.save t in
-  let first = Ufdsu.union t a b in
-  Ufdsu.restore t level;
-  let second = Ufdsu.union t a b in
+  let level = trail_save trail in
+  let first = do_union t trail a b in
+  trail_restore t trail level;
+  let second = do_union t trail a b in
   print_s [%message (first : bool) (second : bool)];
   [%expect {| ((first true) (second true)) |}]
 ;;
 
 let%expect_test "restore to save with no unions is a no-op" =
   let t = Ufdsu.create () in
+  let trail = ref [] in
   let a = Ufdsu.add t in
   let b = Ufdsu.add t in
-  ignore (Ufdsu.union t a b : bool);
-  let level = Ufdsu.save t in
-  Ufdsu.restore t level;
+  ignore (do_union t trail a b : bool);
+  let level = trail_save trail in
+  trail_restore t trail level;
   print_s [%message (Ufdsu.same_class t a b : bool)];
   [%expect {| ("Ufdsu.same_class t a b" true) |}]
 ;;
@@ -93,11 +126,12 @@ let class_members t x =
 
 let%expect_test "iter_class basic" =
   let t = Ufdsu.create () in
+  let trail = ref [] in
   let a = Ufdsu.add t in
   let b = Ufdsu.add t in
   let c = Ufdsu.add t in
-  ignore (Ufdsu.union t a b : bool);
-  ignore (Ufdsu.union t b c : bool);
+  ignore (do_union t trail a b : bool);
+  ignore (do_union t trail b c : bool);
   print_s [%message (class_members t a : int list)];
   print_s [%message (class_members t b : int list)];
   [%expect
@@ -109,14 +143,15 @@ let%expect_test "iter_class basic" =
 
 let%expect_test "iter_class restore splits lists correctly" =
   let t = Ufdsu.create () in
+  let trail = ref [] in
   let a = Ufdsu.add t in
   let b = Ufdsu.add t in
   let c = Ufdsu.add t in
-  ignore (Ufdsu.union t a b : bool);
-  let level = Ufdsu.save t in
-  ignore (Ufdsu.union t b c : bool);
+  ignore (do_union t trail a b : bool);
+  let level = trail_save trail in
+  ignore (do_union t trail b c : bool);
   print_s [%message "before restore" ~members:(class_members t a : int list)];
-  Ufdsu.restore t level;
+  trail_restore t trail level;
   print_s
     [%message
       "after restore"
@@ -196,12 +231,13 @@ let%test_unit "quickcheck matches reference" =
     (Quickcheck.Generator.list quickcheck_generator_operation)
     ~f:(fun ops ->
       let t = Ufdsu.create () in
+      let trail = ref [] in
       let ref_ = Reference.create () in
-      let levels : Ufdsu.Level.t Stack.t = Stack.create () in
+      let level_stack : int Stack.t = Stack.create () in
       List.iter ops ~f:(fun op ->
         match op with
         | Union (x, y) ->
-          let ours = Ufdsu.union t x y in
+          let ours = do_union t trail x y in
           let theirs = Reference.union ref_ x y in
           if Bool.( <> ) ours theirs
           then
@@ -217,8 +253,6 @@ let%test_unit "quickcheck matches reference" =
                  y
                  sc_ours
                  sc_theirs);
-          (* check iter_class is consistent with same_class for all elements
-             seen so far *)
           let class_x = class_members t x in
           List.iter (List.init 10 ~f:Fun.id) ~f:(fun m ->
             let in_iter = List.mem class_x m ~equal:Int.equal in
@@ -234,12 +268,12 @@ let%test_unit "quickcheck matches reference" =
                    in_iter
                    in_same))
         | Push ->
-          Stack.push levels (Ufdsu.save t);
+          Stack.push level_stack (trail_save trail);
           Reference.push ref_
         | Pop ->
-          (match Stack.pop levels with
+          (match Stack.pop level_stack with
            | None -> ()
            | Some level ->
-             Ufdsu.restore t level;
+             trail_restore t trail level;
              Reference.pop ref_)))
 ;;
