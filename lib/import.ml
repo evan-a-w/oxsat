@@ -15,6 +15,7 @@ include struct
   module Hash_table = Hash_table
   module Option_u = Option_u
   module Interned = Interned
+  module Ufdsu = Ufdsu
 end
 
 include struct
