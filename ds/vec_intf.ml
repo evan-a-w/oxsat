@@ -9,6 +9,7 @@ module type%template
       , (value & value) & value & value
       , float64
       , immediate & value & value
+      , (value & value & value) & value
       , bits64 & bits64
       , bits64 & bits64 & bits64
       , bits64 & bits64 & immediate & immediate & bits64
@@ -49,6 +50,7 @@ module type%template
       , bits64
       , bits64 & bits64
       , bits64 & bits64 & bits64
+      , (value & value & value) & value
       , bits64 & bits64 & immediate & immediate & bits64
       , bits64 & bits64 & value & value & bits64
       , (value & value) & value & value
@@ -181,6 +183,7 @@ module type Vec = sig
         , value & (value & value) & value & (value & value) & value
         , bits64 & bits64 & bits64
         , bits64 & bits64 & immediate & immediate & bits64
+        , (value & value & value) & value
         , bits64 & bits64 & value & value & bits64
         , (value & value & bits64) & bits64 & bits64 )] S = S [@kind k]
 
@@ -198,6 +201,7 @@ module type Vec = sig
         , immediate & value & value
         , bits64 & bits64 & bits64
         , bits64 & bits64 & immediate & immediate & bits64
+        , (value & value & value) & value
         , bits64 & bits64 & value & value & bits64
         , (value & value & bits64) & bits64 & bits64 )] Make
       (Arg : Elt

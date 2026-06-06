@@ -16,6 +16,7 @@ module type%template
       , immediate & value & value
       , bits64 & bits64 & bits64
       , bits64 & bits64 & immediate & immediate & bits64
+      , (value & value & value) & value
       , bits64 & bits64 & value & value & bits64
       , (value & value & bits64) & bits64 & bits64 )] S = S [@kind k]
 
@@ -32,6 +33,7 @@ module%template
       , value & (value & value) & value & (value & value) & value
       , bits64 & bits64 & bits64
       , bits64 & bits64 & immediate & immediate & bits64
+      , (value & value & value) & value
       , bits64 & bits64 & value & value & bits64
       , (value & value) & value & value
       , (value & value & bits64) & bits64 & bits64 )] Make

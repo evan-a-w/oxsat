@@ -3,7 +3,7 @@ open! Feel.Import
 
 module Term = struct
   type t =
-    [ `App of function_:Tvar.t * arg:Tvar.t
+    [ `App of function_:Tvar.t * args:t list
     | `Var of Tvar.t
     ]
   [@@deriving sexp, compare, hash]
@@ -35,17 +35,27 @@ module Atom_data = struct
   [@@deriving hash, compare, sexp]
 end
 
-(* module Trail_entry = struct *)
-(* type t = *)
-(*     #{ undo_entry : Ufdsu.Undo_entry.t *)
-(* ; decision_level : int *)
-(*      } *)
-(* end *)
+module Trail_entry = struct
+  type t =
+    #{ undo_entry : Ufdsu.Undo_entry.t
+     ; decision_level : int
+     }
+
+  let create_for_vec () =
+    #{ undo_entry = #{ child = 0; new_root = 0; rank_incremented = false }
+     ; decision_level = 0
+     }
+  ;;
+
+  include functor Vecable.Make [@kind (value & value & value) & value]
+end
 
 type t =
   { ufds_var_by_term : int Term.Table.t
   ; ufdsu : Ufdsu.t
-  ; atoms : Atom_data.t Atom.Table.t (* ; trail : Trail_entry.Vec.t *)
+  ; atoms : Atom_data.t Atom.Table.t
+  ; trail : Trail_entry.Vec.t
+  ; mutable trail_entry_processed_till : int
   }
 
 let create ~atoms =
@@ -56,6 +66,8 @@ let create ~atoms =
         let atom = Atom.normalize atom in
         atom, { atom; sat_var; assignment = Null })
       |> Atom.Table.of_alist_exn
+  ; trail = Trail_entry.Vec.create ()
+  ; trail_entry_processed_till = 0
   }
 ;;
 
