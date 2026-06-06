@@ -4,6 +4,10 @@ you are running tests, don't also dune exec.
 You may need to run eval $(opam env) before dune commands, eg.
 [eval $(opam env) && dune build].
 
+You should prefer defining types as a [type t] inside a module with the name of
+the type. Eg. [type undo_entry = ...] should be [module Undo_entry = struct type
+t = ... end].
+
 Always run ocamlformat after you finish (eg. ocamlformat --inplace */*.ml; ocamlformat */*.mli).
 
 Prefer to write explicit interfaces for new files in the mli, rather than just
