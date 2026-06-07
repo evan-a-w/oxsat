@@ -28,8 +28,8 @@ module type%template [@kind k = (value & value)] Elt = sig
 end
 
 module type%template
-  [@kind k = ((value & (value & value & value) & value) & value)] Elt = sig
-  type t : k
+  [@kind k = ((value & value & value & value) & value)] Elt = sig
+  type t : (value & (value & value & value)) & value
 
   val create_for_vec : unit -> t
 end
@@ -62,7 +62,7 @@ module type%template
       , bits64 & bits64 & value & value & bits64
       , (value & value) & value & value
       , (value & value & bits64) & bits64 & bits64
-      , (value & (value & value & value) & value) & value )] S = sig
+      , (value & value & value & value) & value )] S = sig
   module Elt : Elt [@kind k]
 
   type t
@@ -194,7 +194,7 @@ module type Vec = sig
         , (value & value & value) & value
         , bits64 & bits64 & value & value & bits64
         , (value & value & bits64) & bits64 & bits64
-        , (value & (value & value & value) & value) & value )] S = S [@kind k]
+        , (value & value & value & value) & value )] S = S [@kind k]
 
   module%template
     [@kind
@@ -213,7 +213,7 @@ module type Vec = sig
         , (value & value & value) & value
         , bits64 & bits64 & value & value & bits64
         , (value & value & bits64) & bits64 & bits64
-        , (value & (value & value & value) & value) & value )] Make
+        , (value & value & value & value) & value )] Make
       (Arg : Elt
     [@kind k]) : S [@kind k] with module Elt = Arg
 

@@ -17,7 +17,7 @@ module%template
       , bits64 & bits64 & immediate & immediate & bits64
       , bits64 & bits64 & value & value & bits64
       , (value & value & bits64) & bits64 & bits64
-      , (value & (value & value & value) & value) & value )] Make
+      , (value & value & value & value) & value )] Make
     (Arg : Vec_intf.Elt
   [@kind k]) =
 struct
