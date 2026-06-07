@@ -195,6 +195,7 @@ let assert_true_atom t ~decision_level ~(atom : Atom.t) =
       (match Ufdsu.same_class t.ufdsu t1 t2 with
        | true -> ()
        | false ->
+         (* TODO: ideally calculation of [could_change] is done more efficiently *)
          let could_change term =
            Hashtbl.find_or_null t.parents term
            |> Or_null.map ~f:(fun hash_set -> Hash_set.to_list hash_set)
@@ -205,6 +206,7 @@ let assert_true_atom t ~decision_level ~(atom : Atom.t) =
            |> List.dedup_and_sort ~compare:[%compare: Term.t]
          in
          List.iter could_change ~f:(fun term ->
+           (* TODO: use a signature table so we don't recompute always *)
            match signature t ~term with
            | Null -> ()
            | This signature ->
