@@ -247,10 +247,20 @@ let assert_true_atom t ~decision_level ~(atom : Atom.t) =
   go ()
 ;;
 
+let assert_false_atom t ~decision_level ~(atom : Atom.t) =
+  match Hash_set.mem t.falsehoods atom with
+  | true -> ()
+  | false ->
+    Hash_set.add t.falsehoods atom;
+    Trail_entry.Vec.push
+      t.trail
+      #{ decision_level; kind = Trail_entry.Kind.falsehood atom }
+;;
+
 let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
   t.current_decision_level <- decision_level;
   let atom = Atom.normalize atom in
   match value with
   | true -> assert_true_atom t ~decision_level ~atom
-  | false -> ()
+  | false -> assert_false_atom t ~decision_level ~atom
 ;;
