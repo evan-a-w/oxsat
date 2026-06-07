@@ -9,7 +9,7 @@ module type S = sig
     :  t
     -> [ `Consistent | `Lemma of int array Modes.Global.t ] @ local
 
-  val undo : t -> to_decision_level:int -> unit
+  val undo : t -> to_decision_level_excl:int -> unit
   val on_new_var : t -> var:int -> unit
 end
 

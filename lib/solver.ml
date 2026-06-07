@@ -124,7 +124,7 @@ let pop_from_trail_exn t =
     match t.theory with
     | Null -> ()
     | This (T ((module Theory), theory)) ->
-      Theory.undo theory ~to_decision_level);
+      Theory.undo theory ~to_decision_level_excl:to_decision_level);
   undo_entry t ~trail_entry
 ;;
 

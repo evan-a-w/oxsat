@@ -85,6 +85,20 @@ type t =
   ; falsehoods : Atom.Hash_set.t
   }
 
+let rec undo t ~to_decision_level_excl =
+  match Trail_entry.Vec.length t.trail with
+  | 0 -> ()
+  | _ ->
+    let trail_entry = Trail_entry.Vec.pop_exn t.trail in
+    (match trail_entry.#decision_level > to_decision_level_excl with
+     | false -> ()
+     | true ->
+       (match trail_entry.#kind with
+        | T #(Falsehood, _, atom) -> Hash_set.remove t.falsehoods atom
+        | T #(Undo, undo_entry, _) -> Ufdsu.undo t.ufdsu ~undo_entry);
+       undo t ~to_decision_level_excl)
+;;
+
 let canonical_ufds_var t ~term =
   Hashtbl.find_exn t.ufds_var_by_term term |> Ufdsu.find t.ufdsu _
 ;;
