@@ -47,22 +47,28 @@ end
 
 module Trail_entry = struct
   module Kind = struct
-    type (_ : value & value & value) tag =
-      | Undo : Ufdsu.Undo_entry.t tag
-      | Falsehood : #(Atom.t * unit * unit) tag
-      | Signature_added : #(Signature.t * unit * unit) tag
-      | Signature_changed : #(Signature.t * old_term:Term.t * unit) tag
+    type (_ : (value & value & value) & value) tag =
+      | Undo : #(Ufdsu.Undo_entry.t * Atom.t) tag
+      | Falsehood : #(#(Atom.t * unit * unit) * unit) tag
+      | Signature_added : #(#(Signature.t * unit * unit) * unit) tag
+      | Signature_changed :
+          #(#(Signature.t * old_term:Term.t * unit) * unit) tag
 
     type t = T : #('a tag * 'a) -> t [@@unboxed]
 
-    let undo (undo_entry : Ufdsu.Undo_entry.t) = T #(Undo, undo_entry)
-    let falsehood atom = T #(Falsehood, #(atom, (), ()))
-
-    let signature_changed ~signature ~old_term =
-      T #(Signature_changed, #(signature, ~old_term, ()))
+    let undo ~(undo_entry : Ufdsu.Undo_entry.t) ~atom =
+      T #(Undo, #(undo_entry, atom))
     ;;
 
-    let signature_added ~signature = T #(Signature_added, #(signature, (), ()))
+    let falsehood ~atom = T #(Falsehood, #(#(atom, (), ()), ()))
+
+    let signature_changed ~signature ~old_term =
+      T #(Signature_changed, #(#(signature, ~old_term, ()), ()))
+    ;;
+
+    let signature_added ~signature =
+      T #(Signature_added, #(#(signature, (), ()), ()))
+    ;;
   end
 
   type t =
@@ -70,11 +76,16 @@ module Trail_entry = struct
      ; decision_level : int
      }
 
-  let create_for_vec () =
-    #{ kind = Kind.undo #{ child = 0; new_root = 0; rank_incremented = false }
+  let fake =
+    #{ kind =
+         Kind.undo
+           ~undo_entry:#{ child = 0; new_root = 0; rank_incremented = false }
+           ~atom:(`Eq (`Var (Tvar.of_string "a"), `Var (Tvar.of_string "b")))
      ; decision_level = 0
      }
   ;;
+
+  let create_for_vec () = fake
 
   include functor Vecable.Make [@kind (value & value & value & value) & value]
 end
