@@ -36,13 +36,24 @@ module Atom_data = struct
 end
 
 module Trail_entry = struct
+  module Kind = struct
+    type (_ : value & value & value, _) tag =
+      | Undo : (Ufdsu.Undo_entry.t, _) tag
+      | Ineq : (_, Atom.t) tag
+
+    type t = T : #(('a, 'b) tag * 'a * 'b) -> t [@@unboxed]
+
+    let undo (undo_entry : Ufdsu.Undo_entry.t) = T #(Undo, undo_entry, ())
+    let ineq atom = T #(Ineq, #((), (), ()), atom)
+  end
+
   type t =
-    #{ undo_entry : Ufdsu.Undo_entry.t
+    #{ kind : Kind.t
      ; decision_level : int
      }
 
   let create_for_vec () =
-    #{ undo_entry = #{ child = 0; new_root = 0; rank_incremented = false }
+    #{ kind = Kind.undo #{ child = 0; new_root = 0; rank_incremented = false }
      ; decision_level = 0
      }
   ;;
@@ -68,6 +79,7 @@ type t =
   ; parents : Term.Hash_set.t Term.Table.t
   ; trail : Trail_entry.Vec.t
   ; mutable trail_entry_processed_till : int
+  ; falsehoods : Atom.Hash_set.t
   }
 
 let canonical_ufds_var t ~term =
@@ -122,8 +134,8 @@ let create ~atoms =
   }
 ;;
 
-(* let assert_atom t ~decision_level ~(atom : Atom.t) ~value = *)
-(* let atom = Atom.normalize atom in *)
-(* match atom, value with *)
-(* | `Eq (term1, term2), true -> () *)
-(* ;; *)
+let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
+  let atom = Atom.normalize atom in
+  match atom, value with
+  | `Eq (term1, term2), true -> ()
+;;
