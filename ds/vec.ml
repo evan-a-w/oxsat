@@ -18,7 +18,8 @@ module type%template
       , bits64 & bits64 & immediate & immediate & bits64
       , (value & value & value) & value
       , bits64 & bits64 & value & value & bits64
-      , (value & value & bits64) & bits64 & bits64 )] S = S [@kind k]
+      , (value & value & bits64) & bits64 & bits64
+      , (value & (value & value & value) & value) & value )] S = S [@kind k]
 
 module%template
   [@kind
@@ -36,7 +37,8 @@ module%template
       , (value & value & value) & value
       , bits64 & bits64 & value & value & bits64
       , (value & value) & value & value
-      , (value & value & bits64) & bits64 & bits64 )] Make
+      , (value & value & bits64) & bits64 & bits64
+      , (value & (value & value & value) & value) & value )] Make
     (Arg : Elt
   [@kind k]) : S [@kind k] with module Elt = Arg = struct
   module Elt = Arg

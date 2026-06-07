@@ -39,12 +39,12 @@ module Trail_entry = struct
   module Kind = struct
     type (_ : value & value & value, _) tag =
       | Undo : (Ufdsu.Undo_entry.t, _) tag
-      | Ineq : (_, Atom.t) tag
+      | Falsehood : (_, Atom.t) tag
 
     type t = T : #(('a, 'b) tag * 'a * 'b) -> t [@@unboxed]
 
     let undo (undo_entry : Ufdsu.Undo_entry.t) = T #(Undo, undo_entry, ())
-    let ineq atom = T #(Ineq, #((), (), ()), atom)
+    let falsehood atom = T #(Falsehood, #((), (), ()), atom)
   end
 
   type t =
@@ -58,7 +58,10 @@ module Trail_entry = struct
      }
   ;;
 
-  include functor Vecable.Make [@kind (value & value & value) & value]
+  include
+    functor
+    Vecable.Make
+    [@kind (value & (value & value & value) & value) & value]
 end
 
 module Signature = struct
@@ -131,11 +134,12 @@ let create ~atoms =
   ; trail = Trail_entry.Vec.create ()
   ; trail_entry_processed_till = 0
   ; signature_to_canonical
+  ; falsehoods = Atom.Hash_set.create ()
   }
 ;;
 
-let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
-  let atom = Atom.normalize atom in
-  match atom, value with
-  | `Eq (term1, term2), true -> ()
-;;
+(* let assert_atom t ~decision_level ~(atom : Atom.t) ~value = *)
+(* let atom = Atom.normalize atom in *)
+(* match atom, value with *)
+(* | `Eq (term1, term2), true -> () *)
+(* ;; *)
