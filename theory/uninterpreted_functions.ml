@@ -87,7 +87,7 @@ module Trail_entry = struct
 
   let create_for_vec () = fake
 
-  include functor Vecable.Make [@kind (value & value & value & value) & value]
+  include functor Vecable.Make [@kind (value & (value & value & value) & value) & value]
 end
 
 type t =
