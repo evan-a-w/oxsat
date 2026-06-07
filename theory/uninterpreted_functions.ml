@@ -35,16 +35,31 @@ module Atom_data = struct
   [@@deriving hash, compare, sexp]
 end
 
+module Signature = struct
+  type t =
+    { function_ : Tvar.t
+    ; args : int list
+    }
+  [@@deriving sexp, compare, hash]
+
+  include functor Hashable.Make
+end
+
 module Trail_entry = struct
   module Kind = struct
-    type (_ : value & value & value, _) tag =
-      | Undo : (Ufdsu.Undo_entry.t, _) tag
-      | Falsehood : (_, Atom.t) tag
+    type (_ : value & value & value) tag =
+      | Undo : Ufdsu.Undo_entry.t tag
+      | Falsehood : #(Atom.t * unit * unit) tag
+      | Signature_added : #(Signature.t * Term.t * unit) tag
 
-    type t = T : #(('a, 'b) tag * 'a * 'b) -> t [@@unboxed]
+    type t = T : #('a tag * 'a) -> t [@@unboxed]
 
-    let undo (undo_entry : Ufdsu.Undo_entry.t) = T #(Undo, undo_entry, ())
-    let falsehood atom = T #(Falsehood, #((), (), ()), atom)
+    let undo (undo_entry : Ufdsu.Undo_entry.t) = T #(Undo, undo_entry)
+    let falsehood atom = T #(Falsehood, #(atom, (), ()))
+
+    let signature_added ~signature ~term =
+      T #(Signature_added, #(signature, term, ()))
+    ;;
   end
 
   type t =
@@ -58,20 +73,7 @@ module Trail_entry = struct
      }
   ;;
 
-  include
-    functor
-    Vecable.Make
-    [@kind (value & (value & value & value) & value) & value]
-end
-
-module Signature = struct
-  type t =
-    { function_ : Tvar.t
-    ; args : int list
-    }
-  [@@deriving sexp, compare, hash]
-
-  include functor Hashable.Make
+  include functor Vecable.Make [@kind (value & value & value & value) & value]
 end
 
 type t =
@@ -152,8 +154,41 @@ let create ~atoms =
   }
 ;;
 
-(* let assert_atom t ~decision_level ~(atom : Atom.t) ~value = *)
-(* let atom = Atom.normalize atom in *)
-(* match atom, value with *)
-(* | `Eq (term1, term2), true -> () *)
-(* ;; *)
+let canonical_signature_term t ~term : Term.t or_null =
+  match signature t ~term:(term : Term.t) with
+  | Null -> Null
+  | This signature ->
+    This
+      (Hashtbl.find_or_add
+         t.signature_to_canonical
+         signature
+         ~default:(fun () -> term))
+;;
+
+let assert_true_atom t ~decision_level ~(atom : Atom.t) =
+  let worklist = Vec.Value.create () in
+  Vec.Value.push worklist atom;
+  let rec go () =
+    match Vec.Value.length worklist with
+    | 0 -> ()
+    | _ ->
+      let (`Eq (term1, term2)) = Vec.Value.pop_exn worklist in
+      let t1 = canonical_ufds_var t ~term:term1 in
+      let t2 = canonical_ufds_var t ~term:term2 in
+      (match%optional_u
+         (Ufdsu.union t.ufdsu t1 t2 : Ufdsu.Undo_entry.Option_u.t)
+       with
+       | None -> ()
+       | Some undo_entry ->
+         let could_change1, could_change2 = Hashtbl.find in
+         ())
+  in
+  go ()
+;;
+
+let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
+  let atom = Atom.normalize atom in
+  match value with
+  | true -> assert_true_atom t ~decision_level ~atom
+  | false -> ()
+;;
