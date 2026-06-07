@@ -87,7 +87,10 @@ module Trail_entry = struct
 
   let create_for_vec () = fake
 
-  include functor Vecable.Make [@kind (value & (value & value & value) & value) & value]
+  include
+    functor
+    Vecable.Make
+    [@kind (value & (value & value & value) & value) & value]
 end
 
 type t =
@@ -112,12 +115,13 @@ let rec undo t ~to_decision_level_excl =
      | true ->
        ignore (Trail_entry.Vec.pop_exn t.trail : Trail_entry.t);
        (match trail_entry.#kind with
-        | T #(Falsehood, #(atom, (), ())) -> Hash_set.remove t.falsehoods atom
-        | T #(Signature_added, #(signature, (), ())) ->
+        | T #(Falsehood, #(#(atom, (), ()), ())) ->
+          Hash_set.remove t.falsehoods atom
+        | T #(Signature_added, #(#(signature, (), ()), ())) ->
           Hashtbl.remove t.signature_to_canonical signature
-        | T #(Signature_changed, #(signature, ~old_term, ())) ->
+        | T #(Signature_changed, #(#(signature, ~old_term, ()), ())) ->
           Hashtbl.set t.signature_to_canonical ~key:signature ~data:old_term
-        | T #(Undo, undo_entry) -> Ufdsu.undo t.ufdsu ~undo_entry);
+        | T #(Undo, #(undo_entry, _)) -> Ufdsu.undo t.ufdsu ~undo_entry);
        undo t ~to_decision_level_excl)
 ;;
 
@@ -238,7 +242,7 @@ let assert_true_atom t ~decision_level ~(atom : Atom.t) =
          in
          Trail_entry.Vec.push
            t.trail
-           #{ decision_level; kind = Trail_entry.Kind.undo undo_entry };
+           #{ decision_level; kind = Trail_entry.Kind.undo ~undo_entry ~atom };
          List.iter could_change ~f:(fun term ->
            match canonical_signature_term t ~term with
            | Null -> ()
@@ -265,7 +269,7 @@ let assert_false_atom t ~decision_level ~(atom : Atom.t) =
     Hash_set.add t.falsehoods atom;
     Trail_entry.Vec.push
       t.trail
-      #{ decision_level; kind = Trail_entry.Kind.falsehood atom }
+      #{ decision_level; kind = Trail_entry.Kind.falsehood ~atom }
 ;;
 
 let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
