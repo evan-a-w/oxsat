@@ -45,11 +45,58 @@ module Signature = struct
   include functor Hashable.Make
 end
 
+(* Justification for an edge in the [Explanation_forest]: either a directly
+   asserted equality atom, or a congruence step [f(args1) ~ f(args2)] that
+   reduces to pairwise equalities between corresponding arguments. *)
+module Justification = struct
+  type t =
+    | Asserted of Atom.t
+    | Congruence of
+        { function_ : Tvar.t
+        ; args1 : Term.t list
+        ; args2 : Term.t list
+        }
+  [@@deriving sexp_of]
+end
+
+module Term_pair = struct
+  type t = Term.t * Term.t [@@deriving sexp, compare, hash]
+
+  include functor Hashable.Make
+end
+
+(* A spanning forest over ufds vars that mirrors the union-find's merge history
+   (à la Kruskal's algorithm: every successful union connects two
+   previously-distinct classes, so recording an edge at union time yields a
+   forest whose connectivity exactly matches class equivalence). This lets us
+   reconstruct *why* two terms ended up in the same class, which [Ufdsu] itself
+   cannot do. Edges are added/removed in strict LIFO order with merges/undos, so
+   [Hashtbl.add_multi]/[remove_multi] (which cons/pop list heads) keep both
+   endpoints' adjacency lists correctly synchronized. *)
+module Explanation_forest = struct
+  type t = (int * Justification.t) list Int.Table.t
+
+  let create () : t = Int.Table.create ()
+
+  let add_edge (t : t) ~x ~y ~justification =
+    Hashtbl.add_multi t ~key:x ~data:(y, justification);
+    Hashtbl.add_multi t ~key:y ~data:(x, justification)
+  ;;
+
+  let remove_edge (t : t) ~x ~y =
+    Hashtbl.remove_multi t x;
+    Hashtbl.remove_multi t y
+  ;;
+
+  let neighbors (t : t) x = Hashtbl.find_multi t x
+end
+
 module Trail_entry = struct
   module Kind = struct
     type (_ : (value & value & value) & value) tag =
       | Undo : #(Ufdsu.Undo_entry.t * Atom.t) tag
       | Falsehood : #(#(Atom.t * unit * unit) * unit) tag
+      | Truth : #(#(Atom.t * unit * unit) * unit) tag
       | Signature_added : #(#(Signature.t * unit * unit) * unit) tag
       | Signature_changed :
           #(#(Signature.t * old_term:Term.t * unit) * unit) tag
@@ -61,6 +108,7 @@ module Trail_entry = struct
     ;;
 
     let falsehood ~atom = T #(Falsehood, #(#(atom, (), ()), ()))
+    let truth ~atom = T #(Truth, #(#(atom, (), ()), ()))
 
     let signature_changed ~signature ~old_term =
       T #(Signature_changed, #(#(signature, ~old_term, ()), ()))
@@ -97,8 +145,10 @@ type t =
   { ufds_var_by_term : int Term.Table.t
   ; ufdsu : Ufdsu.t
   ; atoms : Atom_data.t Atom.Table.t
+  ; atom_by_sat_var : Atom.t Int.Table.t
   ; signature_to_canonical : Term.t Signature.Table.t
   ; parents : Term.Hash_set.t Term.Table.t
+  ; explanation_forest : Explanation_forest.t
   ; trail : Trail_entry.Vec.t
   ; mutable trail_entry_processed_till : int
   ; falsehoods : Atom.Hash_set.t
@@ -116,18 +166,25 @@ let rec undo t ~to_decision_level_excl =
        ignore (Trail_entry.Vec.pop_exn t.trail : Trail_entry.t);
        (match trail_entry.#kind with
         | T #(Falsehood, #(#(atom, (), ()), ())) ->
-          Hash_set.remove t.falsehoods atom
+          Hash_set.remove t.falsehoods atom;
+          (Hashtbl.find_exn t.atoms atom).assignment <- Null
+        | T #(Truth, #(#(atom, (), ()), ())) ->
+          (Hashtbl.find_exn t.atoms atom).assignment <- Null
         | T #(Signature_added, #(#(signature, (), ()), ())) ->
           Hashtbl.remove t.signature_to_canonical signature
         | T #(Signature_changed, #(#(signature, ~old_term, ()), ())) ->
           Hashtbl.set t.signature_to_canonical ~key:signature ~data:old_term
-        | T #(Undo, #(undo_entry, _)) -> Ufdsu.undo t.ufdsu ~undo_entry);
+        | T #(Undo, #(undo_entry, _)) ->
+          Explanation_forest.remove_edge
+            t.explanation_forest
+            ~x:undo_entry.#child
+            ~y:undo_entry.#new_root;
+          Ufdsu.undo t.ufdsu ~undo_entry);
        undo t ~to_decision_level_excl)
 ;;
 
-let canonical_ufds_var t ~term =
-  Hashtbl.find_exn t.ufds_var_by_term term |> Ufdsu.find t.ufdsu _
-;;
+let ufds_var t ~term = Hashtbl.find_exn t.ufds_var_by_term term
+let canonical_ufds_var t ~term = ufds_var t ~term |> Ufdsu.find t.ufdsu _
 
 let signature t ~(term : Term.t) : Signature.t or_null =
   match term with
@@ -157,6 +214,7 @@ let create ~atoms =
            in
            Hash_set.add parents term))
   in
+  let atom_by_sat_var = Int.Table.create () in
   let atoms =
     List.map atoms ~f:(fun (atom, sat_var) : (Atom.t * Atom_data.t) ->
       let atom = Atom.normalize atom in
@@ -164,13 +222,16 @@ let create ~atoms =
        | `Eq (a, b) ->
          on_term a;
          on_term b);
+      Hashtbl.set atom_by_sat_var ~key:sat_var ~data:atom;
       atom, { atom; sat_var; assignment = Null })
     |> Atom.Table.of_alist_exn
   in
   { ufds_var_by_term
   ; ufdsu
   ; atoms
+  ; atom_by_sat_var
   ; parents
+  ; explanation_forest = Explanation_forest.create ()
   ; trail = Trail_entry.Vec.create ()
   ; trail_entry_processed_till = 0
   ; signature_to_canonical
@@ -198,13 +259,19 @@ let canonical_signature_term t ~term : Term.t or_null =
 ;;
 
 let assert_true_atom t ~decision_level ~(atom : Atom.t) =
+  let atom_data = Hashtbl.find_exn t.atoms atom in
+  atom_data.assignment <- This true;
+  Trail_entry.Vec.push
+    t.trail
+    #{ decision_level; kind = Trail_entry.Kind.truth ~atom };
   let worklist = Vec.Value.create () in
-  Vec.Value.push worklist atom;
+  let (`Eq (a, b)) = atom in
+  Vec.Value.push worklist ((a, b), Justification.Asserted atom);
   let rec go () =
     match Vec.Value.length worklist with
     | 0 -> ()
     | _ ->
-      let (`Eq (term1, term2)) = Vec.Value.pop_exn worklist in
+      let (term1, term2), justification = Vec.Value.pop_exn worklist in
       let t1 = canonical_ufds_var t ~term:term1 in
       let t2 = canonical_ufds_var t ~term:term2 in
       (match Ufdsu.same_class t.ufdsu t1 t2 with
@@ -240,6 +307,11 @@ let assert_true_atom t ~decision_level ~(atom : Atom.t) =
            (Ufdsu.union t.ufdsu t1 t2 : Ufdsu.Undo_entry.Option_u.t)
            |> Ufdsu.Undo_entry.Option_u.value_exn
          in
+         Explanation_forest.add_edge
+           t.explanation_forest
+           ~x:t1
+           ~y:t2
+           ~justification;
          Trail_entry.Vec.push
            t.trail
            #{ decision_level; kind = Trail_entry.Kind.undo ~undo_entry ~atom };
@@ -255,8 +327,20 @@ let assert_true_atom t ~decision_level ~(atom : Atom.t) =
               with
               | true -> (* do nothing *) ()
               | false ->
-                (* need to merge *)
-                Vec.Value.push worklist (`Eq (term, canonical))));
+                (* need to merge: [term] and [canonical] have matching
+                   signatures, i.e. [f(args1) ~ f(args2)] with [args1]/[args2]
+                   pairwise congruent (already in the same class). *)
+                let justification =
+                  match (term : Term.t), (canonical : Term.t) with
+                  | ( `App (~function_, ~args:args1)
+                    , `App (~function_:_, ~args:args2) ) ->
+                    Justification.Congruence { function_; args1; args2 }
+                  | `Var _, _ | _, `Var _ ->
+                    (* [canonical_signature_term] only ever returns [This _] for
+                       terms with non-null signatures, i.e. [`App _]. *)
+                    assert false
+                in
+                Vec.Value.push worklist ((term, canonical), justification)));
          go ())
   in
   go ()
@@ -267,6 +351,7 @@ let assert_false_atom t ~decision_level ~(atom : Atom.t) =
   | true -> ()
   | false ->
     Hash_set.add t.falsehoods atom;
+    (Hashtbl.find_exn t.atoms atom).assignment <- This false;
     Trail_entry.Vec.push
       t.trail
       #{ decision_level; kind = Trail_entry.Kind.falsehood ~atom }
@@ -278,4 +363,198 @@ let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
   match value with
   | true -> assert_true_atom t ~decision_level ~atom
   | false -> assert_false_atom t ~decision_level ~atom
+;;
+
+(* BFS over the [Explanation_forest] from [from] to [to_] (both ufds vars in the
+   same class), returning the chain of justifications along the unique path
+   connecting them. *)
+let explanation_path t ~from ~to_ =
+  match from = to_ with
+  | true -> []
+  | false ->
+    let visited = Int.Hash_set.create () in
+    let came_from : (int * Justification.t) Int.Table.t = Int.Table.create () in
+    let queue = Queue.create () in
+    Hash_set.add visited from;
+    Queue.enqueue queue from;
+    let rec bfs () =
+      match Queue.dequeue queue with
+      | None -> ()
+      | Some node ->
+        List.iter
+          (Explanation_forest.neighbors t.explanation_forest node)
+          ~f:(fun (neighbor, justification) ->
+            match Hash_set.mem visited neighbor with
+            | true -> ()
+            | false ->
+              Hash_set.add visited neighbor;
+              Hashtbl.set came_from ~key:neighbor ~data:(node, justification);
+              Queue.enqueue queue neighbor);
+        bfs ()
+    in
+    bfs ();
+    let rec build acc node =
+      match node = from with
+      | true -> acc
+      | false ->
+        let prev, justification = Hashtbl.find_exn came_from node in
+        build (justification :: acc) prev
+    in
+    build [] to_
+;;
+
+(* Recursively collects, into [facts], every directly-asserted equality atom
+   used to prove [term1 ~ term2] under the current assignment. Congruence steps
+   [f(args1) ~ f(args2)] are expanded into pairwise argument equalities; [seen]
+   memoizes term pairs already explained so that shared subterms (DAG sharing)
+   don't cause exponential blowup. *)
+let rec explain t ~term1 ~term2 ~seen ~facts =
+  let v1 = ufds_var t ~term:term1 in
+  let v2 = ufds_var t ~term:term2 in
+  match v1 = v2 with
+  | true -> ()
+  | false ->
+    let path = explanation_path t ~from:v1 ~to_:v2 in
+    List.iter path ~f:(function
+      | Justification.Asserted atom -> Hash_set.add facts atom
+      | Justification.Congruence { function_ = _; args1; args2 } ->
+        List.iter2_exn args1 args2 ~f:(fun a b ->
+          let key : Term_pair.t =
+            match Ordering.of_int ([%compare: Term.t] a b) with
+            | Equal | Less -> a, b
+            | Greater -> b, a
+          in
+          match Hash_set.mem seen key with
+          | true -> ()
+          | false ->
+            Hash_set.add seen key;
+            explain t ~term1:a ~term2:b ~seen ~facts))
+;;
+
+let assert_literal t ~decision_level ~literal =
+  match Hashtbl.find t.atom_by_sat_var (Int.abs literal) with
+  | None -> (* not a theory variable *) ()
+  | Some atom -> assert_atom t ~decision_level ~atom ~value:(literal > 0)
+;;
+
+let on_new_var (_ : t) ~var:(_ : int) =
+  (* All theory atoms (and their sat vars) are registered up front in [create];
+     the theory doesn't introduce variables lazily. *)
+  ()
+;;
+
+(* Builds a clause that is the negation of [main_literal]'s complement together
+   with every asserted fact in [facts]: [main_literal] together with, for each
+   fact, the negation of whichever literal is currently asserted (i.e.
+   [-sat_var] if the fact atom is true, [+sat_var] if false). When
+   [main_literal] is currently false, this clause is falsified (a conflict);
+   when unassigned, it is unit (a propagation). [add_clause] handles both
+   uniformly. *)
+let build_lemma t ~main_literal ~(facts : Atom.Hash_set.t) = exclave_
+  let other_literals =
+    Hash_set.to_list facts
+    |> List.map ~f:(fun fact_atom ->
+      let fact_data = Hashtbl.find_exn t.atoms fact_atom in
+      match fact_data.assignment with
+      | This true -> -fact_data.sat_var
+      | This false -> fact_data.sat_var
+      | Null ->
+        (* every fact in an explanation is, by construction, a currently
+           asserted atom *)
+        assert false)
+  in
+  let clause = Array.of_list (main_literal :: other_literals) in
+  Array.sort clause ~compare:Int.compare;
+  `Lemma { Modes.Global.global = clause }
+;;
+
+(* Theory propagation/conflict detection for the theory of uninterpreted
+   functions, fully bidirectional:
+   - Conflict: a falsified atom [Eq(a,b)] whose sides have become congruent.
+   - Positive propagation: an unassigned atom [Eq(a,b)] whose sides have become
+     congruent is forced true.
+   - Negative propagation: an unassigned atom [Eq(a,b)] is forced false once
+     it's known that its sides must remain distinct, witnessed by some falsified
+     atom [Eq(x,y)] with
+     [{canonical a, canonical b} = {canonical x, canonical y}] (same-signature
+     atoms necessarily share a truth value, so this is sound and, since
+     [Eq(x,y)] is false, [a] and [b] cannot merge).
+
+   This is a lazy scan over [falsehoods]/[atoms] rather than an incrementally
+   maintained index: maintaining a class-keyed "watchers" index correctly would
+   require small-to-large merging keyed by the union-find's *own* root choice
+   (which is rank-based, not size-based, so it can't give the usual amortized
+   bound), while a [parents]-style literal-term index (mirroring [could_change]
+   above) is incomplete -- a class's membership can change via a union that
+   involves neither term literally. The scan is O(|atoms| * |falsehoods|) per
+   fixpoint, which is simple, complete, and fine in practice. *)
+let maybe_get_lemma t = exclave_
+  let find_conflict () =
+    Hash_set.to_list t.falsehoods
+    |> List.sort ~compare:Atom.compare
+    |> List.find ~f:(fun atom ->
+      let (`Eq (a, b)) = atom in
+      Ufdsu.same_class
+        t.ufdsu
+        (canonical_ufds_var t ~term:a)
+        (canonical_ufds_var t ~term:b))
+  in
+  let find_propagation () =
+    let false_signatures =
+      Hash_set.to_list t.falsehoods
+      |> List.sort ~compare:Atom.compare
+      |> List.map ~f:(fun atom ->
+        let (`Eq (x, y)) = atom in
+        atom, (canonical_ufds_var t ~term:x, canonical_ufds_var t ~term:y))
+    in
+    Hashtbl.data t.atoms
+    |> List.sort ~compare:(fun d1 d2 -> Atom.compare d1.atom d2.atom)
+    |> List.find_map ~f:(fun atom_data ->
+      match atom_data.assignment with
+      | This _ -> None
+      | Null ->
+        let (`Eq (a, b)) = atom_data.atom in
+        let ca = canonical_ufds_var t ~term:a in
+        let cb = canonical_ufds_var t ~term:b in
+        (match ca = cb with
+         | true -> Some (`Propagate_true atom_data)
+         | false ->
+           List.find_map false_signatures ~f:(fun (false_atom, (cx, cy)) ->
+             match (ca = cx && cb = cy) || (ca = cy && cb = cx) with
+             | true -> Some (`Propagate_false (atom_data, false_atom))
+             | false -> None)))
+  in
+  match find_conflict () with
+  | Some atom ->
+    let (`Eq (a, b)) = atom in
+    let atom_data = Hashtbl.find_exn t.atoms atom in
+    let facts = Atom.Hash_set.create () in
+    let seen = Term_pair.Hash_set.create () in
+    explain t ~term1:a ~term2:b ~seen ~facts;
+    build_lemma t ~main_literal:atom_data.sat_var ~facts
+  | None ->
+    (match find_propagation () with
+     | None -> `Consistent
+     | Some (`Propagate_true atom_data) ->
+       let (`Eq (a, b)) = atom_data.atom in
+       let facts = Atom.Hash_set.create () in
+       let seen = Term_pair.Hash_set.create () in
+       explain t ~term1:a ~term2:b ~seen ~facts;
+       build_lemma t ~main_literal:atom_data.sat_var ~facts
+     | Some (`Propagate_false (atom_data, false_atom)) ->
+       let (`Eq (a, b)) = atom_data.atom in
+       let (`Eq (x, y)) = false_atom in
+       let facts = Atom.Hash_set.create () in
+       Hash_set.add facts false_atom;
+       let seen = Term_pair.Hash_set.create () in
+       let ca = canonical_ufds_var t ~term:a in
+       let cx = canonical_ufds_var t ~term:x in
+       (match ca = cx with
+        | true ->
+          explain t ~term1:a ~term2:x ~seen ~facts;
+          explain t ~term1:b ~term2:y ~seen ~facts
+        | false ->
+          explain t ~term1:a ~term2:y ~seen ~facts;
+          explain t ~term1:b ~term2:x ~seen ~facts);
+       build_lemma t ~main_literal:(-atom_data.sat_var) ~facts)
 ;;
