@@ -20,6 +20,7 @@ type t =
   ; lbd_stamp_set : Stamp_set.t
   ; mutable clause_act_inc : float
   ; mutable iterations : int
+  ; theory : Theory.Packed.t or_null
   }
 
 type time_bound =
@@ -113,6 +114,17 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
 
 let pop_from_trail_exn t =
   let trail_entry = Trail_entry.Vec.pop_exn t.trail in
+  let to_decision_level =
+    match Trail_entry.Vec.length t.trail with
+    | 0 -> 0
+    | l -> (Trail_entry.Vec.get t.trail (l - 1)).#decision_level
+  in
+  if to_decision_level <> trail_entry.#decision_level
+  then (
+    match t.theory with
+    | Null -> ()
+    | This (T ((module Theory), theory)) ->
+      Theory.undo theory ~to_decision_level_excl:to_decision_level);
   undo_entry t ~trail_entry
 ;;
 
@@ -131,6 +143,13 @@ let push_trail_entry t ~(trail_entry : Trail_entry.t) =
             (trail_entry.#literal : int)
             (trail_entry.#decision_level : int)
             (t.decision_level : int)];
+    (match t.theory with
+     | Null -> ()
+     | This (T ((module Theory), theory)) ->
+       Theory.assert_literal
+         theory
+         ~decision_level:trail_entry.#decision_level
+         ~literal);
     var.assignment <- This (trail_entry.#literal > 0);
     var.trail_entry <- Trail_entry.Option_u.some trail_entry;
     Trail_entry.Vec.push t.trail trail_entry;
@@ -186,7 +205,7 @@ let update_blocker_for_watcher t ~watched_literal ~clause_idx ~blocking_literal 
            ~is_binary:watched_clause.#is_binary))
 ;;
 
-let replace_watched_literal' t ~clause_idx ~nullified_literal = exclave_
+let replace_watched_literal t ~clause_idx ~nullified_literal = exclave_
   let clause = Vec.Value.get t.clauses clause_idx in
   assert (
     nullified_literal = Vec.Value.get clause.clause 0
@@ -253,24 +272,6 @@ let replace_watched_literal' t ~clause_idx ~nullified_literal = exclave_
              ~blocking_literal:other_literal
              ~is_binary:false);
         `Replaced literal))
-;;
-
-let replace_watched_literal t ~clause_idx ~nullified_literal = exclave_
-  let res = replace_watched_literal' t ~clause_idx ~nullified_literal in
-  (* if t.debug *)
-  (* then ( *)
-  (* let clause = Vec.Value.get t.clauses clause_idx in *)
-  (* print_s *)
-  (*     [%message *)
-  (*       "replaced_watched_literal" *)
-  (* (nullified_literal : int) *)
-  (* (clause_with_assignments t ~clause : (int * bool or_null) array) *)
-  (* (res *)
-  (*          : [ `Not_replaced_not_conflict *)
-  (* | `Not_replaced_conflict of int *)
-  (* | `Replaced of int *)
-  (*            ])]); *)
-  res
 ;;
 
 let update_watches_for_assignment t ~(var : Var.t) ~literal = exclave_
@@ -343,26 +344,6 @@ let rec remove_greater_than_decision_level t ~decision_level =
     remove_greater_than_decision_level t ~decision_level)
 ;;
 
-let rec propagate t : int or_null =
-  match t.trail_processed_till < Trail_entry.Vec.length t.trail with
-  | false -> Null
-  | true ->
-    let trail_entry = Trail_entry.Vec.get t.trail t.trail_processed_till in
-    t.trail_processed_till <- t.trail_processed_till + 1;
-    let var = Vec.Value.get t.vars (Int.abs trail_entry.#literal) in
-    if t.debug
-    then
-      print_s
-        [%message "propagate: trying assignment" (trail_entry.#literal : int)];
-    (match
-       update_watches_for_assignment t ~var ~literal:trail_entry.#literal
-     with
-     | `Conflict clause_idx -> This clause_idx
-     | `No_conflict ->
-       t.stats <- #{ t.stats with propagations = t.stats.#propagations + 1 };
-       propagate t)
-;;
-
 let trail_index_of_var_exn t ~var =
   let rec go i =
     if i < 0
@@ -425,6 +406,10 @@ let ensure_literal t ~literal =
   let var = literal_var t ~literal in
   if not var.exists
   then (
+    (match t.theory with
+     | Null -> ()
+     | This (T ((module Theory), theory)) ->
+       Theory.on_new_var theory ~var:(Int.abs literal));
     Vsids.on_new_var t.vsids ~var:(Int.abs literal);
     var.exists <- true)
 ;;
@@ -529,6 +514,53 @@ let mark_literal t ~seen ~literal ~(local_ path_count) ~learned_literals =
            else Vec.Value.push learned_literals literal)))
 ;;
 
+let propagate_theory t = exclave_
+  match t.theory with
+  | Null -> `Consistent
+  | This (T ((module Theory), theory)) ->
+    (match Theory.maybe_get_lemma theory with
+     | `Consistent -> `Consistent
+     | `Lemma { global = clause } ->
+       (match
+          add_clause
+            t
+            ~literals:(Vec.Value.of_array_taking_ownership clause)
+            ~learned:true
+        with
+        | `Ok -> `Continue
+        | `Conflict _ as res -> res))
+;;
+
+let rec propagate' t : int or_null =
+  match t.trail_processed_till < Trail_entry.Vec.length t.trail with
+  | false -> Null
+  | true ->
+    let trail_entry = Trail_entry.Vec.get t.trail t.trail_processed_till in
+    t.trail_processed_till <- t.trail_processed_till + 1;
+    let var = Vec.Value.get t.vars (Int.abs trail_entry.#literal) in
+    if t.debug
+    then
+      print_s
+        [%message "propagate: trying assignment" (trail_entry.#literal : int)];
+    (match
+       update_watches_for_assignment t ~var ~literal:trail_entry.#literal
+     with
+     | `Conflict clause_idx -> This clause_idx
+     | `No_conflict ->
+       t.stats <- #{ t.stats with propagations = t.stats.#propagations + 1 };
+       propagate' t)
+;;
+
+let rec propagate t =
+  match propagate' t with
+  | This _ as res -> res
+  | Null ->
+    (match propagate_theory t with
+     | `Conflict clause_idx -> This clause_idx
+     | `Consistent -> Null
+     | `Continue -> propagate t)
+;;
+
 let simplify_learned_clause t ~learned_literals ~uip_literal ~seen =
   (* just don't add redundant literals
 
@@ -601,50 +633,80 @@ let analyze_conflict t ~(failed_clause : Clause.t) ~failed_clause_idx =
         "analyze_conflict"
           ~failed_clause:(clause_to_array failed_clause : int array)
           (failed_clause_with_assignments : (int * bool or_null) array)];
-  let found_uip = ref false in
-  let uip_literal = ref 0 in
-  let i = ref (Trail_entry.Vec.length t.trail - 1) in
-  while !i >= 0 && not !found_uip do
-    let trail_entry = Trail_entry.Vec.get t.trail !i in
-    let literal = trail_entry.#literal in
-    if Stamp_set.is_seen seen ~var:(Int.abs literal)
-       && trail_entry.#decision_level = t.decision_level
-    then (
-      Stamp_set.clear_seen seen ~var:(Int.abs literal);
-      decr path_count;
-      if !path_count = 0
+  match !path_count = 0 && Vec.Value.length learned_literals > 0 with
+  | true ->
+    (* No literal of the failed clause sits at the current decision level --
+       e.g. a freshly-added unit clause directly conflicts with an
+       assumption-decision from an earlier level (possible when multiple
+       assumptions each occupy their own decision level). There is no 1UIP at
+       [t.decision_level] to search for: every falsified literal already
+       collected into [learned_literals] comes from a strictly lower
+       decision level. Treat the one with the highest decision level as the
+       asserting literal (its negation becomes the learned unit/clause's
+       UIP), so backjumping lands just below it. *)
+    if !needs_rescale then rescale_clause_activities t;
+    (let best_idx = ref 0 in
+       let best_dl = ref (-1) in
+       Vec.Value.iteri learned_literals ~f:(fun i literal ->
+         let var = literal_var t ~literal in
+         match%optional_u (var.trail_entry : Trail_entry.Option_u.t) with
+         | None -> ()
+         | Some trail_entry ->
+           let dl = trail_entry.#decision_level in
+           if dl > !best_dl
+           then (
+             best_dl := dl;
+             best_idx := i));
+       let uip_trail_literal = Vec.Value.get learned_literals !best_idx in
+       let uip_literal = -uip_trail_literal in
+       Vec.Value.swap learned_literals 0 !best_idx;
+       Vec.Value.set learned_literals 0 uip_literal;
+       simplify_learned_clause ~learned_literals ~uip_literal ~seen t)
+  | false ->
+    let found_uip = ref false in
+    let uip_literal = ref 0 in
+    let i = ref (Trail_entry.Vec.length t.trail - 1) in
+    while !i >= 0 && not !found_uip do
+      let trail_entry = Trail_entry.Vec.get t.trail !i in
+      let literal = trail_entry.#literal in
+      if Stamp_set.is_seen seen ~var:(Int.abs literal)
+         && trail_entry.#decision_level = t.decision_level
       then (
-        found_uip := true;
-        uip_literal := -literal)
-      else (
-        match trail_entry.#reason with
-        | T #(Decision, ()) -> failwith "found decision before reaching UIP"
-        | T #(Clause_idx, clause_idx) ->
-          needs_rescale := add_clause_activity t ~clause_idx || !needs_rescale;
-          let clause = Vec.Value.get t.clauses clause_idx in
-          if t.debug
-          then
-            print_s
-              [%message
-                "analyze_conflict"
-                  ~learned:(Vec.Value.to_array learned_literals : int array)
-                  ~see:(clause_to_array clause : int array)
-                  (literal : int)
-                  (!path_count : int)];
-          Vec.Value.iter clause.clause ~f:(fun reason_literal ->
-            if Int.abs reason_literal <> Int.abs literal
-            then mark_literal reason_literal)));
-    decr i
-  done;
-  if not !found_uip then failwith "conflict analysis failed to find UIP";
-  if !needs_rescale then rescale_clause_activities t;
-  let uip_literal = !uip_literal in
-  if Vec.Value.length learned_literals = 0
-  then Vec.Value.push learned_literals uip_literal
-  else (
-    Vec.Value.push learned_literals (Vec.Value.get learned_literals 0);
-    Vec.Value.set learned_literals 0 uip_literal);
-  simplify_learned_clause ~learned_literals ~uip_literal ~seen t
+        Stamp_set.clear_seen seen ~var:(Int.abs literal);
+        decr path_count;
+        if !path_count = 0
+        then (
+          found_uip := true;
+          uip_literal := -literal)
+        else (
+          match trail_entry.#reason with
+          | T #(Decision, ()) -> failwith "found decision before reaching UIP"
+          | T #(Clause_idx, clause_idx) ->
+            needs_rescale := add_clause_activity t ~clause_idx || !needs_rescale;
+            let clause = Vec.Value.get t.clauses clause_idx in
+            if t.debug
+            then
+              print_s
+                [%message
+                  "analyze_conflict"
+                    ~learned:(Vec.Value.to_array learned_literals : int array)
+                    ~see:(clause_to_array clause : int array)
+                    (literal : int)
+                    (!path_count : int)];
+            Vec.Value.iter clause.clause ~f:(fun reason_literal ->
+              if Int.abs reason_literal <> Int.abs literal
+              then mark_literal reason_literal)));
+      decr i
+    done;
+    if not !found_uip then failwith "conflict analysis failed to find UIP";
+    if !needs_rescale then rescale_clause_activities t;
+    let uip_literal = !uip_literal in
+    if Vec.Value.length learned_literals = 0
+    then Vec.Value.push learned_literals uip_literal
+    else (
+      Vec.Value.push learned_literals (Vec.Value.get learned_literals 0);
+      Vec.Value.set learned_literals 0 uip_literal);
+    simplify_learned_clause ~learned_literals ~uip_literal ~seen t
 ;;
 
 let rec luby_value i =
@@ -920,6 +982,13 @@ let maybe_clear_past_solve_state t =
   if has_run_before
   then (
     if t.debug then print_endline "restarting";
+    (* Between [solve] calls there are no active assumptions: reset to 0 so
+       [restart] pops the trail all the way back to decision level 0, rather
+       than leaving behind decision-level-1 (etc.) entries from the previous
+       [solve]'s assumptions. Otherwise those stale entries would coexist
+       with the next [solve]'s own (unrelated) decision-level-1 entries,
+       breaking the 1UIP invariant in [analyze_conflict]. *)
+    t.decision_level_of_last_assumption <- 0;
     restart t)
 ;;
 
@@ -947,7 +1016,11 @@ let%template solve ?(time_bound = `Unlimited) ?(local_ assumptions = [||]) t
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
-let create ?(random_state = Random.State.make [| 1; 2; 3 |]) ?(debug = false) ()
+let create
+  ?theory
+  ?(random_state = Random.State.make [| 1; 2; 3 |])
+  ?(debug = false)
+  ()
   =
   let _ = random_state in
   { trail = Trail_entry.Vec.create ()
@@ -967,6 +1040,10 @@ let create ?(random_state = Random.State.make [| 1; 2; 3 |]) ?(debug = false) ()
   ; lbd_stamp_set = Stamp_set.create ()
   ; clause_act_inc = 1.0
   ; iterations = 0
+  ; theory =
+      (match theory with
+       | None -> Null
+       | Some packed -> This packed)
   }
 ;;
 
@@ -982,8 +1059,8 @@ let add_clause t ~clause =
   | `Conflict failed_clause_idx -> `Unsat (unsat_core t failed_clause_idx)
 ;;
 
-let create_with_formula ?(local_ debug) formula =
-  let t = create ?debug () in
+let create_with_formula ?theory ?(local_ debug) formula =
+  let t = create ?theory ?debug () in
   let unsat_core = stack_ (ref Null) in
   Array.iter formula ~f:(fun clause ->
     match !unsat_core with

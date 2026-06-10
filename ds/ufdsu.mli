@@ -1,0 +1,39 @@
+open! Core
+
+type t [@@deriving sexp_of]
+
+module Undo_entry : sig
+  type t =
+    #{ child : int
+     ; new_root : int
+     ; rank_incremented : bool
+     }
+  [@@deriving sexp_of]
+
+  module Option_u :
+    Option_u.S [@kind value & value & value] with type Elt.t := t
+end
+
+val create : ?capacity:int -> unit -> t
+val add : t -> int
+
+(** [find t x] returns the representative of [x]'s class. O(log n). Auto-expands
+    if [x] is beyond the current capacity. *)
+val find : t -> int -> int
+
+(** [union t x y] merges the classes of [x] and [y] and records the merge on the
+    internal trail. Returns [true] if they were in different classes.
+    Auto-expands as needed. *)
+val union : t -> int -> int -> Undo_entry.Option_u.t
+
+val same_class : t -> int -> int -> bool
+
+(** [iter_class t x ~f] calls [f] on every element in the same class as [x],
+    including [x] itself. Order is unspecified. *)
+val iter_class : t -> int -> f:(int -> unit) @ local -> unit
+
+(** Number of elements added so far. *)
+val size : t -> int
+
+(** needs to be in lifo order of undo entry returns from union *)
+val undo : t -> undo_entry:Undo_entry.t -> unit

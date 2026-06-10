@@ -9,6 +9,7 @@ module type%template
       , (value & value) & value & value
       , float64
       , immediate & value & value
+      , (value & value & value) & value
       , bits64 & bits64
       , bits64 & bits64 & bits64
       , bits64 & bits64 & immediate & immediate & bits64
@@ -26,8 +27,22 @@ module type%template [@kind k = (value & value)] Elt = sig
   val create_for_vec : unit -> t
 end
 
-(* ppx_template cannot spell right-nested products in [@kind ...], so types whose
-   concrete layout is nested must use the corresponding flattened surface
+module type%template
+  [@kind k = ((value & value & value & value) & value)] Elt = sig
+  type t : (value & (value & value & value)) & value
+
+  val create_for_vec : unit -> t
+end
+
+module type%template
+  [@kind k = ((value & (value & value & value) & value) & value)] Elt = sig
+  type t : (value & ((value & value & value) & value)) & value
+
+  val create_for_vec : unit -> t
+end
+
+(* ppx_template cannot spell right-nested products in [@kind ...], so types
+   whose concrete layout is nested must use the corresponding flattened surface
    product here. Keep this case non-[external_] so concrete types like
    [lib2/var.ml] can instantiate it directly. *)
 module type%template
@@ -49,10 +64,13 @@ module type%template
       , bits64
       , bits64 & bits64
       , bits64 & bits64 & bits64
+      , (value & value & value) & value
       , bits64 & bits64 & immediate & immediate & bits64
       , bits64 & bits64 & value & value & bits64
       , (value & value) & value & value
-      , (value & value & bits64) & bits64 & bits64 )] S = sig
+      , (value & value & bits64) & bits64 & bits64
+      , (value & value & value & value) & value
+      , (value & (value & value & value) & value) & value )] S = sig
   module Elt : Elt [@kind k]
 
   type t
@@ -181,8 +199,11 @@ module type Vec = sig
         , value & (value & value) & value & (value & value) & value
         , bits64 & bits64 & bits64
         , bits64 & bits64 & immediate & immediate & bits64
+        , (value & value & value) & value
         , bits64 & bits64 & value & value & bits64
-        , (value & value & bits64) & bits64 & bits64 )] S = S [@kind k]
+        , (value & value & bits64) & bits64 & bits64
+        , (value & value & value & value) & value
+        , (value & (value & value & value) & value) & value )] S = S [@kind k]
 
   module%template
     [@kind
@@ -198,8 +219,11 @@ module type Vec = sig
         , immediate & value & value
         , bits64 & bits64 & bits64
         , bits64 & bits64 & immediate & immediate & bits64
+        , (value & value & value) & value
         , bits64 & bits64 & value & value & bits64
-        , (value & value & bits64) & bits64 & bits64 )] Make
+        , (value & value & bits64) & bits64 & bits64
+        , (value & value & value & value) & value
+        , (value & (value & value & value) & value) & value )] Make
       (Arg : Elt
     [@kind k]) : S [@kind k] with module Elt = Arg
 

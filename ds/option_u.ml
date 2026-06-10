@@ -7,6 +7,7 @@ module type%template
     k
     = ( value
       , value & value
+      , value & value & value
       , bits64
       , bits64 & bits64
       , value & bits64
@@ -27,6 +28,7 @@ module%template
     k
     = ( value
       , value & value
+      , value & value & value
       , bits64
       , (value & value) & value & value
       , bits64 & bits64
@@ -88,6 +90,7 @@ module%template
     k
     = ( value
       , value & value
+      , value & value & value
       , bits64
       , (value & value) & value & value
       , bits64 & bits64
