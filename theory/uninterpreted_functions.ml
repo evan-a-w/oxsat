@@ -1,31 +1,6 @@
 open! Core
 open! Feel.Import
 
-module Term = struct
-  type t =
-    [ `App of function_:Tvar.t * args:t list
-    | `Var of Tvar.t
-    ]
-  [@@deriving sexp, compare, hash]
-
-  include functor Comparable.Make
-  include functor Hashable.Make
-end
-
-module Atom = struct
-  type t = [ `Eq of Term.t * Term.t ] [@@deriving sexp, compare, hash]
-
-  let normalize = function
-    | `Eq (a, b) as x ->
-      (match Ordering.of_int ([%compare: Term.t] a b) with
-       | Equal | Less -> x
-       | Greater -> `Eq (b, a))
-  ;;
-
-  include functor Comparable.Make
-  include functor Hashable.Make
-end
-
 module Atom_data = struct
   type t =
     { atom : Atom.t
@@ -150,7 +125,6 @@ type t =
   ; parents : Term.Hash_set.t Term.Table.t
   ; explanation_forest : Explanation_forest.t
   ; trail : Trail_entry.Vec.t
-  ; mutable trail_entry_processed_till : int
   ; falsehoods : Atom.Hash_set.t
   ; mutable current_decision_level : int
   }
@@ -194,52 +168,6 @@ let signature t ~(term : Term.t) : Signature.t or_null =
     This { function_; args }
 ;;
 
-let create ~atoms =
-  let ufds_var_by_term = Term.Table.create () in
-  let signature_to_canonical = Signature.Table.create () in
-  let parents = Term.Table.create () in
-  let ufdsu = Ufdsu.create () in
-  let on_term term =
-    match Hashtbl.find ufds_var_by_term term with
-    | Some _ -> ()
-    | None ->
-      let ufds_var = Ufdsu.add ufdsu in
-      Hashtbl.set ufds_var_by_term ~key:term ~data:ufds_var;
-      (match (term : Term.t) with
-       | `Var _ -> ()
-       | `App (~function_:_, ~args) ->
-         List.iter args ~f:(fun arg ->
-           let parents =
-             Hashtbl.find_or_add parents arg ~default:Term.Hash_set.create
-           in
-           Hash_set.add parents term))
-  in
-  let atom_by_sat_var = Int.Table.create () in
-  let atoms =
-    List.map atoms ~f:(fun (atom, sat_var) : (Atom.t * Atom_data.t) ->
-      let atom = Atom.normalize atom in
-      (match atom with
-       | `Eq (a, b) ->
-         on_term a;
-         on_term b);
-      Hashtbl.set atom_by_sat_var ~key:sat_var ~data:atom;
-      atom, { atom; sat_var; assignment = Null })
-    |> Atom.Table.of_alist_exn
-  in
-  { ufds_var_by_term
-  ; ufdsu
-  ; atoms
-  ; atom_by_sat_var
-  ; parents
-  ; explanation_forest = Explanation_forest.create ()
-  ; trail = Trail_entry.Vec.create ()
-  ; trail_entry_processed_till = 0
-  ; signature_to_canonical
-  ; falsehoods = Atom.Hash_set.create ()
-  ; current_decision_level = 0
-  }
-;;
-
 let canonical_signature_term t ~term : Term.t or_null =
   match signature t ~term:(term : Term.t) with
   | Null -> Null
@@ -258,15 +186,14 @@ let canonical_signature_term t ~term : Term.t or_null =
       [@nontail])
 ;;
 
-let assert_true_atom t ~decision_level ~(atom : Atom.t) =
-  let atom_data = Hashtbl.find_exn t.atoms atom in
-  atom_data.assignment <- This true;
-  Trail_entry.Vec.push
-    t.trail
-    #{ decision_level; kind = Trail_entry.Kind.truth ~atom };
-  let worklist = Vec.Value.create () in
-  let (`Eq (a, b)) = atom in
-  Vec.Value.push worklist ((a, b), Justification.Asserted atom);
+(* Processes [worklist] (pairs of terms known to be congruent, with the
+   justification for why), unioning their ufds classes and propagating any
+   resulting congruences transitively (e.g. merging [a]/[b] may make
+   [f(a)]/[f(b)] congruent, which is pushed back onto the worklist). Used both
+   when an equality atom is asserted true (seeded with that atom's two sides)
+   and when a newly-registered term's signature already matches an existing
+   canonical term (seeded with that pair). *)
+let propagate_congruence t ~decision_level ~(atom : Atom.t) ~worklist =
   let rec go () =
     match Vec.Value.length worklist with
     | 0 -> ()
@@ -344,6 +271,93 @@ let assert_true_atom t ~decision_level ~(atom : Atom.t) =
          go ())
   in
   go ()
+;;
+
+(* Registers [term] (and, transitively, the [parents] links from its
+   arguments to it) in the union-find and term tables, if not already
+   present. If [term] is an [App] whose signature (under the current
+   union-find) already matches a different canonical term, propagates the
+   resulting congruence (e.g. registering [f(x)] after [x ~ y] is already
+   known, with [f(y)] already registered, immediately merges [f(x)] and
+   [f(y)]). Used by both [create] and [add_atom]. *)
+let rec register_term t ~decision_level ~(atom : Atom.t) ~(term : Term.t) =
+  match Hashtbl.find t.ufds_var_by_term term with
+  | Some _ -> ()
+  | None ->
+    (match term with
+     | `Var _ -> ()
+     | `App (~function_:_, ~args) ->
+       List.iter args ~f:(fun arg -> register_term t ~decision_level ~atom ~term:arg));
+    let ufds_var = Ufdsu.add t.ufdsu in
+    Hashtbl.set t.ufds_var_by_term ~key:term ~data:ufds_var;
+    (match term with
+     | `Var _ -> ()
+     | `App (~function_, ~args) ->
+       List.iter args ~f:(fun arg ->
+         let parents =
+           Hashtbl.find_or_add t.parents arg ~default:Term.Hash_set.create
+         in
+         Hash_set.add parents term);
+       (match canonical_signature_term t ~term with
+        | Null -> ()
+        | This canonical when [%equal: Term.t] canonical term -> ()
+        | This canonical ->
+          let justification =
+            match (canonical : Term.t) with
+            | `App (~function_:_, ~args:args2) ->
+              Justification.Congruence { function_; args1 = args; args2 }
+            | `Var _ ->
+              (* [canonical_signature_term] only ever returns [This _] for
+                 terms with non-null signatures, i.e. [`App _]. *)
+              assert false
+          in
+          let worklist = Vec.Value.create () in
+          Vec.Value.push worklist ((term, canonical), justification);
+          propagate_congruence t ~decision_level ~atom ~worklist))
+;;
+
+(* Registers [atom] (and its terms) under [sat_var]. Used by both [create]
+   and [add_atom]. *)
+let register_atom t ~(atom : Atom.t) ~sat_var =
+  let atom = Atom.normalize atom in
+  let (`Eq (a, b)) = atom in
+  let decision_level = t.current_decision_level in
+  register_term t ~decision_level ~atom ~term:a;
+  register_term t ~decision_level ~atom ~term:b;
+  Hashtbl.set t.atom_by_sat_var ~key:sat_var ~data:atom;
+  Hashtbl.set t.atoms ~key:atom ~data:{ atom; sat_var; assignment = Null }
+;;
+
+let create ~atoms =
+  let t =
+    { ufds_var_by_term = Term.Table.create ()
+    ; ufdsu = Ufdsu.create ()
+    ; atoms = Atom.Table.create ()
+    ; atom_by_sat_var = Int.Table.create ()
+    ; parents = Term.Table.create ()
+    ; explanation_forest = Explanation_forest.create ()
+    ; trail = Trail_entry.Vec.create ()
+    ; signature_to_canonical = Signature.Table.create ()
+    ; falsehoods = Atom.Hash_set.create ()
+    ; current_decision_level = 0
+    }
+  in
+  List.iter atoms ~f:(fun (atom, sat_var) -> register_atom t ~atom ~sat_var);
+  t
+;;
+
+let add_atom t ~atom ~sat_var = register_atom t ~atom ~sat_var
+
+let assert_true_atom t ~decision_level ~(atom : Atom.t) =
+  let atom_data = Hashtbl.find_exn t.atoms atom in
+  atom_data.assignment <- This true;
+  Trail_entry.Vec.push
+    t.trail
+    #{ decision_level; kind = Trail_entry.Kind.truth ~atom };
+  let worklist = Vec.Value.create () in
+  let (`Eq (a, b)) = atom in
+  Vec.Value.push worklist ((a, b), Justification.Asserted atom);
+  propagate_congruence t ~decision_level ~atom ~worklist
 ;;
 
 let assert_false_atom t ~decision_level ~(atom : Atom.t) =

@@ -633,50 +633,80 @@ let analyze_conflict t ~(failed_clause : Clause.t) ~failed_clause_idx =
         "analyze_conflict"
           ~failed_clause:(clause_to_array failed_clause : int array)
           (failed_clause_with_assignments : (int * bool or_null) array)];
-  let found_uip = ref false in
-  let uip_literal = ref 0 in
-  let i = ref (Trail_entry.Vec.length t.trail - 1) in
-  while !i >= 0 && not !found_uip do
-    let trail_entry = Trail_entry.Vec.get t.trail !i in
-    let literal = trail_entry.#literal in
-    if Stamp_set.is_seen seen ~var:(Int.abs literal)
-       && trail_entry.#decision_level = t.decision_level
-    then (
-      Stamp_set.clear_seen seen ~var:(Int.abs literal);
-      decr path_count;
-      if !path_count = 0
+  match !path_count = 0 && Vec.Value.length learned_literals > 0 with
+  | true ->
+    (* No literal of the failed clause sits at the current decision level --
+       e.g. a freshly-added unit clause directly conflicts with an
+       assumption-decision from an earlier level (possible when multiple
+       assumptions each occupy their own decision level). There is no 1UIP at
+       [t.decision_level] to search for: every falsified literal already
+       collected into [learned_literals] comes from a strictly lower
+       decision level. Treat the one with the highest decision level as the
+       asserting literal (its negation becomes the learned unit/clause's
+       UIP), so backjumping lands just below it. *)
+    if !needs_rescale then rescale_clause_activities t;
+    (let best_idx = ref 0 in
+       let best_dl = ref (-1) in
+       Vec.Value.iteri learned_literals ~f:(fun i literal ->
+         let var = literal_var t ~literal in
+         match%optional_u (var.trail_entry : Trail_entry.Option_u.t) with
+         | None -> ()
+         | Some trail_entry ->
+           let dl = trail_entry.#decision_level in
+           if dl > !best_dl
+           then (
+             best_dl := dl;
+             best_idx := i));
+       let uip_trail_literal = Vec.Value.get learned_literals !best_idx in
+       let uip_literal = -uip_trail_literal in
+       Vec.Value.swap learned_literals 0 !best_idx;
+       Vec.Value.set learned_literals 0 uip_literal;
+       simplify_learned_clause ~learned_literals ~uip_literal ~seen t)
+  | false ->
+    let found_uip = ref false in
+    let uip_literal = ref 0 in
+    let i = ref (Trail_entry.Vec.length t.trail - 1) in
+    while !i >= 0 && not !found_uip do
+      let trail_entry = Trail_entry.Vec.get t.trail !i in
+      let literal = trail_entry.#literal in
+      if Stamp_set.is_seen seen ~var:(Int.abs literal)
+         && trail_entry.#decision_level = t.decision_level
       then (
-        found_uip := true;
-        uip_literal := -literal)
-      else (
-        match trail_entry.#reason with
-        | T #(Decision, ()) -> failwith "found decision before reaching UIP"
-        | T #(Clause_idx, clause_idx) ->
-          needs_rescale := add_clause_activity t ~clause_idx || !needs_rescale;
-          let clause = Vec.Value.get t.clauses clause_idx in
-          if t.debug
-          then
-            print_s
-              [%message
-                "analyze_conflict"
-                  ~learned:(Vec.Value.to_array learned_literals : int array)
-                  ~see:(clause_to_array clause : int array)
-                  (literal : int)
-                  (!path_count : int)];
-          Vec.Value.iter clause.clause ~f:(fun reason_literal ->
-            if Int.abs reason_literal <> Int.abs literal
-            then mark_literal reason_literal)));
-    decr i
-  done;
-  if not !found_uip then failwith "conflict analysis failed to find UIP";
-  if !needs_rescale then rescale_clause_activities t;
-  let uip_literal = !uip_literal in
-  if Vec.Value.length learned_literals = 0
-  then Vec.Value.push learned_literals uip_literal
-  else (
-    Vec.Value.push learned_literals (Vec.Value.get learned_literals 0);
-    Vec.Value.set learned_literals 0 uip_literal);
-  simplify_learned_clause ~learned_literals ~uip_literal ~seen t
+        Stamp_set.clear_seen seen ~var:(Int.abs literal);
+        decr path_count;
+        if !path_count = 0
+        then (
+          found_uip := true;
+          uip_literal := -literal)
+        else (
+          match trail_entry.#reason with
+          | T #(Decision, ()) -> failwith "found decision before reaching UIP"
+          | T #(Clause_idx, clause_idx) ->
+            needs_rescale := add_clause_activity t ~clause_idx || !needs_rescale;
+            let clause = Vec.Value.get t.clauses clause_idx in
+            if t.debug
+            then
+              print_s
+                [%message
+                  "analyze_conflict"
+                    ~learned:(Vec.Value.to_array learned_literals : int array)
+                    ~see:(clause_to_array clause : int array)
+                    (literal : int)
+                    (!path_count : int)];
+            Vec.Value.iter clause.clause ~f:(fun reason_literal ->
+              if Int.abs reason_literal <> Int.abs literal
+              then mark_literal reason_literal)));
+      decr i
+    done;
+    if not !found_uip then failwith "conflict analysis failed to find UIP";
+    if !needs_rescale then rescale_clause_activities t;
+    let uip_literal = !uip_literal in
+    if Vec.Value.length learned_literals = 0
+    then Vec.Value.push learned_literals uip_literal
+    else (
+      Vec.Value.push learned_literals (Vec.Value.get learned_literals 0);
+      Vec.Value.set learned_literals 0 uip_literal);
+    simplify_learned_clause ~learned_literals ~uip_literal ~seen t
 ;;
 
 let rec luby_value i =
@@ -952,6 +982,13 @@ let maybe_clear_past_solve_state t =
   if has_run_before
   then (
     if t.debug then print_endline "restarting";
+    (* Between [solve] calls there are no active assumptions: reset to 0 so
+       [restart] pops the trail all the way back to decision level 0, rather
+       than leaving behind decision-level-1 (etc.) entries from the previous
+       [solve]'s assumptions. Otherwise those stale entries would coexist
+       with the next [solve]'s own (unrelated) decision-level-1 entries,
+       breaking the 1UIP invariant in [analyze_conflict]. *)
+    t.decision_level_of_last_assumption <- 0;
     restart t)
 ;;
 
