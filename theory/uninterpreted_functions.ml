@@ -273,13 +273,13 @@ let propagate_congruence t ~decision_level ~(atom : Atom.t) ~worklist =
   go ()
 ;;
 
-(* Registers [term] (and, transitively, the [parents] links from its
-   arguments to it) in the union-find and term tables, if not already
-   present. If [term] is an [App] whose signature (under the current
-   union-find) already matches a different canonical term, propagates the
-   resulting congruence (e.g. registering [f(x)] after [x ~ y] is already
-   known, with [f(y)] already registered, immediately merges [f(x)] and
-   [f(y)]). Used by both [create] and [add_atom]. *)
+(* Registers [term] (and, transitively, the [parents] links from its arguments
+   to it) in the union-find and term tables, if not already present. If [term]
+   is an [App] whose signature (under the current union-find) already matches a
+   different canonical term, propagates the resulting congruence (e.g.
+   registering [f(x)] after [x ~ y] is already known, with [f(y)] already
+   registered, immediately merges [f(x)] and [f(y)]). Used by both [create] and
+   [add_atom]. *)
 let rec register_term t ~decision_level ~(atom : Atom.t) ~(term : Term.t) =
   match Hashtbl.find t.ufds_var_by_term term with
   | Some _ -> ()
@@ -287,7 +287,8 @@ let rec register_term t ~decision_level ~(atom : Atom.t) ~(term : Term.t) =
     (match term with
      | `Var _ -> ()
      | `App (~function_:_, ~args) ->
-       List.iter args ~f:(fun arg -> register_term t ~decision_level ~atom ~term:arg));
+       List.iter args ~f:(fun arg ->
+         register_term t ~decision_level ~atom ~term:arg));
     let ufds_var = Ufdsu.add t.ufdsu in
     Hashtbl.set t.ufds_var_by_term ~key:term ~data:ufds_var;
     (match term with
@@ -307,8 +308,8 @@ let rec register_term t ~decision_level ~(atom : Atom.t) ~(term : Term.t) =
             | `App (~function_:_, ~args:args2) ->
               Justification.Congruence { function_; args1 = args; args2 }
             | `Var _ ->
-              (* [canonical_signature_term] only ever returns [This _] for
-                 terms with non-null signatures, i.e. [`App _]. *)
+              (* [canonical_signature_term] only ever returns [This _] for terms
+                 with non-null signatures, i.e. [`App _]. *)
               assert false
           in
           let worklist = Vec.Value.create () in
@@ -316,8 +317,8 @@ let rec register_term t ~decision_level ~(atom : Atom.t) ~(term : Term.t) =
           propagate_congruence t ~decision_level ~atom ~worklist))
 ;;
 
-(* Registers [atom] (and its terms) under [sat_var]. Used by both [create]
-   and [add_atom]. *)
+(* Registers [atom] (and its terms) under [sat_var]. Used by both [create] and
+   [add_atom]. *)
 let register_atom t ~(atom : Atom.t) ~sat_var =
   let atom = Atom.normalize atom in
   let (`Eq (a, b)) = atom in
@@ -482,8 +483,8 @@ let build_lemma t ~main_literal ~(facts : Atom.Hash_set.t) = exclave_
   `Lemma { Modes.Global.global = clause }
 ;;
 
-(* Theory propagation/conflict detection for the theory of uninterpreted
-   functions, fully bidirectional:
+(* Theory propagation/conflict detection
+
    - Conflict: a falsified atom [Eq(a,b)] whose sides have become congruent.
    - Positive propagation: an unassigned atom [Eq(a,b)] whose sides have become
      congruent is forced true.
@@ -494,14 +495,7 @@ let build_lemma t ~main_literal ~(facts : Atom.Hash_set.t) = exclave_
      atoms necessarily share a truth value, so this is sound and, since
      [Eq(x,y)] is false, [a] and [b] cannot merge).
 
-   This is a lazy scan over [falsehoods]/[atoms] rather than an incrementally
-   maintained index: maintaining a class-keyed "watchers" index correctly would
-   require small-to-large merging keyed by the union-find's *own* root choice
-   (which is rank-based, not size-based, so it can't give the usual amortized
-   bound), while a [parents]-style literal-term index (mirroring [could_change]
-   above) is incomplete -- a class's membership can change via a union that
-   involves neither term literally. The scan is O(|atoms| * |falsehoods|) per
-   fixpoint, which is simple, complete, and fine in practice. *)
+   This is not computed incrementally. *)
 let maybe_get_lemma t = exclave_
   let find_conflict () =
     Hash_set.to_list t.falsehoods
