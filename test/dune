@@ -3,6 +3,6 @@
  (preprocess
   (pps ppx_jane))
  (inline_tests)
- (libraries core core_unix feel examples)
+ (libraries core core_unix feel examples theory)
  (flags
   (:standard -extension-universe beta)))

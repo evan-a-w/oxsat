@@ -1,5 +1,6 @@
 open! Core
 open! Feel.Import
+open! Theory
 
 let x = `Var (Tvar.of_string "x")
 let y = `Var (Tvar.of_string "y")
