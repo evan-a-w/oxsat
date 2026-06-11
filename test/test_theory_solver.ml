@@ -10,9 +10,7 @@ let eq a b : Formula.t = Atom (`Eq (a, b))
 let neq a b : Formula.t = Not (eq a b)
 
 let print_result (result : Feel.Sat_result.t) =
-  match result with
-  | Sat _ -> print_endline "SAT"
-  | Unsat _ -> print_endline "UNSAT"
+  print_s [%sexp (result : Feel.Sat_result.t)]
 ;;
 
 let assert_ok solver formula =
@@ -45,8 +43,7 @@ let%expect_test "Atom.normalize orders Eq sides canonically" =
   let b = `Eq (y, x) in
   print_s [%sexp (sexp_of_atom (Atom.normalize a) : Sexp.t)];
   print_s [%sexp (sexp_of_atom (Atom.normalize b) : Sexp.t)];
-  [%expect
-    {|
+  [%expect {|
     (Eq (Var x) (Var y))
     (Eq (Var x) (Var y))
     |}]
@@ -63,14 +60,13 @@ let%expect_test "Term/Atom sexp round trip" =
 let%expect_test "Tseitin: simple propositional formula matches truth table" =
   let a = `Eq (x, x) in
   let b = `Eq (y, y) in
-  let formula : Formula.t =
-    And [ Atom a; Or [ Atom b; Not (Atom a) ] ]
-  in
+  let formula : Formula.t = And [ Atom a; Or [ Atom b; Not (Atom a) ] ] in
   let encoding = Formula.Encoding.create () in
   let clauses = Formula.encode encoding formula in
   let solver = Feel.Solver.create () in
   List.iter clauses ~f:(fun clause ->
-    ignore (Feel.Solver.add_clause solver ~clause : [ `Ok | `Unsat of int array ]));
+    ignore
+      (Feel.Solver.add_clause solver ~clause : [ `Ok | `Unsat of int array ]));
   let result = Feel.Solver.solve solver in
   let var_a = Formula.Encoding.sat_var_for_atom encoding a in
   let var_b = Formula.Encoding.sat_var_for_atom encoding b in
@@ -89,7 +85,8 @@ let%expect_test "Tseitin: simple propositional formula matches truth table" =
   [%expect {| (SAT (var_a 1) (var_b 2) (a (true)) (b (true))) |}]
 ;;
 
-let%expect_test "Tseitin: atom -> sat_var mapping is stable across encode calls" =
+let%expect_test "Tseitin: atom -> sat_var mapping is stable across encode calls"
+  =
   let a = `Eq (x, y) in
   let encoding = Formula.Encoding.create () in
   let (_ : int array list) = Formula.encode encoding (Atom a) in
@@ -104,15 +101,14 @@ let%expect_test "Tseitin: True/False and double negation" =
   let encoding = Formula.Encoding.create () in
   let solver = Feel.Solver.create () in
   let assert_formula formula =
-    List.iter
-      (Formula.encode encoding formula)
-      ~f:(fun clause ->
-        ignore (Feel.Solver.add_clause solver ~clause : [ `Ok | `Unsat of int array ]))
+    List.iter (Formula.encode encoding formula) ~f:(fun clause ->
+      ignore
+        (Feel.Solver.add_clause solver ~clause : [ `Ok | `Unsat of int array ]))
   in
   assert_formula True;
   assert_formula (Not (Not True));
   print_result (Feel.Solver.solve solver);
-  [%expect {| SAT |}]
+  [%expect {| (Sat (assignments (() (true)))) |}]
 ;;
 
 let%expect_test "Tseitin: False is unsatisfiable" =
@@ -134,15 +130,14 @@ let%expect_test "Tseitin: And [] is True, Or [] is False" =
   let encoding = Formula.Encoding.create () in
   let solver = Feel.Solver.create () in
   let assert_formula formula =
-    List.iter
-      (Formula.encode encoding formula)
-      ~f:(fun clause ->
-        ignore (Feel.Solver.add_clause solver ~clause : [ `Ok | `Unsat of int array ]))
+    List.iter (Formula.encode encoding formula) ~f:(fun clause ->
+      ignore
+        (Feel.Solver.add_clause solver ~clause : [ `Ok | `Unsat of int array ]))
   in
   assert_formula (And []);
   assert_formula (Not (Or []));
   print_result (Feel.Solver.solve solver);
-  [%expect {| SAT |}]
+  [%expect {| (Sat (assignments (() (true) (false)))) |}]
 ;;
 
 let%expect_test "Tseitin: Or [] (False) contradicts True" =
@@ -166,12 +161,12 @@ let%expect_test "pure boolean formula (no theory atoms)" =
   let a = `Eq (x, x) in
   let b = `Eq (y, y) in
   let solver = Solver.create () in
-  (* (a \/ b) /\ (~a \/ b) /\ (a \/ ~b)  =>  b must be true *)
+  (* (a \/ b) /\ (~a \/ b) /\ (a \/ ~b) => b must be true *)
   assert_ok solver (Or [ Atom a; Atom b ]);
   assert_ok solver (Or [ Not (Atom a); Atom b ]);
   assert_ok solver (Or [ Atom a; Not (Atom b) ]);
   print_result (Solver.solve solver);
-  [%expect {| SAT |}]
+  [%expect {| (Sat (assignments (() (true) (true) (true) (true) (true)))) |}]
 ;;
 
 let%expect_test "EUF: transitivity violation is unsat" =
@@ -180,7 +175,7 @@ let%expect_test "EUF: transitivity violation is unsat" =
   assert_ok solver (neq y z);
   assert_ok solver (eq x z);
   print_result (Solver.solve solver);
-  [%expect {| UNSAT |}]
+  [%expect {| (Unsat (unsat_core (1))) |}]
 ;;
 
 let%expect_test "EUF: congruence conflict (f(x) <> f(y) with x = y)" =
@@ -188,16 +183,18 @@ let%expect_test "EUF: congruence conflict (f(x) <> f(y) with x = y)" =
   assert_ok solver (eq x y);
   assert_ok solver (neq (f x) (f y));
   print_result (Solver.solve solver);
-  [%expect {| UNSAT |}]
+  [%expect {| (Unsat (unsat_core (1))) |}]
 ;;
 
-let%expect_test "EUF: congruence positive propagation (x = y forces f(x) = f(y))" =
+let%expect_test "EUF: congruence positive propagation (x = y forces f(x) = \
+                 f(y))"
+  =
   let solver = Solver.create () in
   (* assert f(x) <> f(y) first, then x = y -- should still detect conflict *)
   assert_ok solver (neq (f x) (f y));
   assert_ok solver (eq x y);
   print_result (Solver.solve solver);
-  [%expect {| UNSAT |}]
+  [%expect {| (Unsat (unsat_core (-1))) |}]
 ;;
 
 let%expect_test "EUF: satisfiable case" =
@@ -205,13 +202,13 @@ let%expect_test "EUF: satisfiable case" =
   assert_ok solver (eq x y);
   assert_ok solver (neq y z);
   print_result (Solver.solve solver);
-  [%expect {| SAT |}]
+  [%expect {| (Sat (assignments (() (true) (false)))) |}]
 ;;
 
 (* ----- Incremental assert_formula + solve ----- *)
 
-(* Asserting a unit clause that directly contradicts an already-true literal
-   at decision level 0 is rejected by [assert_formula] itself (mirroring
+(* Asserting a unit clause that directly contradicts an already-true literal at
+   decision level 0 is rejected by [assert_formula] itself (mirroring
    [Feel.Solver.add_clause]'s reject-on-conflict semantics): the conflicting
    clause is never added, so the solver's state is unchanged and the next
    [solve] still reports the prior (now-stale) result. *)
@@ -219,12 +216,12 @@ let%expect_test "incremental: asserting a contradicting formula after solve" =
   let solver = Solver.create () in
   assert_ok solver (eq x y);
   print_result (Solver.solve solver);
-  [%expect {| SAT |}];
+  [%expect {| (Sat (assignments (() (true)))) |}];
   assert_ok solver (neq x y);
   print_result (Solver.solve solver);
   [%expect {|
     UNSAT (at assert time)
-    SAT
+    (Sat (assignments (() (true))))
     |}]
 ;;
 
@@ -232,11 +229,11 @@ let%expect_test "incremental: new EUF atoms registered after a solve" =
   let solver = Solver.create () in
   assert_ok solver (eq x y);
   print_result (Solver.solve solver);
-  [%expect {| SAT |}];
+  [%expect {| (Sat (assignments (() (true)))) |}];
   (* introduce brand-new terms/atoms involving f, after solving once *)
   assert_ok solver (neq (f x) (f y));
   print_result (Solver.solve solver);
-  [%expect {| UNSAT |}]
+  [%expect {| (Unsat (unsat_core (1))) |}]
 ;;
 
 (* ----- Push/pop ----- *)
@@ -245,55 +242,57 @@ let%expect_test "push/pop: retracting a contradicting constraint" =
   let solver = Solver.create () in
   assert_ok solver (eq x y);
   print_result (Solver.solve solver);
-  [%expect {| SAT |}];
+  [%expect {| (Sat (assignments (() (true)))) |}];
   Solver.push solver;
   assert_ok solver (neq x y);
   print_result (Solver.solve solver);
-  [%expect {| UNSAT |}];
+  [%expect {| (Unsat (unsat_core (1))) |}];
   Solver.pop solver;
   print_result (Solver.solve solver);
-  [%expect {| SAT |}]
+  [%expect {| (Sat (assignments (() (true) (false)))) |}]
 ;;
 
 let%expect_test "push/pop: nested scopes" =
   let solver = Solver.create () in
   assert_ok solver (eq x y);
   print_result (Solver.solve solver);
-  [%expect {| SAT |}];
+  [%expect {| (Sat (assignments (() (true)))) |}];
   Solver.push solver;
   assert_ok solver (neq y z);
   print_result (Solver.solve solver);
-  [%expect {| SAT |}];
+  [%expect {| (Sat (assignments (() (true) (true) (false)))) |}];
   Solver.push solver;
   assert_ok solver (eq x z);
   (* x=y, y<>z, x=z is a transitivity violation *)
   print_result (Solver.solve solver);
-  [%expect {| UNSAT |}];
+  [%expect {| (Unsat (unsat_core (3))) |}];
   Solver.pop solver;
   (* back to: x=y, y<>z -- satisfiable *)
   print_result (Solver.solve solver);
-  [%expect {| SAT |}];
+  [%expect {| (Sat (assignments (() (true) (true) (false) (false) (false)))) |}];
   Solver.pop solver;
   (* back to: x=y only -- satisfiable *)
   print_result (Solver.solve solver);
-  [%expect {| SAT |}]
+  [%expect {| (Sat (assignments (() (true) (true) (false) (false) (false)))) |}]
 ;;
 
-let%expect_test "push/pop: EUF congruence conflict inside a scope is retracted on pop" =
+let%expect_test "push/pop: EUF congruence conflict inside a scope is retracted \
+                 on pop"
+  =
   let solver = Solver.create () in
   assert_ok solver (eq x y);
   print_result (Solver.solve solver);
-  [%expect {| SAT |}];
+  [%expect {| (Sat (assignments (() (true)))) |}];
   Solver.push solver;
   assert_ok solver (neq (f x) (f y));
   print_result (Solver.solve solver);
-  [%expect {| UNSAT |}];
+  [%expect {| (Unsat (unsat_core (-3))) |}];
   Solver.pop solver;
   print_result (Solver.solve solver);
-  [%expect {| SAT |}];
+  [%expect {| (Sat (assignments (() (true) (false) (true)))) |}];
   (* solving again should remain consistent *)
   print_result (Solver.solve solver);
-  [%expect {| SAT |}]
+  [%expect {| (Sat (assignments (() (true) (false) (true)))) |}]
 ;;
 
 (* ----- Stats passthrough ----- *)
