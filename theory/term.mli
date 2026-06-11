@@ -1,8 +1,6 @@
 open! Core
 open! Feel.Import
 
-(** General terms shared across theories: applications of an uninterpreted
-    function symbol to arguments, or a variable. *)
 type t =
   [ `App of function_:Tvar.t * args:t list
   | `Var of Tvar.t
