@@ -24,7 +24,7 @@ let zero = { num = 0; den = 1 }
 let one = { num = 1; den = 1 }
 let of_int num = { num; den = 1 }
 
-let ( + ) a b =
+let ( + ) (local_ a) (local_ b) =
   reduce
     ~num:(Int.( + ) (Int.( * ) a.num b.den) (Int.( * ) b.num a.den))
     ~den:(Int.( * ) a.den b.den)
@@ -38,8 +38,8 @@ let ( - ) a b =
 
 let ( * ) a b = reduce ~num:(Int.( * ) a.num b.num) ~den:(Int.( * ) a.den b.den)
 let ( / ) a b = reduce ~num:(Int.( * ) a.num b.den) ~den:(Int.( * ) a.den b.num)
-let neg a = { a with num = Int.neg a.num }
-let abs a = { a with num = Int.abs a.num }
+let neg (local_ a) = { num = Int.neg a.num; den = a.den }
+let abs a = { num = Int.abs a.num; den = a.den }
 let sign a = Int.compare a.num 0
 let is_zero a = a.num = 0
 

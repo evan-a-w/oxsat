@@ -12,12 +12,12 @@ val compare : t -> t -> int
 val zero : t
 val one : t
 val of_int : int -> t
-val ( + ) : t -> t -> t
-val ( - ) : t -> t -> t
-val ( * ) : t -> t -> t
-val ( / ) : t -> t -> t
-val neg : t -> t
-val abs : t -> t
+val ( + ) : t @ local -> t @ local -> t
+val ( - ) : t @ local -> t @ local -> t
+val ( * ) : t @ local -> t @ local -> t
+val ( / ) : t @ local -> t @ local -> t
+val neg : t @ local -> t
+val abs : t @ local -> t
 
 (** [-1], [0], or [1]. *)
 val sign : t -> int
