@@ -32,12 +32,16 @@ let assert_formula t formula : [ `Ok | `Unsat of int array ] =
     | [] -> clauses
     | activation :: _ -> guard_clauses ~activation clauses
   in
-  (* New theory atoms must be registered before their sat vars are referenced
-     by any clause, so that [assert_literal] (triggered by unit propagation
-     during [add_clause]) recognizes them as theory atoms from the start. *)
+  (* New theory atoms must be registered before their sat vars are referenced by
+     any clause, so that [assert_literal] (triggered by unit propagation during
+     [add_clause]) recognizes them as theory atoms from the start. *)
   List.iter
     (Formula.Encoding.new_atoms_since t.encoding ~checkpoint)
-    ~f:(fun (atom, sat_var) -> Uninterpreted_functions.add_atom t.theory ~atom ~sat_var);
+    ~f:(fun (atom, sat_var) ->
+      match atom with
+      | #Uninterpreted_functions.Atom.t as atom ->
+        Uninterpreted_functions.add_atom t.theory ~atom ~sat_var
+      | `Le (_, _) -> ());
   List.fold_until
     clauses
     ~init:`Ok

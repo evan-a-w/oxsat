@@ -375,26 +375,31 @@ let create ~atoms =
 let add_atom t ~atom ~sat_var = register_atom t ~atom ~sat_var
 
 let assert_true_atom t ~decision_level ~(atom : Atom.t) =
-  let atom_data = Hashtbl.find_exn t.atoms atom in
-  atom_data.assignment <- This true;
-  Trail_entry.Vec.push
-    t.trail
-    #{ decision_level; kind = Trail_entry.Kind.truth ~atom };
-  let worklist = Vec.Value.create () in
-  let (`Eq (a, b)) = atom in
-  Vec.Value.push worklist ((a, b), Justification.Asserted atom);
-  propagate_congruence t ~decision_level ~atom ~worklist
+  match Hashtbl.find_or_null t.atoms atom with
+  | Null -> ()
+  | This atom_data ->
+    atom_data.assignment <- This true;
+    Trail_entry.Vec.push
+      t.trail
+      #{ decision_level; kind = Trail_entry.Kind.truth ~atom };
+    let worklist = Vec.Value.create () in
+    let (`Eq (a, b)) = atom in
+    Vec.Value.push worklist ((a, b), Justification.Asserted atom);
+    propagate_congruence t ~decision_level ~atom ~worklist
 ;;
 
 let assert_false_atom t ~decision_level ~(atom : Atom.t) =
-  match Hash_set.mem t.falsehoods atom with
-  | true -> ()
-  | false ->
-    Hash_set.add t.falsehoods atom;
-    (Hashtbl.find_exn t.atoms atom).assignment <- This false;
-    Trail_entry.Vec.push
-      t.trail
-      #{ decision_level; kind = Trail_entry.Kind.falsehood ~atom }
+  match Hashtbl.find_or_null t.atoms atom with
+  | Null -> ()
+  | This atom_data ->
+    (match Hash_set.mem t.falsehoods atom with
+     | true -> ()
+     | false ->
+       Hash_set.add t.falsehoods atom;
+       atom_data.assignment <- This false;
+       Trail_entry.Vec.push
+         t.trail
+         #{ decision_level; kind = Trail_entry.Kind.falsehood ~atom })
 ;;
 
 let assert_atom t ~decision_level ~(atom : Atom.t) ~value =

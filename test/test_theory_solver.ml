@@ -34,9 +34,7 @@ let rec sexp_of_term (term : Term.t) : Sexp.t =
       ]
 ;;
 
-let sexp_of_atom (`Eq (a, b) : Atom.t) : Sexp.t =
-  List [ Atom "Eq"; sexp_of_term a; sexp_of_term b ]
-;;
+let sexp_of_atom = [%sexp_of: Atom.t]
 
 let%expect_test "Atom.normalize orders Eq sides canonically" =
   let a = `Eq (x, y) in
@@ -44,8 +42,8 @@ let%expect_test "Atom.normalize orders Eq sides canonically" =
   print_s [%sexp (sexp_of_atom (Atom.normalize a) : Sexp.t)];
   print_s [%sexp (sexp_of_atom (Atom.normalize b) : Sexp.t)];
   [%expect {|
-    (Eq (Var x) (Var y))
-    (Eq (Var x) (Var y))
+    (Eq ((Var 2) (Var 3)))
+    (Eq ((Var 2) (Var 3)))
     |}]
 ;;
 
@@ -219,7 +217,8 @@ let%expect_test "incremental: asserting a contradicting formula after solve" =
   [%expect {| (Sat (assignments (() (true)))) |}];
   assert_ok solver (neq x y);
   print_result (Solver.solve solver);
-  [%expect {|
+  [%expect
+    {|
     UNSAT (at assert time)
     (Sat (assignments (() (true))))
     |}]
