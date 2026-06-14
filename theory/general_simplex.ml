@@ -25,35 +25,49 @@ module Maybe_bound = struct
   [@@deriving sexp, compare, hash]
 end
 
-module Atom_data = struct
+module Var = struct
   type t =
-    { le : Q.t Maybe_bound.t
-    ; ge : Q.t Maybe_bound.t
+    { mutable assignment : Q.t
+    ; mutable kind : [ `Basic of int | `Nonbasic of int ]
+    ; mutable le : Q.t Maybe_bound.t
+    ; mutable ge : Q.t Maybe_bound.t
     }
   [@@deriving sexp]
 end
 
 type t =
   { tableau : Q.t Vec.Value.t Vec.Value.t
-  ; mutable num_nonbasic : int
-  ; basic_constraints : Atom_data.t Vec.Value.t
+  ; basic_vars : Var.t Vec.Value.t
+  ; nonbasic_vars : Var.t Vec.Value.t
+  ; vars : Var.t Vec.Value.t
   }
 
 (** returns the new var id *)
-let add_nonbasic t : int =
-  let res = t.num_nonbasic in
-  t.num_nonbasic <- t.num_nonbasic + 1;
+let add_nonbasic t : Var.t =
+  let var : Var.t =
+    { assignment = Q.zero
+    ; kind = `Nonbasic (Vec.Value.length t.nonbasic_vars)
+    ; le = Unbounded
+    ; ge = Unbounded
+    }
+  in
+  Vec.Value.push t.nonbasic_vars var;
+  Vec.Value.push t.vars var;
   Vec.Value.iter t.tableau ~f:(fun v -> Vec.Value.push v Q.zero);
-  res
+  var
 ;;
 
 (** returns the new var id *)
-let add_processed_constraint
-  t
-  ~nonbasic_coefficients
-  ~(basic_atom_data : Atom_data.t)
-  =
-  Vec.Value.push t.basic_constraints basic_atom_data;
+let add_processed_constraint t ~nonbasic_coefficients ~le ~ge =
+  let var : Var.t =
+    { assignment = Q.zero
+    ; kind = `Basic (Vec.Value.length t.basic_vars)
+    ; le
+    ; ge
+    }
+  in
+  Vec.Value.push t.vars var;
+  Vec.Value.push t.basic_vars var;
   Vec.Value.push
     t.tableau
     (Vec.Value.of_array_taking_ownership nonbasic_coefficients)
@@ -68,7 +82,9 @@ let add_constraint t ((lhs, op, rhs) : Sum.t * Op.t * Sum.t) =
     Iarray.sort lhs.vars ~compare:(fun (_, var1) (_, var2) ->
       Int.compare var1 var2)
   in
-  let nonbasic_coefficients = Array.init t.num_nonbasic ~f:(Fn.const Q.zero) in
+  let nonbasic_coefficients =
+    Array.init (Vec.Value.length t.nonbasic_vars) ~f:(Fn.const Q.zero)
+  in
   let set (q, v) = nonbasic_coefficients.(v) <- q in
   let rec collect_vars li ri =
     let ld = li >= Iarray.length lhs_sorted_vars in
@@ -98,12 +114,12 @@ let add_constraint t ((lhs, op, rhs) : Sum.t * Op.t * Sum.t) =
         collect_vars (li + 1) ri)
   in
   collect_vars 0 0;
-  let basic_atom_data : Atom_data.t =
+  let (le, ge) : Q.t Maybe_bound.t * Q.t Maybe_bound.t =
     let const = Q.( - ) rhs.const lhs.const in
     match op with
-    | `Le -> { le = Bounded const; ge = Unbounded }
-    | `Ge -> { le = Unbounded; ge = Bounded const }
-    | `Eq -> { le = Bounded const; ge = Bounded const }
+    | `Le -> Bounded const, Unbounded
+    | `Ge -> Unbounded, Bounded const
+    | `Eq -> Bounded const, Bounded const
   in
-  add_processed_constraint t ~nonbasic_coefficients ~basic_atom_data
+  add_processed_constraint t ~nonbasic_coefficients ~le ~ge
 ;;
