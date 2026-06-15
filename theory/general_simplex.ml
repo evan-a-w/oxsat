@@ -23,6 +23,12 @@ module Maybe_bound = struct
     | Unbounded
     | Bounded of 'a
   [@@deriving sexp, compare, hash]
+
+  let map t ~f =
+    match t with
+    | Unbounded -> Unbounded
+    | Bounded x -> Bounded (f x)
+  ;;
 end
 
 module Bound = struct
@@ -31,6 +37,18 @@ module Bound = struct
     ; ge : Q.t Maybe_bound.t
     }
   [@@deriving sexp]
+
+  let check_bounds t with_q =
+    let diff_with_bound bound =
+      Maybe_bound.map bound ~f:(fun q -> Q.(q - with_q))
+    in
+    match diff_with_bound t.le with
+    | Bounded q when Q.compare q Q.zero < 0 -> `Must_sub (Q.neg q)
+    | Unbounded | Bounded _ ->
+      (match diff_with_bound t.ge with
+       | Bounded q when Q.compare q Q.zero > 0 -> `Must_add q
+       | Unbounded | Bounded _ -> `In_bounds)
+  ;;
 end
 
 module Var = struct
@@ -39,6 +57,65 @@ module Var = struct
     ; mutable bound : Bound.t
     }
   [@@deriving sexp]
+
+  let diff_to_become_in_bounds t =
+    match Bound.check_bounds t.bound t.assignment with
+    | `Must_add q -> Some (`Must_add q)
+    | `Must_sub q -> Some (`Must_sub q)
+    | `In_bounds -> None
+  ;;
+
+  let allowed_to_shift t : Bound.t =
+    let diff_with_bound bound =
+      Maybe_bound.map bound ~f:(fun q -> Q.(q - t.assignment))
+    in
+    { le = diff_with_bound t.bound.le |> Maybe_bound.map ~f:(Q.max Q.zero)
+    ; ge = diff_with_bound t.bound.ge |> Maybe_bound.map ~f:(Q.min Q.zero)
+    }
+  ;;
+
+  let%expect_test "eg" =
+    let t =
+      { assignment = Q.zero
+      ; bound = { le = Bounded (Q.of_int 10); ge = Bounded (Q.of_int 10) }
+      }
+    in
+    print_s
+      [%message
+        (diff_to_become_in_bounds t
+         : [ `Must_add of Q.t | `Must_sub of Q.t ] option)
+          (allowed_to_shift t : Bound.t)];
+    [%expect
+      {|
+      (("diff_to_become_in_bounds t" ((Must_add ((num 10) (den 1)))))
+       ("allowed_to_shift t"
+        ((le (Bounded ((num 10) (den 1)))) (ge (Bounded ((num 0) (den 1)))))))
+      |}];
+    t.assignment <- Q.of_int 10;
+    print_s
+      [%message
+        (diff_to_become_in_bounds t
+         : [ `Must_add of Q.t | `Must_sub of Q.t ] option)
+          (allowed_to_shift t : Bound.t)];
+    [%expect
+      {|
+      (("diff_to_become_in_bounds t" ())
+       ("allowed_to_shift t"
+        ((le (Bounded ((num 0) (den 1)))) (ge (Bounded ((num 0) (den 1)))))))
+      |}];
+    t.assignment <- Q.of_int 20;
+    print_s
+      [%message
+        (diff_to_become_in_bounds t
+         : [ `Must_add of Q.t | `Must_sub of Q.t ] option)
+          (allowed_to_shift t : Bound.t)];
+    [%expect
+      {|
+      (("diff_to_become_in_bounds t" ((Must_sub ((num 10) (den 1)))))
+       ("allowed_to_shift t"
+        ((le (Bounded ((num 0) (den 1)))) (ge (Bounded ((num -10) (den 1)))))))
+      |}]
+  ;;
 end
 
 type t =
@@ -244,3 +321,13 @@ let%expect_test "pivot example" =
        ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))))))
     |}]
 ;;
+
+(* let rec solve t = *)
+(* let failing_basic = *)
+(* Vec.Value.findi t.basic_vars ~f:(fun _ var -> *)
+(* Var.min_diff_to_become_in_bounds var |> Option.map ~f:(Tuple2.create var)) *)
+(* in *)
+(* match failing_basic with *)
+(* | None -> `Sat *)
+(* | Some (var, change) -> () *)
+(* ;; *)
