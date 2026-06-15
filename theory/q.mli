@@ -20,8 +20,9 @@ val neg : t @ local -> t
 val abs : t @ local -> t
 
 (** [-1], [0], or [1]. *)
-val sign : t -> int
+val sign' : t -> int
 
+val sign : t -> [ `Neg | `Zero | `Pos ]
 val is_zero : t -> bool
 val min : t -> t -> t
 val max : t -> t -> t

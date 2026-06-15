@@ -40,7 +40,13 @@ let ( * ) a b = reduce ~num:(Int.( * ) a.num b.num) ~den:(Int.( * ) a.den b.den)
 let ( / ) a b = reduce ~num:(Int.( * ) a.num b.den) ~den:(Int.( * ) a.den b.num)
 let neg (local_ a) = { num = Int.neg a.num; den = a.den }
 let abs a = { num = Int.abs a.num; den = a.den }
-let sign a = Int.compare a.num 0
+let sign' a = Int.compare a.num 0
+
+let sign a =
+  let x = sign' a in
+  if x < 0 then `Neg else if x = 0 then `Zero else `Pos
+;;
+
 let is_zero a = a.num = 0
 
 (* [a.den], [b.den] > 0, so cross-multiplying preserves order. *)

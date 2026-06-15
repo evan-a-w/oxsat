@@ -43,25 +43,34 @@ module Bound = struct
       Maybe_bound.map bound ~f:(fun q -> Q.(q - with_q))
     in
     match diff_with_bound t.le with
-    | Bounded q when Q.compare q Q.zero < 0 -> `Must_sub (Q.neg q)
+    | Bounded q when Q.compare q Q.zero < 0 -> `Diff q
     | Unbounded | Bounded _ ->
       (match diff_with_bound t.ge with
-       | Bounded q when Q.compare q Q.zero > 0 -> `Must_add q
+       | Bounded q when Q.compare q Q.zero > 0 -> `Diff q
        | Unbounded | Bounded _ -> `In_bounds)
   ;;
+
+  let in_bounds t with_q =
+    match check_bounds t with_q with
+    | `In_bounds -> true
+    | `Diff _ -> false
+  ;;
+
+  let max t = t.le
+  let min t = t.ge
 end
 
 module Var = struct
   type t =
     { mutable assignment : Q.t
     ; mutable bound : Bound.t
+    ; id : int
     }
   [@@deriving sexp]
 
   let diff_to_become_in_bounds t =
     match Bound.check_bounds t.bound t.assignment with
-    | `Must_add q -> Some (`Must_add q)
-    | `Must_sub q -> Some (`Must_sub q)
+    | `Diff q -> Some q
     | `In_bounds -> None
   ;;
 
@@ -78,25 +87,22 @@ module Var = struct
     let t =
       { assignment = Q.zero
       ; bound = { le = Bounded (Q.of_int 10); ge = Bounded (Q.of_int 10) }
+      ; id = 0
       }
     in
     print_s
       [%message
-        (diff_to_become_in_bounds t
-         : [ `Must_add of Q.t | `Must_sub of Q.t ] option)
-          (allowed_to_shift t : Bound.t)];
+        (diff_to_become_in_bounds t : Q.t option) (allowed_to_shift t : Bound.t)];
     [%expect
       {|
-      (("diff_to_become_in_bounds t" ((Must_add ((num 10) (den 1)))))
+      (("diff_to_become_in_bounds t" (((num 10) (den 1))))
        ("allowed_to_shift t"
         ((le (Bounded ((num 10) (den 1)))) (ge (Bounded ((num 0) (den 1)))))))
       |}];
     t.assignment <- Q.of_int 10;
     print_s
       [%message
-        (diff_to_become_in_bounds t
-         : [ `Must_add of Q.t | `Must_sub of Q.t ] option)
-          (allowed_to_shift t : Bound.t)];
+        (diff_to_become_in_bounds t : Q.t option) (allowed_to_shift t : Bound.t)];
     [%expect
       {|
       (("diff_to_become_in_bounds t" ())
@@ -106,12 +112,10 @@ module Var = struct
     t.assignment <- Q.of_int 20;
     print_s
       [%message
-        (diff_to_become_in_bounds t
-         : [ `Must_add of Q.t | `Must_sub of Q.t ] option)
-          (allowed_to_shift t : Bound.t)];
+        (diff_to_become_in_bounds t : Q.t option) (allowed_to_shift t : Bound.t)];
     [%expect
       {|
-      (("diff_to_become_in_bounds t" ((Must_sub ((num 10) (den 1)))))
+      (("diff_to_become_in_bounds t" (((num -10) (den 1))))
        ("allowed_to_shift t"
         ((le (Bounded ((num 0) (den 1)))) (ge (Bounded ((num -10) (den 1)))))))
       |}]
@@ -129,17 +133,22 @@ type t =
 (** returns the new var id *)
 let add_nonbasic t : Var.t =
   let var : Var.t =
-    { assignment = Q.zero; bound = { le = Unbounded; ge = Unbounded } }
+    { assignment = Q.zero
+    ; bound = { le = Unbounded; ge = Unbounded }
+    ; id = Vec.Value.length t.vars
+    }
   in
-  Vec.Value.push t.nonbasic_vars var;
   Vec.Value.push t.vars var;
+  Vec.Value.push t.nonbasic_vars var;
   Vec.Value.iter t.tableau ~f:(fun v -> Vec.Value.push v Q.zero);
   var
 ;;
 
 (** returns the new var id *)
 let add_processed_constraint t ~nonbasic_coefficients ~bound =
-  let var : Var.t = { assignment = Q.zero; bound } in
+  let var : Var.t =
+    { assignment = Q.zero; bound; id = Vec.Value.length t.vars }
+  in
   Vec.Value.push t.vars var;
   Vec.Value.push t.basic_vars var;
   Vec.Value.push
@@ -213,7 +222,7 @@ let eval t ~row =
 ;;
 
 (** col = nonbasic var, row = basic var *)
-let pivot t ~row ~col =
+let pivot t ~row ~col ~diff_to_col =
   let coeff = get_tableau t ~row ~col in
   assert (not (Q.is_zero coeff));
   set_tableau t ~row ~col ~q:(Q.neg Q.one);
@@ -227,6 +236,9 @@ let pivot t ~row ~col =
     | true -> ()
     | false ->
       let mult = Vec.Value.get row' col in
+      let basic_var = Vec.Value.get t.basic_vars i in
+      (* here we apply the diff to the var as well *)
+      basic_var.assignment <- Q.((diff_to_col * mult) + basic_var.assignment);
       for j = 0 to Vec.Value.length row' - 1 do
         if j = col
         then Vec.Value.set row' j (Q.( * ) (get_tableau t ~row ~col) mult)
@@ -248,11 +260,11 @@ let%expect_test "pivot example" =
   let bound1 : Bound.t = { le = Unbounded; ge = Bounded (Q.of_int 1) } in
   let bound2 : Bound.t = { le = Unbounded; ge = Bounded (Q.of_int 2) } in
   let unbounded : Bound.t = { le = Unbounded; ge = Unbounded } in
-  let b0 : Var.t = { assignment = Q.zero; bound = bound0 } in
-  let b1 : Var.t = { assignment = Q.zero; bound = bound1 } in
-  let b2 : Var.t = { assignment = Q.zero; bound = bound2 } in
-  let nb0 : Var.t = { assignment = Q.zero; bound = unbounded } in
-  let nb1 : Var.t = { assignment = Q.zero; bound = unbounded } in
+  let b0 : Var.t = { assignment = Q.zero; bound = bound0; id = 0 } in
+  let b1 : Var.t = { assignment = Q.zero; bound = bound1; id = 1 } in
+  let b2 : Var.t = { assignment = Q.zero; bound = bound2; id = 2 } in
+  let nb0 : Var.t = { assignment = Q.zero; bound = unbounded; id = 3 } in
+  let nb1 : Var.t = { assignment = Q.zero; bound = unbounded; id = 4 } in
   let t =
     { tableau =
         Vec.Value.of_list
@@ -274,25 +286,29 @@ let%expect_test "pivot example" =
        (((num -1) (den 1)) ((num 2) (den 1)))))
      (basic_vars
       (((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))))
+        (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 0))
        ((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))))
+        (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 1))
        ((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))))))
+        (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2))))
      (nonbasic_vars
-      (((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded))))
-       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded))))))
+      (((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 3))
+       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 4))))
      (vars
       (((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))))
+        (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 0))
        ((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))))
+        (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 1))
        ((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))))
-       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded))))
-       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))))))
+        (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2))
+       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 3))
+       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 4)))))
     |}];
-  pivot t ~row:0 ~col:0;
+  pivot t ~row:0 ~col:0 ~diff_to_col:Q.zero;
   print_s [%sexp (t : t)];
   [%expect
     {|
@@ -301,33 +317,147 @@ let%expect_test "pivot example" =
        (((num 2) (den 1)) ((num -3) (den 1)))
        (((num -1) (den 1)) ((num 3) (den 1)))))
      (basic_vars
-      (((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded))))
+      (((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 3))
        ((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))))
+        (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 1))
        ((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))))))
+        (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2))))
      (nonbasic_vars
       (((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))))
-       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded))))))
+        (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 0))
+       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 4))))
      (vars
       (((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))))
+        (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 0))
        ((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))))
+        (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 1))
        ((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))))
-       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded))))
-       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))))))
+        (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2))
+       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 3))
+       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 4)))))
     |}]
 ;;
 
-(* let rec solve t = *)
-(* let failing_basic = *)
-(* Vec.Value.findi t.basic_vars ~f:(fun _ var -> *)
-(* Var.min_diff_to_become_in_bounds var |> Option.map ~f:(Tuple2.create var)) *)
-(* in *)
-(* match failing_basic with *)
-(* | None -> `Sat *)
-(* | Some (var, change) -> () *)
-(* ;; *)
+let rec solve t =
+  let failing_basic =
+    Vec.Value.findi t.basic_vars ~f:(fun row var ->
+      Var.diff_to_become_in_bounds var |> Option.map ~f:(Tuple3.create row var))
+  in
+  match failing_basic with
+  | None -> `Sat
+  | Some (row, basic_var, diff) ->
+    let candidate_nonbasic =
+      Vec.Value.findi t.nonbasic_vars ~f:(fun col nonbasic_var ->
+        let q = get_tableau t ~row ~col in
+        match Q.is_zero q with
+        | true -> None
+        | false ->
+          let need_apply = Q.(diff / q) in
+          (match
+             Bound.in_bounds (Var.allowed_to_shift nonbasic_var) need_apply
+           with
+           | false -> None
+           | true -> Some (col, nonbasic_var, need_apply)))
+    in
+    (match candidate_nonbasic with
+     | None -> `Unsat
+     | Some (col, nonbasic_var, need_apply) ->
+       nonbasic_var.assignment <- Q.(nonbasic_var.assignment + need_apply);
+       basic_var.assignment <- Q.(basic_var.assignment + diff);
+       pivot t ~row ~col ~diff_to_col:need_apply;
+       solve t)
+;;
+
+let%expect_test "example simplex" =
+  let bound0 : Bound.t = { le = Unbounded; ge = Bounded (Q.of_int 2) } in
+  let bound1 : Bound.t = { le = Unbounded; ge = Bounded (Q.of_int 0) } in
+  let bound2 : Bound.t = { le = Unbounded; ge = Bounded (Q.of_int 1) } in
+  let unbounded : Bound.t = { le = Unbounded; ge = Unbounded } in
+  let b0 : Var.t = { assignment = Q.zero; bound = bound0; id = 2 } in
+  let b1 : Var.t = { assignment = Q.zero; bound = bound1; id = 3 } in
+  let b2 : Var.t = { assignment = Q.zero; bound = bound2; id = 4 } in
+  let nb0 : Var.t = { assignment = Q.zero; bound = unbounded; id = 0 } in
+  let nb1 : Var.t = { assignment = Q.zero; bound = unbounded; id = 1 } in
+  let t =
+    { tableau =
+        Vec.Value.of_list
+          [ Vec.Value.of_list [ Q.one; Q.one ]
+          ; Vec.Value.of_list [ Q.of_int 2; Q.of_int (-1) ]
+          ; Vec.Value.of_list [ Q.of_int (-1); Q.of_int 2 ]
+          ]
+    ; basic_vars = Vec.Value.of_list [ b0; b1; b2 ]
+    ; nonbasic_vars = Vec.Value.of_list [ nb0; nb1 ]
+    ; vars = Vec.Value.of_list [ nb0; nb1; b0; b1; b2 ]
+    }
+  in
+  print_s [%sexp (t : t)];
+  [%expect
+    {|
+    ((tableau
+      ((((num 1) (den 1)) ((num 1) (den 1)))
+       (((num 2) (den 1)) ((num -1) (den 1)))
+       (((num -1) (den 1)) ((num 2) (den 1)))))
+     (basic_vars
+      (((assignment ((num 0) (den 1)))
+        (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2))
+       ((assignment ((num 0) (den 1)))
+        (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 3))
+       ((assignment ((num 0) (den 1)))
+        (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 4))))
+     (nonbasic_vars
+      (((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 0))
+       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 1))))
+     (vars
+      (((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 0))
+       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 1))
+       ((assignment ((num 0) (den 1)))
+        (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2))
+       ((assignment ((num 0) (den 1)))
+        (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 3))
+       ((assignment ((num 0) (den 1)))
+        (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 4)))))
+    |}];
+  (match solve t with
+   | `Sat -> print_endline "sat"
+   | `Unsat -> print_endline "unsat");
+  print_s [%sexp (t : t)];
+  [%expect
+    {|
+    sat
+    ((tableau
+      ((((num 2) (den 3)) ((num -1) (den 3)))
+       (((num 1) (den 1)) ((num -1) (den 1)))
+       (((num 1) (den 3)) ((num 1) (den 3)))))
+     (basic_vars
+      (((assignment ((num 1) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 0))
+       ((assignment ((num 1) (den 1)))
+        (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 3))
+       ((assignment ((num 1) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 1))))
+     (nonbasic_vars
+      (((assignment ((num 2) (den 1)))
+        (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2))
+       ((assignment ((num 1) (den 1)))
+        (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 4))))
+     (vars
+      (((assignment ((num 1) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 0))
+       ((assignment ((num 1) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 1))
+       ((assignment ((num 2) (den 1)))
+        (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2))
+       ((assignment ((num 1) (den 1)))
+        (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 3))
+       ((assignment ((num 1) (den 1)))
+        (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 4)))))
+    |}]
+;;
