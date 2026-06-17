@@ -38,6 +38,8 @@ module Bound = struct
     }
   [@@deriving sexp]
 
+  let unbounded = { le = Unbounded; ge = Unbounded }
+
   let check_bounds t with_q =
     let diff_with_bound bound =
       Maybe_bound.map bound ~f:(fun q -> Q.(q - with_q))
@@ -60,8 +62,7 @@ end
 module Var = struct
   type t =
     { mutable assignment : Q.t
-    ; mutable last_satisfying_assignment : Q.t
-    ; bound : Bound.t
+    ; mutable bound : Bound.t
     ; id : int
     }
   [@@deriving sexp]
@@ -84,7 +85,6 @@ module Var = struct
   let%expect_test "eg" =
     let t =
       { assignment = Q.zero
-      ; last_satisfying_assignment = Q.zero
       ; bound = { le = Bounded (Q.of_int 10); ge = Bounded (Q.of_int 10) }
       ; id = 0
       }
@@ -129,11 +129,11 @@ type t =
   }
 [@@deriving sexp]
 
-(** returns the new var id *)
+type constraint_ = int [@@deriving sexp, compare, equal, hash]
+
 let add_nonbasic t : Var.t =
   let var : Var.t =
     { assignment = Q.zero
-    ; last_satisfying_assignment = Q.zero
     ; bound = { le = Unbounded; ge = Unbounded }
     ; id = Vec.Value.length t.vars
     }
@@ -144,23 +144,19 @@ let add_nonbasic t : Var.t =
   var
 ;;
 
-(** returns the new var id *)
 let add_processed_constraint t ~nonbasic_coefficients ~bound =
   let var : Var.t =
-    { assignment = Q.zero
-    ; last_satisfying_assignment = Q.zero
-    ; bound
-    ; id = Vec.Value.length t.vars
-    }
+    { assignment = Q.zero; bound; id = Vec.Value.length t.vars }
   in
   Vec.Value.push t.vars var;
   Vec.Value.push t.basic_vars var;
   Vec.Value.push
     t.tableau
-    (Vec.Value.of_array_taking_ownership nonbasic_coefficients)
+    (Vec.Value.of_array_taking_ownership nonbasic_coefficients);
+  var.id
 ;;
 
-let add_constraint t ((lhs, op, rhs) : Sum.t * Op.t * Sum.t) =
+let add_constraint t ((lhs, op, rhs) : Sum.t * Op.t * Sum.t) : constraint_ =
   let lhs_sorted_vars =
     Iarray.sort lhs.vars ~compare:(fun (_, var1) (_, var2) ->
       Int.compare var1 var2)
@@ -211,6 +207,10 @@ let add_constraint t ((lhs, op, rhs) : Sum.t * Op.t * Sum.t) =
   add_processed_constraint t ~nonbasic_coefficients ~bound
 ;;
 
+let remove_constraint t ~constraint_ =
+  (Vec.Value.get t.vars constraint_).bound <- Bound.unbounded
+;;
+
 let get_tableau t ~row ~col = Vec.Value.get (Vec.Value.get t.tableau row) col
 
 let set_tableau t ~row ~col ~q =
@@ -256,41 +256,11 @@ let%expect_test "pivot example" =
   let bound1 : Bound.t = { le = Unbounded; ge = Bounded (Q.of_int 1) } in
   let bound2 : Bound.t = { le = Unbounded; ge = Bounded (Q.of_int 2) } in
   let unbounded : Bound.t = { le = Unbounded; ge = Unbounded } in
-  let b0 : Var.t =
-    { assignment = Q.zero
-    ; bound = bound0
-    ; id = 0
-    ; last_satisfying_assignment = Q.zero
-    }
-  in
-  let b1 : Var.t =
-    { assignment = Q.zero
-    ; bound = bound1
-    ; id = 1
-    ; last_satisfying_assignment = Q.zero
-    }
-  in
-  let b2 : Var.t =
-    { assignment = Q.zero
-    ; bound = bound2
-    ; id = 2
-    ; last_satisfying_assignment = Q.zero
-    }
-  in
-  let nb0 : Var.t =
-    { assignment = Q.zero
-    ; bound = unbounded
-    ; id = 3
-    ; last_satisfying_assignment = Q.zero
-    }
-  in
-  let nb1 : Var.t =
-    { assignment = Q.zero
-    ; bound = unbounded
-    ; id = 4
-    ; last_satisfying_assignment = Q.zero
-    }
-  in
+  let b0 : Var.t = { assignment = Q.zero; bound = bound0; id = 0 } in
+  let b1 : Var.t = { assignment = Q.zero; bound = bound1; id = 1 } in
+  let b2 : Var.t = { assignment = Q.zero; bound = bound2; id = 2 } in
+  let nb0 : Var.t = { assignment = Q.zero; bound = unbounded; id = 3 } in
+  let nb1 : Var.t = { assignment = Q.zero; bound = unbounded; id = 4 } in
   let t =
     { tableau =
         Vec.Value.of_list
@@ -312,37 +282,27 @@ let%expect_test "pivot example" =
        (((num -1) (den 1)) ((num 2) (den 1)))))
      (basic_vars
       (((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 0))
        ((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 1))
        ((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2))))
      (nonbasic_vars
-      (((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge Unbounded))) (id 3))
-       ((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge Unbounded))) (id 4))))
+      (((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 3))
+       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 4))))
      (vars
       (((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 0))
        ((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 1))
        ((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2))
-       ((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge Unbounded))) (id 3))
-       ((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge Unbounded))) (id 4)))))
+       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 3))
+       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 4)))))
     |}];
   pivot t ~row:0 ~col:0 ~diff_to_col:Q.zero;
   print_s [%sexp (t : t)];
@@ -353,38 +313,28 @@ let%expect_test "pivot example" =
        (((num 2) (den 1)) ((num -3) (den 1)))
        (((num -1) (den 1)) ((num 3) (den 1)))))
      (basic_vars
-      (((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge Unbounded))) (id 3))
+      (((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 3))
        ((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 1))
        ((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2))))
      (nonbasic_vars
       (((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 0))
-       ((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge Unbounded))) (id 4))))
+       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 4))))
      (vars
       (((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 0))
        ((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 1))
        ((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2))
-       ((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge Unbounded))) (id 3))
-       ((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge Unbounded))) (id 4)))))
+       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 3))
+       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 4)))))
     |}]
 ;;
 
@@ -394,10 +344,7 @@ let rec solve t =
       Var.diff_to_become_in_bounds var |> Option.map ~f:(Tuple3.create row var))
   in
   match failing_basic with
-  | None ->
-    Vec.Value.iter t.vars ~f:(fun var ->
-      var.last_satisfying_assignment <- var.assignment);
-    `Sat
+  | None -> `Sat
   | Some (row, basic_var, diff) ->
     let candidate_nonbasic =
       Vec.Value.findi t.nonbasic_vars ~f:(fun col nonbasic_var ->
@@ -426,41 +373,11 @@ let%expect_test "example simplex" =
   let bound1 : Bound.t = { le = Unbounded; ge = Bounded (Q.of_int 0) } in
   let bound2 : Bound.t = { le = Unbounded; ge = Bounded (Q.of_int 1) } in
   let unbounded : Bound.t = { le = Unbounded; ge = Unbounded } in
-  let b0 : Var.t =
-    { assignment = Q.zero
-    ; bound = bound0
-    ; id = 2
-    ; last_satisfying_assignment = Q.zero
-    }
-  in
-  let b1 : Var.t =
-    { assignment = Q.zero
-    ; bound = bound1
-    ; id = 3
-    ; last_satisfying_assignment = Q.zero
-    }
-  in
-  let b2 : Var.t =
-    { assignment = Q.zero
-    ; bound = bound2
-    ; id = 4
-    ; last_satisfying_assignment = Q.zero
-    }
-  in
-  let nb0 : Var.t =
-    { assignment = Q.zero
-    ; bound = unbounded
-    ; id = 0
-    ; last_satisfying_assignment = Q.zero
-    }
-  in
-  let nb1 : Var.t =
-    { assignment = Q.zero
-    ; bound = unbounded
-    ; id = 1
-    ; last_satisfying_assignment = Q.zero
-    }
-  in
+  let b0 : Var.t = { assignment = Q.zero; bound = bound0; id = 2 } in
+  let b1 : Var.t = { assignment = Q.zero; bound = bound1; id = 3 } in
+  let b2 : Var.t = { assignment = Q.zero; bound = bound2; id = 4 } in
+  let nb0 : Var.t = { assignment = Q.zero; bound = unbounded; id = 0 } in
+  let nb1 : Var.t = { assignment = Q.zero; bound = unbounded; id = 1 } in
   let t =
     { tableau =
         Vec.Value.of_list
@@ -482,36 +399,26 @@ let%expect_test "example simplex" =
        (((num -1) (den 1)) ((num 2) (den 1)))))
      (basic_vars
       (((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2))
        ((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 3))
        ((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 4))))
      (nonbasic_vars
-      (((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge Unbounded))) (id 0))
-       ((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge Unbounded))) (id 1))))
+      (((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 0))
+       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 1))))
      (vars
-      (((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge Unbounded))) (id 0))
+      (((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 0))
+       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 1))
        ((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge Unbounded))) (id 1))
-       ((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2))
        ((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 3))
        ((assignment ((num 0) (den 1)))
-        (last_satisfying_assignment ((num 0) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 4)))))
     |}];
   (match solve t with
@@ -526,44 +433,42 @@ let%expect_test "example simplex" =
        (((num 1) (den 1)) ((num -1) (den 1)))
        (((num 1) (den 3)) ((num 1) (den 3)))))
      (basic_vars
-      (((assignment ((num 1) (den 1)))
-        (last_satisfying_assignment ((num 1) (den 1)))
-        (bound ((le Unbounded) (ge Unbounded))) (id 0))
+      (((assignment ((num 1) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 0))
        ((assignment ((num 1) (den 1)))
-        (last_satisfying_assignment ((num 1) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 3))
-       ((assignment ((num 1) (den 1)))
-        (last_satisfying_assignment ((num 1) (den 1)))
-        (bound ((le Unbounded) (ge Unbounded))) (id 1))))
+       ((assignment ((num 1) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 1))))
      (nonbasic_vars
       (((assignment ((num 2) (den 1)))
-        (last_satisfying_assignment ((num 2) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2))
        ((assignment ((num 1) (den 1)))
-        (last_satisfying_assignment ((num 1) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 4))))
      (vars
-      (((assignment ((num 1) (den 1)))
-        (last_satisfying_assignment ((num 1) (den 1)))
-        (bound ((le Unbounded) (ge Unbounded))) (id 0))
-       ((assignment ((num 1) (den 1)))
-        (last_satisfying_assignment ((num 1) (den 1)))
-        (bound ((le Unbounded) (ge Unbounded))) (id 1))
+      (((assignment ((num 1) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 0))
+       ((assignment ((num 1) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
+        (id 1))
        ((assignment ((num 2) (den 1)))
-        (last_satisfying_assignment ((num 2) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2))
        ((assignment ((num 1) (den 1)))
-        (last_satisfying_assignment ((num 1) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 3))
        ((assignment ((num 1) (den 1)))
-        (last_satisfying_assignment ((num 1) (den 1)))
         (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 4)))))
     |}]
 ;;
 
-let restore_last_satisfying_assignment t =
-  Vec.Value.iter t.vars ~f:(fun var ->
-    var.assignment <- var.last_satisfying_assignment)
+module Snapshot = struct
+  type t = Q.t array
+end
+
+let snapshot_assignments t : Snapshot.t =
+  Array.init (Vec.Value.length t.vars) ~f:(fun i ->
+    (Vec.Value.get t.vars i).assignment)
+;;
+
+let restore_assignments t (snapshot : Snapshot.t) =
+  Array.iteri snapshot ~f:(fun i q -> (Vec.Value.get t.vars i).assignment <- q)
 ;;
 
 let add_nonbasic t = (add_nonbasic t).id
