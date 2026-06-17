@@ -37,5 +37,5 @@ type t [@@deriving sexp]
 
 val add_nonbasic : t -> int
 val add_constraint : t -> Sum.t * Op.t * Sum.t -> unit
-val restore_last_satisfying_assignment : t -> unit
 val solve : t -> [ `Sat | `Unsat ]
+val restore_last_satisfying_assignment : t -> unit
