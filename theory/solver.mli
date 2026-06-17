@@ -44,3 +44,5 @@ val solve
   -> Feel.Sat_result.t
 
 val stats : t -> Feel.Stats.t
+val assert_type : t -> Tvar.t -> Tvar_types.Type.t -> unit
+val get_type : t -> Tvar.t -> Tvar_types.Type.t option

@@ -6,6 +6,7 @@ type t =
   ; theory : Uninterpreted_functions.t
   ; encoding : Formula.Encoding.t
   ; mutable scopes : int list (* activation literals, innermost first *)
+  ; tvar_types : Tvar_types.t
   }
 
 let create () =
@@ -15,7 +16,12 @@ let create () =
       ~theory:(Feel.Theory.pack (module Uninterpreted_functions) theory)
       ()
   in
-  { solver; theory; encoding = Formula.Encoding.create (); scopes = [] }
+  { solver
+  ; theory
+  ; encoding = Formula.Encoding.create ()
+  ; scopes = []
+  ; tvar_types = Tvar_types.create ()
+  }
 ;;
 
 (* OR's [-activation] into every clause in [clauses], so each clause is
@@ -54,13 +60,16 @@ let assert_formula t formula : [ `Ok | `Unsat of int array ] =
 
 let push t =
   let activation = Formula.Encoding.fresh_var t.encoding in
-  t.scopes <- activation :: t.scopes
+  t.scopes <- activation :: t.scopes;
+  Tvar_types.push t.tvar_types
 ;;
 
 let pop t =
   match t.scopes with
   | [] -> assert false
-  | _ :: rest -> t.scopes <- rest
+  | _ :: rest ->
+    t.scopes <- rest;
+    Tvar_types.pop t.tvar_types
 ;;
 
 let solve ?time_bound ?(assumptions = [||]) t =
@@ -70,3 +79,5 @@ let solve ?time_bound ?(assumptions = [||]) t =
 ;;
 
 let stats t = Feel.Solver.stats t.solver
+let assert_type t var typ = Tvar_types.assert_type t.tvar_types var typ
+let get_type t var = Tvar_types.get_type t.tvar_types var
