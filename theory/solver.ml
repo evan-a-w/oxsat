@@ -115,7 +115,9 @@ let rec type_expr_to_term : Type_expr.t -> Uninterpreted_functions.Term.t
     `App (~function_:ctor, ~args:(List.map args ~f:type_expr_to_term))
 ;;
 
-let assert_formula t formula : [ `Ok | `Unsat of int array ] =
+let assert_formula t formula
+  : [ `Ok | `Unsat of Feel.Sat_result.Proof_clause.t list ]
+  =
   let checkpoint = Formula.Encoding.checkpoint t.encoding in
   let clauses = Formula.encode t.encoding formula in
   let root_lit = (List.last_exn clauses).(0) in
@@ -163,22 +165,35 @@ let pop t =
   | _ :: rest -> t.scopes <- rest
 ;;
 
-let reason_formula t (raw_core : int array) : Formula.t =
+let clause_to_formula t (literals : int array) : Formula.t option =
   let formulas =
-    Array.to_list raw_core
-    |> List.filter_map ~f:(fun lit ->
-      match Hashtbl.find t.formula_by_root_lit lit with
-      | Some f -> Some f
-      | None ->
-        let var = Int.abs lit in
-        (match Formula.Encoding.atom_for_sat_var t.encoding var with
-         | Some atom ->
-           if lit > 0
-           then Some (Formula.Atom atom)
-           else Some (Formula.Not (Formula.Atom atom))
-         | None -> None))
+    Array.filter_map literals ~f:(fun lit ->
+      let var = Int.abs lit in
+      match Formula.Encoding.atom_for_sat_var t.encoding var with
+      | Some atom ->
+        if lit > 0
+        then Some (Formula.Atom atom)
+        else Some (Formula.Not (Formula.Atom atom))
+      | None -> None)
   in
-  Formula.And formulas
+  if Array.length formulas = Array.length literals
+  then Some (Formula.Or (Array.to_list formulas))
+  else None
+;;
+
+let make_proof t (proof_clauses : Feel.Sat_result.Proof_clause.t list)
+  : Solver_result.Proof_step.t list
+  =
+  List.filter_map proof_clauses ~f:(fun { literals; is_theory } ->
+    if is_theory
+    then
+      clause_to_formula t literals
+      |> Option.map ~f:(fun f -> Solver_result.Proof_step.Tautology f)
+    else if Array.length literals = 1
+    then
+      Hashtbl.find t.formula_by_root_lit literals.(0)
+      |> Option.map ~f:(fun f -> Solver_result.Proof_step.Asserted f)
+    else None)
 ;;
 
 let solve ?time_bound ?(assumptions = [||]) t : Solver_result.t =
@@ -186,7 +201,7 @@ let solve ?time_bound ?(assumptions = [||]) t : Solver_result.t =
   let assumptions = Array.append scope_assumptions assumptions in
   match Feel.Solver.solve ?time_bound ~assumptions t.solver with
   | Sat { assignments } -> Sat { assignments }
-  | Unsat { unsat_core } -> Unsat { reason = reason_formula t unsat_core }
+  | Unsat { proof } -> Unsat { proof = make_proof t proof }
 ;;
 
 let stats t = Feel.Solver.stats t.solver

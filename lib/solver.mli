@@ -28,7 +28,11 @@ val create_with_formula
   :  ?theory:Theory.Packed.t
   -> ?debug:bool @ local
   -> int array array
-  -> [ `Ok of t | `Unsat of int array ]
+  -> [ `Ok of t | `Unsat of Sat_result.Proof_clause.t list ]
 
-val add_clause : t -> clause:int array -> [ `Ok | `Unsat of int array ]
+val add_clause
+  :  t
+  -> clause:int array
+  -> [ `Ok | `Unsat of Sat_result.Proof_clause.t list ]
+
 val stats : t -> Stats.t

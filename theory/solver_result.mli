@@ -1,7 +1,14 @@
 open! Core
 open! Feel.Import
 
+module Proof_step : sig
+  type t =
+    | Asserted of Formula.t
+    | Tautology of Formula.t
+  [@@deriving sexp]
+end
+
 type t =
   | Sat of { assignments : bool option array }
-  | Unsat of { reason : Formula.t }
+  | Unsat of { proof : Proof_step.t list }
 [@@deriving sexp]
