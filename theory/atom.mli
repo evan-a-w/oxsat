@@ -14,6 +14,7 @@ open! Feel.Import
 type t =
   [ `Eq of Term.t * Term.t
   | `Le of Linear_expr.t * Q.t
+  | `Has_type of Tvar.t * Tvar_types.Type.t
   ]
 [@@deriving sexp, compare, hash]
 

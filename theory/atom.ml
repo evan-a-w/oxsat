@@ -4,6 +4,7 @@ open! Feel.Import
 type t =
   [ `Eq of Term.t * Term.t
   | `Le of Linear_expr.t * Q.t
+  | `Has_type of Tvar.t * Tvar_types.Type.t
   ]
 [@@deriving sexp, compare, hash]
 
@@ -15,6 +16,7 @@ let normalize = function
   | `Le (expr, c) ->
     let full, _factor = Linear_expr.(primitive (expr - const c)) in
     `Le ({ full with const = Q.zero }, Q.neg full.const)
+  | `Has_type _ as x -> x
 ;;
 
 include functor Comparable.Make
