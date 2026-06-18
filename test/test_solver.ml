@@ -88,8 +88,10 @@ let%expect_test "contradictory unit clauses are unsatisfiable" =
   in
   (match result with
    | Sat _ -> print_endline "SAT"
-   | Unsat { proof } -> print_s [%message "UNSAT" (proof : Sat_result.Proof_clause.t list)]);
-  [%expect {|
+   | Unsat { proof } ->
+     print_s [%message "UNSAT" (proof : Sat_result.Proof_clause.t list)]);
+  [%expect
+    {|
     (UNSAT
      (proof
       (((literals (-1)) (is_theory false)) ((literals (1)) (is_theory false)))))
@@ -114,7 +116,8 @@ let%expect_test "contradictory assumptions are unsat" =
   (match result with
    | Sat { assignments } ->
      print_s [%message "SAT" (assignments_to_int_array assignments : int array)]
-   | Unsat { proof } -> print_s [%message "UNSAT" (proof : Sat_result.Proof_clause.t list)]);
+   | Unsat { proof } ->
+     print_s [%message "UNSAT" (proof : Sat_result.Proof_clause.t list)]);
   [%expect {| (UNSAT (proof (((literals (1 -1)) (is_theory false))))) |}]
 ;;
 
@@ -202,8 +205,10 @@ let%expect_test "unit propagation leads to conflict" =
   in
   (match result with
    | Sat _ -> print_endline "SAT"
-   | Unsat { proof } -> print_s [%message "UNSAT" (proof : Sat_result.Proof_clause.t list)]);
-  [%expect {|
+   | Unsat { proof } ->
+     print_s [%message "UNSAT" (proof : Sat_result.Proof_clause.t list)]);
+  [%expect
+    {|
     (UNSAT
      (proof
       (((literals (-2)) (is_theory false)) ((literals (2 -1)) (is_theory false))
@@ -239,8 +244,10 @@ let%expect_test "pigeonhole principle - 2 pigeons, 1 hole (unsat)" =
   let result = Solver.solve solver in
   (match result with
    | Sat _ -> print_endline "SAT"
-   | Unsat { proof } -> print_s [%message "UNSAT" (proof : Sat_result.Proof_clause.t list)]);
-  [%expect {|
+   | Unsat { proof } ->
+     print_s [%message "UNSAT" (proof : Sat_result.Proof_clause.t list)]);
+  [%expect
+    {|
     (UNSAT
      (proof
       (((literals (-2 -1)) (is_theory false)) ((literals (2)) (is_theory false))
@@ -299,7 +306,8 @@ let run_dimacs s =
   match result with
   | Sat _ -> print_endline "SAT"
   | Unsat { proof } ->
-    print_s [%message "UNSAT" ~unsat_core:(proof : Sat_result.Proof_clause.t list)]
+    print_s
+      [%message "UNSAT" ~unsat_core:(proof : Sat_result.Proof_clause.t list)]
 ;;
 
 let%expect_test "sudoku" =
@@ -315,7 +323,8 @@ let%expect_test "succ dimacs" =
 
 let%expect_test "fail dimacs" =
   run_dimacs Examples.Dimacs.fail_eg;
-  [%expect {|
+  [%expect
+    {|
     (UNSAT
      (unsat_core
       (((literals (-90 -91 -88 -89 -87 -86)) (is_theory false))
@@ -372,7 +381,8 @@ let%expect_test "assumptions" =
         [%message
           "SAT" ~assignments:(assignments_to_int_array assignments : int array)]
     | Unsat { proof } ->
-      print_s [%message "UNSAT" ~unsat_core:(proof : Sat_result.Proof_clause.t list)]
+      print_s
+        [%message "UNSAT" ~unsat_core:(proof : Sat_result.Proof_clause.t list)]
   in
   solve ();
   solve ~assumptions:[| 1 |] ();

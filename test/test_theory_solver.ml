@@ -67,8 +67,7 @@ let%expect_test "Tseitin: simple propositional formula matches truth table" =
   let clauses = Formula.encode encoding formula in
   let solver = Feel.Solver.create () in
   List.iter clauses ~f:(fun clause ->
-    ignore
-      (Feel.Solver.add_clause solver ~clause : [ `Ok | `Unsat of _ ]));
+    ignore (Feel.Solver.add_clause solver ~clause : [ `Ok | `Unsat of _ ]));
   let result = Feel.Solver.solve solver in
   let var_a = Formula.Encoding.sat_var_for_atom encoding a in
   let var_b = Formula.Encoding.sat_var_for_atom encoding b in
@@ -104,8 +103,7 @@ let%expect_test "Tseitin: True/False and double negation" =
   let solver = Feel.Solver.create () in
   let assert_formula formula =
     List.iter (Formula.encode encoding formula) ~f:(fun clause ->
-      ignore
-        (Feel.Solver.add_clause solver ~clause : [ `Ok | `Unsat of _ ]))
+      ignore (Feel.Solver.add_clause solver ~clause : [ `Ok | `Unsat of _ ]))
   in
   assert_formula True;
   assert_formula (Not (Not True));
@@ -133,8 +131,7 @@ let%expect_test "Tseitin: And [] is True, Or [] is False" =
   let solver = Feel.Solver.create () in
   let assert_formula formula =
     List.iter (Formula.encode encoding formula) ~f:(fun clause ->
-      ignore
-        (Feel.Solver.add_clause solver ~clause : [ `Ok | `Unsat of _ ]))
+      ignore (Feel.Solver.add_clause solver ~clause : [ `Ok | `Unsat of _ ]))
   in
   assert_formula (And []);
   assert_formula (Not (Or []));
@@ -178,7 +175,8 @@ let%expect_test "EUF: transitivity violation is unsat" =
   assert_ok solver (neq y z);
   assert_ok solver (eq x z);
   print_result (Solver.solve solver);
-  [%expect {|
+  [%expect
+    {|
     (Unsat
      (proof
       ((Tautology
@@ -196,7 +194,8 @@ let%expect_test "EUF: congruence conflict (f(x) <> f(y) with x = y)" =
   assert_ok solver (eq x y);
   assert_ok solver (neq (f x) (f y));
   print_result (Solver.solve solver);
-  [%expect {|
+  [%expect
+    {|
     (Unsat
      (proof
       ((Tautology
@@ -282,7 +281,8 @@ let%expect_test "incremental: new EUF atoms registered after a solve" =
   (* introduce brand-new terms/atoms involving f, after solving once *)
   assert_ok solver (neq (f x) (f y));
   print_result (Solver.solve solver);
-  [%expect {|
+  [%expect
+    {|
     (Unsat
      (proof
       ((Tautology
@@ -331,7 +331,8 @@ let%expect_test "push/pop: nested scopes" =
   assert_ok solver (eq x z);
   (* x=y, y<>z, x=z is a transitivity violation *)
   print_result (Solver.solve solver);
-  [%expect {|
+  [%expect
+    {|
     (Unsat
      (proof
       ((Tautology
@@ -421,7 +422,8 @@ let%expect_test "Has_type: conflicting ground types are unsat" =
   Solver.assert_type solver xv int_type;
   Solver.assert_type solver xv float_type;
   print_result (Solver.solve solver);
-  [%expect {|
+  [%expect
+    {|
     (Unsat
      (proof
       ((Tautology
@@ -447,7 +449,8 @@ let%expect_test "Has_type: structural conflict (Array vs Int)" =
   Solver.assert_type solver xv (array_of (Var a));
   Solver.assert_type solver xv int_type;
   print_result (Solver.solve solver);
-  [%expect {|
+  [%expect
+    {|
     (Unsat
      (proof
       ((Tautology
@@ -480,7 +483,8 @@ let%expect_test "Has_type: push/pop retracts type conflict" =
   Solver.push solver;
   Solver.assert_type solver xv float_type;
   print_result (Solver.solve solver);
-  [%expect {|
+  [%expect
+    {|
     (Unsat
      (proof
       ((Tautology
@@ -520,7 +524,8 @@ let%expect_test "Type_eq: TypeEq(a, Int) and TypeEq(a, Float) conflict via \
   assert_ok solver (type_eq (Var a) int_type);
   assert_ok solver (type_eq (Var a) float_type);
   print_result (Solver.solve solver);
-  [%expect {|
+  [%expect
+    {|
     (Unsat
      (proof
       ((Tautology
