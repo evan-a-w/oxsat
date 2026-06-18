@@ -67,18 +67,24 @@ let create () =
     }
   in
   (* Pre-register pairwise disequalities between distinct base types. This makes
-     the type-level EUF aware that e.g. [Int != Float], so that asserting
-     [TypeEq('a, Int)] and [TypeEq('a, Float)] yields a conflict. *)
+     the type-level EUF aware that e.g. [Int ≠ Float], so that asserting
+     [TypeEq('a, Int)] and [TypeEq('a, Float)] yields a conflict. Registered via
+     [sat_var_for_atom] so [make_core] resolves these vars to
+     [Neg (Type_eq ...)] rather than [Raw n]. *)
   let base_types = Type_expr.Base.all in
   List.iter base_types ~f:(fun b1 ->
     List.iter base_types ~f:(fun b2 ->
       if [%compare: Type_expr.Base.t] b1 b2 < 0
       then (
+        let sat_var =
+          Formula.Encoding.sat_var_for_atom
+            t.encoding
+            (`Type_eq (Base b1, Base b2))
+        in
         let uf_atom =
           Uninterpreted_functions.Atom.normalize
             (`Eq (`Var (Type_expr.base_tvar b1), `Var (Type_expr.base_tvar b2)))
         in
-        let sat_var = Formula.Encoding.fresh_var t.encoding in
         Uninterpreted_functions.add_atom t.type_uf ~atom:uf_atom ~sat_var;
         ignore
           (Feel.Solver.add_clause t.solver ~clause:[| -sat_var |]
@@ -149,10 +155,22 @@ let pop t =
   | _ :: rest -> t.scopes <- rest
 ;;
 
-let solve ?time_bound ?(assumptions = [||]) t =
+let make_core t (raw_core : int array) : Core_literal.t list =
+  Array.to_list raw_core
+  |> List.map ~f:(fun lit ->
+    let var = Int.abs lit in
+    match Formula.Encoding.atom_for_sat_var t.encoding var with
+    | Some atom ->
+      if lit > 0 then Core_literal.Pos atom else Core_literal.Neg atom
+    | None -> Core_literal.Raw var)
+;;
+
+let solve ?time_bound ?(assumptions = [||]) t : Solver_result.t =
   let scope_assumptions = Array.of_list t.scopes in
   let assumptions = Array.append scope_assumptions assumptions in
-  Feel.Solver.solve ?time_bound ~assumptions t.solver
+  match Feel.Solver.solve ?time_bound ~assumptions t.solver with
+  | Sat { assignments } -> Sat { assignments }
+  | Unsat { unsat_core } -> Unsat { core = make_core t unsat_core }
 ;;
 
 let stats t = Feel.Solver.stats t.solver

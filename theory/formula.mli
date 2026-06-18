@@ -27,6 +27,10 @@ module Encoding : sig
       (after normalization) hasn't been seen before. *)
   val sat_var_for_atom : t -> Atom.t -> int
 
+  (** The atom registered for [sat_var], if [sat_var] was allocated by
+      [sat_var_for_atom] (as opposed to [fresh_var] or a Tseitin auxiliary). *)
+  val atom_for_sat_var : t -> int -> Atom.t option
+
   (** All [(atom, sat_var)] pairs registered so far, in the order in which they
       were first encountered, with each [atom] normalized. *)
   val atoms : t -> (Atom.t * int) list

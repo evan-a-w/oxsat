@@ -34,15 +34,17 @@ val push : t -> unit
     retracts constraints, not vocabulary. *)
 val pop : t -> unit
 
-(** [solve t] checks satisfiability of all formulas asserted in currently active
-    scopes. [assumptions] are additional unit assumptions for this call only,
-    combined with the activation literals of any open scopes. *)
+val stats : t -> Feel.Stats.t
+
+(** Checks satisfiability of all formulas asserted in currently active scopes.
+    [assumptions] are additional unit assumptions for this call only. On
+    [Unsat], each literal in [core] has its theory atom resolved so callers see
+    actual [Atom.t] expressions rather than raw SAT variable indices. *)
 val solve
   :  ?time_bound:Feel.Solver.time_bound
   -> ?assumptions:int array
   -> t
-  -> Feel.Sat_result.t
+  -> Solver_result.t
 
-val stats : t -> Feel.Stats.t
 val assert_type : t -> Tvar.t -> Type_expr.t -> unit
 val get_type : t -> Tvar.t -> Type_expr.t option

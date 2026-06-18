@@ -14,6 +14,7 @@ module Encoding = struct
   type t =
     { mutable next_var : int
     ; atom_to_sat_var : int Atom.Table.t
+    ; sat_var_to_atom : Atom.t Int.Table.t
     ; atoms_in_order : (Atom.t * int) Vec.Value.t
     ; mutable true_var : int or_null
     }
@@ -21,6 +22,7 @@ module Encoding = struct
   let create () =
     { next_var = 1
     ; atom_to_sat_var = Atom.Table.create ()
+    ; sat_var_to_atom = Int.Table.create ()
     ; atoms_in_order = Vec.Value.create ()
     ; true_var = Null
     }
@@ -36,10 +38,12 @@ module Encoding = struct
     let atom = Atom.normalize atom in
     Hashtbl.find_or_add t.atom_to_sat_var atom ~default:(fun () ->
       let sat_var = fresh_var t in
+      Hashtbl.set t.sat_var_to_atom ~key:sat_var ~data:atom;
       Vec.Value.push t.atoms_in_order (atom, sat_var);
       sat_var)
   ;;
 
+  let atom_for_sat_var t sat_var = Hashtbl.find t.sat_var_to_atom sat_var
   let atoms t = Vec.Value.to_list t.atoms_in_order
   let checkpoint t = Vec.Value.length t.atoms_in_order
 
