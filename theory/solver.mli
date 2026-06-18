@@ -38,8 +38,9 @@ val stats : t -> Feel.Stats.t
 
 (** Checks satisfiability of all formulas asserted in currently active scopes.
     [assumptions] are additional unit assumptions for this call only. On
-    [Unsat], each literal in [core] has its theory atom resolved so callers see
-    actual [Atom.t] expressions rather than raw SAT variable indices. *)
+    [Unsat], [reason] is a [Formula.And] of the conflicting formulas, with
+    Tseitin auxiliary variables resolved back to the original [Formula.t] that
+    introduced them. *)
 val solve
   :  ?time_bound:Feel.Solver.time_bound
   -> ?assumptions:int array

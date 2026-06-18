@@ -45,6 +45,7 @@ type t =
   ; tt : Tvar_types.t
   ; encoding : Formula.Encoding.t
   ; mutable scopes : int list (* activation literals, innermost first *)
+  ; formula_by_root_lit : Formula.t Int.Table.t
   }
 
 let create () =
@@ -64,13 +65,14 @@ let create () =
     ; tt
     ; encoding = Formula.Encoding.create ()
     ; scopes = []
+    ; formula_by_root_lit = Int.Table.create ()
     }
   in
   (* Pre-register pairwise disequalities between distinct base types. This makes
      the type-level EUF aware that e.g. [Int ≠ Float], so that asserting
      [TypeEq('a, Int)] and [TypeEq('a, Float)] yields a conflict. Registered via
-     [sat_var_for_atom] so [make_core] resolves these vars to
-     [Neg (Type_eq ...)] rather than [Raw n]. *)
+     [sat_var_for_atom] so [reason_formula] resolves these vars to
+     [Not (Atom (Type_eq ...))] rather than silently dropping them. *)
   let base_types = Type_expr.Base.all in
   List.iter base_types ~f:(fun b1 ->
     List.iter base_types ~f:(fun b2 ->
@@ -86,6 +88,10 @@ let create () =
             (`Eq (`Var (Type_expr.base_tvar b1), `Var (Type_expr.base_tvar b2)))
         in
         Uninterpreted_functions.add_atom t.type_uf ~atom:uf_atom ~sat_var;
+        Hashtbl.set
+          t.formula_by_root_lit
+          ~key:(-sat_var)
+          ~data:(Formula.Not (Formula.Atom (`Type_eq (Base b1, Base b2))));
         ignore
           (Feel.Solver.add_clause t.solver ~clause:[| -sat_var |]
            : [ `Ok | `Unsat of _ ]))));
@@ -112,6 +118,8 @@ let rec type_expr_to_term : Type_expr.t -> Uninterpreted_functions.Term.t
 let assert_formula t formula : [ `Ok | `Unsat of int array ] =
   let checkpoint = Formula.Encoding.checkpoint t.encoding in
   let clauses = Formula.encode t.encoding formula in
+  let root_lit = (List.last_exn clauses).(0) in
+  Hashtbl.set t.formula_by_root_lit ~key:root_lit ~data:formula;
   let clauses =
     match t.scopes with
     | [] -> clauses
@@ -155,14 +163,22 @@ let pop t =
   | _ :: rest -> t.scopes <- rest
 ;;
 
-let make_core t (raw_core : int array) : Core_literal.t list =
-  Array.to_list raw_core
-  |> List.map ~f:(fun lit ->
-    let var = Int.abs lit in
-    match Formula.Encoding.atom_for_sat_var t.encoding var with
-    | Some atom ->
-      if lit > 0 then Core_literal.Pos atom else Core_literal.Neg atom
-    | None -> Core_literal.Raw var)
+let reason_formula t (raw_core : int array) : Formula.t =
+  let formulas =
+    Array.to_list raw_core
+    |> List.filter_map ~f:(fun lit ->
+      match Hashtbl.find t.formula_by_root_lit lit with
+      | Some f -> Some f
+      | None ->
+        let var = Int.abs lit in
+        (match Formula.Encoding.atom_for_sat_var t.encoding var with
+         | Some atom ->
+           if lit > 0
+           then Some (Formula.Atom atom)
+           else Some (Formula.Not (Formula.Atom atom))
+         | None -> None))
+  in
+  Formula.And formulas
 ;;
 
 let solve ?time_bound ?(assumptions = [||]) t : Solver_result.t =
@@ -170,7 +186,7 @@ let solve ?time_bound ?(assumptions = [||]) t : Solver_result.t =
   let assumptions = Array.append scope_assumptions assumptions in
   match Feel.Solver.solve ?time_bound ~assumptions t.solver with
   | Sat { assignments } -> Sat { assignments }
-  | Unsat { unsat_core } -> Unsat { core = make_core t unsat_core }
+  | Unsat { unsat_core } -> Unsat { reason = reason_formula t unsat_core }
 ;;
 
 let stats t = Feel.Solver.stats t.solver
