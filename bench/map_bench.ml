@@ -40,7 +40,8 @@ let generate_random_map ~size =
     Map.add_exn map ~key ~data:())
 ;;
 
-(* Execute a single operation on the map - returns new map since Core Map is immutable *)
+(* Execute a single operation on the map - returns new map since Core Map is
+   immutable *)
 let execute_operation map op =
   match op with
   | Insert key -> Map.set map ~key ~data:()

@@ -88,8 +88,7 @@ let%expect_test "contradictory unit clauses are unsatisfiable" =
   in
   (match result with
    | Sat _ -> print_endline "SAT"
-   | Unsat { unsat_core } ->
-     print_s [%message "UNSAT" (unsat_core : int array)]);
+   | Unsat { unsat_core } -> print_s [%message "UNSAT" (unsat_core : int array)]);
   [%expect {| (UNSAT (unsat_core (1))) |}]
 ;;
 
@@ -111,8 +110,7 @@ let%expect_test "contradictory assumptions are unsat" =
   (match result with
    | Sat { assignments } ->
      print_s [%message "SAT" (assignments_to_int_array assignments : int array)]
-   | Unsat { unsat_core } ->
-     print_s [%message "UNSAT" (unsat_core : int array)]);
+   | Unsat { unsat_core } -> print_s [%message "UNSAT" (unsat_core : int array)]);
   [%expect {| (UNSAT (unsat_core (1 -1))) |}]
 ;;
 
@@ -122,13 +120,15 @@ let%expect_test "adding clause after solve can change model" =
   let result = Solver.solve solver in
   (match result with
    | Sat { assignments } ->
-     print_s [%message "before" (assignments_to_int_array assignments : int array)]
+     print_s
+       [%message "before" (assignments_to_int_array assignments : int array)]
    | Unsat _ -> print_endline "before UNSAT");
   ignore (Solver.add_clause solver ~clause:[| -1 |] : [ `Ok | `Unsat of _ ]);
   let result = Solver.solve solver in
   (match result with
    | Sat { assignments } ->
-     print_s [%message "after" (assignments_to_int_array assignments : int array)]
+     print_s
+       [%message "after" (assignments_to_int_array assignments : int array)]
    | Unsat { unsat_core } ->
      print_s [%message "after UNSAT" (unsat_core : int array)]);
   [%expect
@@ -198,8 +198,7 @@ let%expect_test "unit propagation leads to conflict" =
   in
   (match result with
    | Sat _ -> print_endline "SAT"
-   | Unsat { unsat_core } ->
-     print_s [%message "UNSAT" (unsat_core : int array)]);
+   | Unsat { unsat_core } -> print_s [%message "UNSAT" (unsat_core : int array)]);
   [%expect {| (UNSAT (unsat_core (2))) |}]
 ;;
 
@@ -231,8 +230,7 @@ let%expect_test "pigeonhole principle - 2 pigeons, 1 hole (unsat)" =
   let result = Solver.solve solver in
   (match result with
    | Sat _ -> print_endline "SAT"
-   | Unsat { unsat_core } ->
-     print_s [%message "UNSAT" (unsat_core : int array)]);
+   | Unsat { unsat_core } -> print_s [%message "UNSAT" (unsat_core : int array)]);
   [%expect {| (UNSAT (unsat_core (1))) |}]
 ;;
 
@@ -240,7 +238,8 @@ let%expect_test "clause with multiple literals satisfied by one assignment" =
   let solver = Solver.create () in
   (* Add clauses: x1 and (x1 or x2 or x3) *)
   ignore (Solver.add_clause solver ~clause:[| 1 |] : [ `Ok | `Unsat of _ ]);
-  ignore (Solver.add_clause solver ~clause:[| 1; 2; 3 |] : [ `Ok | `Unsat of _ ]);
+  ignore
+    (Solver.add_clause solver ~clause:[| 1; 2; 3 |] : [ `Ok | `Unsat of _ ]);
   let result = Solver.solve solver in
   (match result with
    | Sat { assignments } ->
@@ -307,20 +306,44 @@ let%expect_test "fail dimacs" =
 
 let%expect_test "assumptions" =
   let solver = Solver.create () in
-  ignore (Solver.add_clause solver ~clause:[| 3; -5; 6 |] : [ `Ok | `Unsat of _ ]);
-  ignore (Solver.add_clause solver ~clause:[| -2; -5; -3; 6; -4 |] : [ `Ok | `Unsat of _ ]);
-  ignore (Solver.add_clause solver ~clause:[| -5; 1; 4; -6 |] : [ `Ok | `Unsat of _ ]);
-  ignore (Solver.add_clause solver ~clause:[| 3; -4; 6; 1; 2; 4 |] : [ `Ok | `Unsat of _ ]);
-  ignore (Solver.add_clause solver ~clause:[| -3; 4; -2; 6; -1; -5 |] : [ `Ok | `Unsat of _ ]);
-  ignore (Solver.add_clause solver ~clause:[| 3; -2; -6; 4 |] : [ `Ok | `Unsat of _ ]);
-  ignore (Solver.add_clause solver ~clause:[| 3; 2; -1 |] : [ `Ok | `Unsat of _ ]);
-  ignore (Solver.add_clause solver ~clause:[| -6; -4; 5; -3 |] : [ `Ok | `Unsat of _ ]);
-  ignore (Solver.add_clause solver ~clause:[| -3; 2; 5; 6; -1; -4 |] : [ `Ok | `Unsat of _ ]);
-  ignore (Solver.add_clause solver ~clause:[| 4; -2; -3; 5 |] : [ `Ok | `Unsat of _ ]);
-  ignore (Solver.add_clause solver ~clause:[| 3; -2; -1; -5; -6; -4 |] : [ `Ok | `Unsat of _ ]);
+  ignore
+    (Solver.add_clause solver ~clause:[| 3; -5; 6 |] : [ `Ok | `Unsat of _ ]);
+  ignore
+    (Solver.add_clause solver ~clause:[| -2; -5; -3; 6; -4 |]
+     : [ `Ok | `Unsat of _ ]);
+  ignore
+    (Solver.add_clause solver ~clause:[| -5; 1; 4; -6 |]
+     : [ `Ok | `Unsat of _ ]);
+  ignore
+    (Solver.add_clause solver ~clause:[| 3; -4; 6; 1; 2; 4 |]
+     : [ `Ok | `Unsat of _ ]);
+  ignore
+    (Solver.add_clause solver ~clause:[| -3; 4; -2; 6; -1; -5 |]
+     : [ `Ok | `Unsat of _ ]);
+  ignore
+    (Solver.add_clause solver ~clause:[| 3; -2; -6; 4 |]
+     : [ `Ok | `Unsat of _ ]);
+  ignore
+    (Solver.add_clause solver ~clause:[| 3; 2; -1 |] : [ `Ok | `Unsat of _ ]);
+  ignore
+    (Solver.add_clause solver ~clause:[| -6; -4; 5; -3 |]
+     : [ `Ok | `Unsat of _ ]);
+  ignore
+    (Solver.add_clause solver ~clause:[| -3; 2; 5; 6; -1; -4 |]
+     : [ `Ok | `Unsat of _ ]);
+  ignore
+    (Solver.add_clause solver ~clause:[| 4; -2; -3; 5 |]
+     : [ `Ok | `Unsat of _ ]);
+  ignore
+    (Solver.add_clause solver ~clause:[| 3; -2; -1; -5; -6; -4 |]
+     : [ `Ok | `Unsat of _ ]);
   ignore (Solver.add_clause solver ~clause:[| -2; -6 |] : [ `Ok | `Unsat of _ ]);
-  ignore (Solver.add_clause solver ~clause:[| -1; -2; 4; 5 |] : [ `Ok | `Unsat of _ ]);
-  ignore (Solver.add_clause solver ~clause:[| 2; -4; 1; 3; -5; -6 |] : [ `Ok | `Unsat of _ ]);
+  ignore
+    (Solver.add_clause solver ~clause:[| -1; -2; 4; 5 |]
+     : [ `Ok | `Unsat of _ ]);
+  ignore
+    (Solver.add_clause solver ~clause:[| 2; -4; 1; 3; -5; -6 |]
+     : [ `Ok | `Unsat of _ ]);
   let solve ?assumptions () =
     let result = Solver.solve ?assumptions solver in
     match result with

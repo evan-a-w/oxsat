@@ -640,28 +640,28 @@ let analyze_conflict t ~(failed_clause : Clause.t) ~failed_clause_idx =
        assumption-decision from an earlier level (possible when multiple
        assumptions each occupy their own decision level). There is no 1UIP at
        [t.decision_level] to search for: every falsified literal already
-       collected into [learned_literals] comes from a strictly lower
-       decision level. Treat the one with the highest decision level as the
-       asserting literal (its negation becomes the learned unit/clause's
-       UIP), so backjumping lands just below it. *)
+       collected into [learned_literals] comes from a strictly lower decision
+       level. Treat the one with the highest decision level as the asserting
+       literal (its negation becomes the learned unit/clause's UIP), so
+       backjumping lands just below it. *)
     if !needs_rescale then rescale_clause_activities t;
-    (let best_idx = ref 0 in
-       let best_dl = ref (-1) in
-       Vec.Value.iteri learned_literals ~f:(fun i literal ->
-         let var = literal_var t ~literal in
-         match%optional_u (var.trail_entry : Trail_entry.Option_u.t) with
-         | None -> ()
-         | Some trail_entry ->
-           let dl = trail_entry.#decision_level in
-           if dl > !best_dl
-           then (
-             best_dl := dl;
-             best_idx := i));
-       let uip_trail_literal = Vec.Value.get learned_literals !best_idx in
-       let uip_literal = -uip_trail_literal in
-       Vec.Value.swap learned_literals 0 !best_idx;
-       Vec.Value.set learned_literals 0 uip_literal;
-       simplify_learned_clause ~learned_literals ~uip_literal ~seen t)
+    let best_idx = ref 0 in
+    let best_dl = ref (-1) in
+    Vec.Value.iteri learned_literals ~f:(fun i literal ->
+      let var = literal_var t ~literal in
+      match%optional_u (var.trail_entry : Trail_entry.Option_u.t) with
+      | None -> ()
+      | Some trail_entry ->
+        let dl = trail_entry.#decision_level in
+        if dl > !best_dl
+        then (
+          best_dl := dl;
+          best_idx := i));
+    let uip_trail_literal = Vec.Value.get learned_literals !best_idx in
+    let uip_literal = -uip_trail_literal in
+    Vec.Value.swap learned_literals 0 !best_idx;
+    Vec.Value.set learned_literals 0 uip_literal;
+    simplify_learned_clause ~learned_literals ~uip_literal ~seen t
   | false ->
     let found_uip = ref false in
     let uip_literal = ref 0 in
@@ -985,9 +985,9 @@ let maybe_clear_past_solve_state t =
     (* Between [solve] calls there are no active assumptions: reset to 0 so
        [restart] pops the trail all the way back to decision level 0, rather
        than leaving behind decision-level-1 (etc.) entries from the previous
-       [solve]'s assumptions. Otherwise those stale entries would coexist
-       with the next [solve]'s own (unrelated) decision-level-1 entries,
-       breaking the 1UIP invariant in [analyze_conflict]. *)
+       [solve]'s assumptions. Otherwise those stale entries would coexist with
+       the next [solve]'s own (unrelated) decision-level-1 entries, breaking the
+       1UIP invariant in [analyze_conflict]. *)
     t.decision_level_of_last_assumption <- 0;
     restart t)
 ;;

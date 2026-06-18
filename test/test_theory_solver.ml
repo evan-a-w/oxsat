@@ -164,7 +164,8 @@ let%expect_test "pure boolean formula (no theory atoms)" =
   assert_ok solver (Or [ Not (Atom a); Atom b ]);
   assert_ok solver (Or [ Atom a; Not (Atom b) ]);
   print_result (Solver.solve solver);
-  [%expect {| (Sat (assignments (() (true) (true) (true) (true) (true)))) |}]
+  [%expect
+    {| (Sat (assignments (() (false) (true) (true) (true) (true) (true)))) |}]
 ;;
 
 let%expect_test "EUF: transitivity violation is unsat" =
@@ -173,7 +174,7 @@ let%expect_test "EUF: transitivity violation is unsat" =
   assert_ok solver (neq y z);
   assert_ok solver (eq x z);
   print_result (Solver.solve solver);
-  [%expect {| (Unsat (unsat_core (1))) |}]
+  [%expect {| (Unsat (unsat_core (2))) |}]
 ;;
 
 let%expect_test "EUF: congruence conflict (f(x) <> f(y) with x = y)" =
@@ -181,7 +182,7 @@ let%expect_test "EUF: congruence conflict (f(x) <> f(y) with x = y)" =
   assert_ok solver (eq x y);
   assert_ok solver (neq (f x) (f y));
   print_result (Solver.solve solver);
-  [%expect {| (Unsat (unsat_core (1))) |}]
+  [%expect {| (Unsat (unsat_core (2))) |}]
 ;;
 
 let%expect_test "EUF: congruence positive propagation (x = y forces f(x) = \
@@ -192,7 +193,7 @@ let%expect_test "EUF: congruence positive propagation (x = y forces f(x) = \
   assert_ok solver (neq (f x) (f y));
   assert_ok solver (eq x y);
   print_result (Solver.solve solver);
-  [%expect {| (Unsat (unsat_core (-1))) |}]
+  [%expect {| (Unsat (unsat_core (-2))) |}]
 ;;
 
 let%expect_test "EUF: satisfiable case" =
@@ -200,7 +201,7 @@ let%expect_test "EUF: satisfiable case" =
   assert_ok solver (eq x y);
   assert_ok solver (neq y z);
   print_result (Solver.solve solver);
-  [%expect {| (Sat (assignments (() (true) (false)))) |}]
+  [%expect {| (Sat (assignments (() (false) (true) (false)))) |}]
 ;;
 
 (* ----- Incremental assert_formula + solve ----- *)
@@ -214,13 +215,13 @@ let%expect_test "incremental: asserting a contradicting formula after solve" =
   let solver = Solver.create () in
   assert_ok solver (eq x y);
   print_result (Solver.solve solver);
-  [%expect {| (Sat (assignments (() (true)))) |}];
+  [%expect {| (Sat (assignments (() (false) (true)))) |}];
   assert_ok solver (neq x y);
   print_result (Solver.solve solver);
   [%expect
     {|
     UNSAT (at assert time)
-    (Sat (assignments (() (true))))
+    (Sat (assignments (() (false) (true))))
     |}]
 ;;
 
@@ -228,11 +229,11 @@ let%expect_test "incremental: new EUF atoms registered after a solve" =
   let solver = Solver.create () in
   assert_ok solver (eq x y);
   print_result (Solver.solve solver);
-  [%expect {| (Sat (assignments (() (true)))) |}];
+  [%expect {| (Sat (assignments (() (false) (true)))) |}];
   (* introduce brand-new terms/atoms involving f, after solving once *)
   assert_ok solver (neq (f x) (f y));
   print_result (Solver.solve solver);
-  [%expect {| (Unsat (unsat_core (1))) |}]
+  [%expect {| (Unsat (unsat_core (2))) |}]
 ;;
 
 (* ----- Push/pop ----- *)
@@ -241,38 +242,40 @@ let%expect_test "push/pop: retracting a contradicting constraint" =
   let solver = Solver.create () in
   assert_ok solver (eq x y);
   print_result (Solver.solve solver);
-  [%expect {| (Sat (assignments (() (true)))) |}];
+  [%expect {| (Sat (assignments (() (false) (true)))) |}];
   Solver.push solver;
   assert_ok solver (neq x y);
   print_result (Solver.solve solver);
-  [%expect {| (Unsat (unsat_core (1))) |}];
+  [%expect {| (Unsat (unsat_core (2))) |}];
   Solver.pop solver;
   print_result (Solver.solve solver);
-  [%expect {| (Sat (assignments (() (true) (false)))) |}]
+  [%expect {| (Sat (assignments (() (false) (true) (false)))) |}]
 ;;
 
 let%expect_test "push/pop: nested scopes" =
   let solver = Solver.create () in
   assert_ok solver (eq x y);
   print_result (Solver.solve solver);
-  [%expect {| (Sat (assignments (() (true)))) |}];
+  [%expect {| (Sat (assignments (() (false) (true)))) |}];
   Solver.push solver;
   assert_ok solver (neq y z);
   print_result (Solver.solve solver);
-  [%expect {| (Sat (assignments (() (true) (true) (false)))) |}];
+  [%expect {| (Sat (assignments (() (false) (true) (true) (false)))) |}];
   Solver.push solver;
   assert_ok solver (eq x z);
   (* x=y, y<>z, x=z is a transitivity violation *)
   print_result (Solver.solve solver);
-  [%expect {| (Unsat (unsat_core (3))) |}];
+  [%expect {| (Unsat (unsat_core (4))) |}];
   Solver.pop solver;
   (* back to: x=y, y<>z -- satisfiable *)
   print_result (Solver.solve solver);
-  [%expect {| (Sat (assignments (() (true) (true) (false) (false) (false)))) |}];
+  [%expect
+    {| (Sat (assignments (() (false) (true) (true) (false) (false) (false)))) |}];
   Solver.pop solver;
   (* back to: x=y only -- satisfiable *)
   print_result (Solver.solve solver);
-  [%expect {| (Sat (assignments (() (true) (true) (false) (false) (false)))) |}]
+  [%expect
+    {| (Sat (assignments (() (false) (true) (true) (false) (false) (false)))) |}]
 ;;
 
 let%expect_test "push/pop: EUF congruence conflict inside a scope is retracted \
@@ -281,17 +284,17 @@ let%expect_test "push/pop: EUF congruence conflict inside a scope is retracted \
   let solver = Solver.create () in
   assert_ok solver (eq x y);
   print_result (Solver.solve solver);
-  [%expect {| (Sat (assignments (() (true)))) |}];
+  [%expect {| (Sat (assignments (() (false) (true)))) |}];
   Solver.push solver;
   assert_ok solver (neq (f x) (f y));
   print_result (Solver.solve solver);
-  [%expect {| (Unsat (unsat_core (-3))) |}];
+  [%expect {| (Unsat (unsat_core (-4))) |}];
   Solver.pop solver;
   print_result (Solver.solve solver);
-  [%expect {| (Sat (assignments (() (true) (false) (true)))) |}];
+  [%expect {| (Sat (assignments (() (false) (true) (false) (true)))) |}];
   (* solving again should remain consistent *)
   print_result (Solver.solve solver);
-  [%expect {| (Sat (assignments (() (true) (false) (true)))) |}]
+  [%expect {| (Sat (assignments (() (false) (true) (false) (true)))) |}]
 ;;
 
 (* ----- Stats passthrough ----- *)
@@ -303,4 +306,124 @@ let%expect_test "stats passthrough" =
   let stats = Solver.stats solver in
   print_s [%message "" ~iterations_nonneg:(stats.#iterations >= 0 : bool)];
   [%expect {| (iterations_nonneg true) |}]
+;;
+
+(* ----- Type theory (Has_type / Type_eq) ----- *)
+
+let xv = Tvar.of_string "x"
+let yv = Tvar.of_string "y"
+let int_type : Type_expr.t = Base Int
+let float_type : Type_expr.t = Base Float
+let array_ctor = Tvar.of_string "Array"
+let array_of (elem : Type_expr.t) : Type_expr.t = App (array_ctor, [ elem ])
+let type_eq te1 te2 : Formula.t = Atom (`Type_eq (te1, te2))
+
+let%expect_test "Has_type: basic assert and get_type" =
+  let solver = Solver.create () in
+  Solver.assert_type solver xv int_type;
+  print_s [%sexp (Solver.get_type solver xv : Type_expr.t option)];
+  ignore (Solver.solve solver : Feel.Sat_result.t);
+  print_s [%sexp (Solver.get_type solver xv : Type_expr.t option)];
+  [%expect {|
+    ((Base Int))
+    ((Base Int))
+    |}]
+;;
+
+let%expect_test "Has_type: conflicting ground types are unsat" =
+  let solver = Solver.create () in
+  Solver.assert_type solver xv int_type;
+  Solver.assert_type solver xv float_type;
+  print_result (Solver.solve solver);
+  [%expect {| (Unsat (unsat_core (2))) |}]
+;;
+
+let%expect_test "Has_type: two variables can have different types" =
+  let solver = Solver.create () in
+  Solver.assert_type solver xv int_type;
+  Solver.assert_type solver yv float_type;
+  print_result (Solver.solve solver);
+  [%expect {| (Sat (assignments (() (false) (true) (true)))) |}]
+;;
+
+let%expect_test "Has_type: structural conflict (Array vs Int)" =
+  let a = Tvar.of_string "a" in
+  let solver = Solver.create () in
+  Solver.assert_type solver xv (array_of (Var a));
+  Solver.assert_type solver xv int_type;
+  print_result (Solver.solve solver);
+  [%expect {| (Unsat (unsat_core (2))) |}]
+;;
+
+let%expect_test "Has_type: same constructor, different type args — sat without \
+                 TypeEq constraints"
+  =
+  let a = Tvar.of_string "a" in
+  let b = Tvar.of_string "b" in
+  let solver = Solver.create () in
+  (* Array('a) and Array('b) have the same head — no top-level conflict *)
+  Solver.assert_type solver xv (array_of (Var a));
+  Solver.assert_type solver xv (array_of (Var b));
+  print_result (Solver.solve solver);
+  [%expect {| (Sat (assignments (() (false) (true) (true)))) |}]
+;;
+
+let%expect_test "Has_type: push/pop retracts type conflict" =
+  let solver = Solver.create () in
+  Solver.assert_type solver xv int_type;
+  print_result (Solver.solve solver);
+  [%expect {| (Sat (assignments (() (false) (true)))) |}];
+  Solver.push solver;
+  Solver.assert_type solver xv float_type;
+  print_result (Solver.solve solver);
+  [%expect {| (Unsat (unsat_core (4))) |}];
+  Solver.pop solver;
+  print_result (Solver.solve solver);
+  [%expect {| (Sat (assignments (() (false) (true) (false) (false)))) |}]
+;;
+
+let%expect_test "Has_type: get_type reflects pushed/popped state" =
+  let solver = Solver.create () in
+  Solver.assert_type solver xv int_type;
+  ignore (Solver.solve solver : Feel.Sat_result.t);
+  print_s [%sexp (Solver.get_type solver xv : Type_expr.t option)];
+  [%expect {| ((Base Int)) |}];
+  Solver.push solver;
+  Solver.assert_type solver xv float_type;
+  (* conflicting, but get_type reflects the last literal asserted *)
+  ignore (Solver.solve solver : Feel.Sat_result.t);
+  print_s [%sexp (Solver.get_type solver xv : Type_expr.t option)];
+  [%expect {| ((Base Float)) |}];
+  Solver.pop solver;
+  ignore (Solver.solve solver : Feel.Sat_result.t);
+  print_s [%sexp (Solver.get_type solver xv : Type_expr.t option)];
+  [%expect {| ((Base Int)) |}]
+;;
+
+let%expect_test "Type_eq: TypeEq(a, Int) and TypeEq(a, Float) conflict via \
+                 type-level EUF"
+  =
+  let a = Tvar.of_string "a" in
+  let solver = Solver.create () in
+  assert_ok solver (type_eq (Var a) int_type);
+  assert_ok solver (type_eq (Var a) float_type);
+  print_result (Solver.solve solver);
+  [%expect {| (Unsat (unsat_core (-1))) |}]
+;;
+
+let%expect_test "Type_eq: TypeEq(a, Int) alone is sat" =
+  let a = Tvar.of_string "a" in
+  let solver = Solver.create () in
+  assert_ok solver (type_eq (Var a) int_type);
+  print_result (Solver.solve solver);
+  [%expect {| (Sat (assignments (() (false) (true)))) |}]
+;;
+
+let%expect_test "Type_eq: normalize makes Type_eq(a, b) = Type_eq(b, a)" =
+  let a = Tvar.of_string "a" in
+  let te = Type_expr.Var a in
+  let atom1 = Atom.normalize (`Type_eq (te, int_type)) in
+  let atom2 = Atom.normalize (`Type_eq (int_type, te)) in
+  print_s [%sexp ([%equal: Atom.t] atom1 atom2 : bool)];
+  [%expect {| true |}]
 ;;

@@ -50,8 +50,8 @@ module Encoding = struct
   ;;
 
   (* A variable that is always true: a fresh variable with a unit clause
-     asserting it, allocated lazily and cached so [True]/[False] don't waste
-     a variable when unused. *)
+     asserting it, allocated lazily and cached so [True]/[False] don't waste a
+     variable when unused. *)
   let true_literal t ~clauses =
     match t.true_var with
     | This var -> var
@@ -63,8 +63,8 @@ module Encoding = struct
   ;;
 end
 
-(* Returns a literal representing [formula]'s truth value, pushing any
-   Tseitin definition clauses for subformulas onto [clauses]. *)
+(* Returns a literal representing [formula]'s truth value, pushing any Tseitin
+   definition clauses for subformulas onto [clauses]. *)
 let rec literal_of (encoding : Encoding.t) ~clauses (formula : t) : int =
   match formula with
   | True -> Encoding.true_literal encoding ~clauses
@@ -77,7 +77,7 @@ let rec literal_of (encoding : Encoding.t) ~clauses (formula : t) : int =
     (* d -> l_i, for each i *)
     List.iter literals ~f:(fun l -> Vec.Value.push clauses [| -d; l |]);
     (* (l_1 /\ ... /\ l_n) -> d *)
-    Vec.Value.push clauses (Array.of_list (d :: List.map literals ~f:(( ~- ))));
+    Vec.Value.push clauses (Array.of_list (d :: List.map literals ~f:( ~- )));
     d
   | Or fs ->
     let literals = List.map fs ~f:(literal_of encoding ~clauses) in
@@ -85,7 +85,7 @@ let rec literal_of (encoding : Encoding.t) ~clauses (formula : t) : int =
     (* l_i -> d, for each i *)
     List.iter literals ~f:(fun l -> Vec.Value.push clauses [| -l; d |]);
     (* d -> (l_1 \/ ... \/ l_n) *)
-    Vec.Value.push clauses (Array.of_list ((-d) :: literals));
+    Vec.Value.push clauses (Array.of_list (-d :: literals));
     d
 ;;
 

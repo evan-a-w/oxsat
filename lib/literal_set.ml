@@ -4,7 +4,8 @@ open! Import
 type t =
   { present : int Vec.Value.t
   ; location_by_literal :
-      (* -1 is none because or null is annoying and cbf to make an optional int thing *)
+      (* -1 is none because or null is annoying and cbf to make an optional int
+         thing *)
       int Vec.Value.t Tf_pair.t
   ; random_state : Random.State.t
   }

@@ -12,7 +12,6 @@ let create ?(capacity = 0) ~compare () =
 let length t = Vec.Value.length t.data
 let is_empty t = length t = 0
 let clear t = Vec.Value.clear t.data
-
 let parent i = (i - 1) / 2
 let left i = (2 * i) + 1
 let right i = (2 * i) + 2
