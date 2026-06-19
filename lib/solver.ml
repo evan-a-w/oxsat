@@ -829,7 +829,7 @@ let backtrack t ~failed_clause ~failed_clause_idx =
    clauses are transparent: we recurse into their literals' reasons instead. For
    User/Theory clauses we also recurse so we reach the User clauses that made
    each Theory clause's literals false. *)
-let extract_proof t failed_clause_idx : Sat_result.Proof_clause.t list =
+let extract_unsat_core t failed_clause_idx : Sat_result.Core_clause.t list =
   let seen_vars = Stamp_set.create () in
   Stamp_set.reset seen_vars;
   let seen_clause_idxs = Hash_set.create (module Core.Int) in
@@ -843,7 +843,7 @@ let extract_proof t failed_clause_idx : Sat_result.Proof_clause.t list =
        | User | Theory ->
          Vec.Value.push
            result
-           { Sat_result.Proof_clause.literals = Vec.Value.to_array clause.clause
+           { Sat_result.Core_clause.literals = Vec.Value.to_array clause.clause
            ; is_theory =
                (match clause.origin with
                 | Theory -> true
@@ -868,8 +868,8 @@ let extract_proof t failed_clause_idx : Sat_result.Proof_clause.t list =
 ;;
 
 let%template unsat t failed_clause_idx : Sat_result.t @ m =
-  let proof = extract_proof t failed_clause_idx in
-  Unsat { proof } [@exclave_if_stack a]
+  let core = extract_unsat_core t failed_clause_idx in
+  Unsat { core } [@exclave_if_stack a]
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
@@ -1040,7 +1040,7 @@ let%template solve ?(time_bound = `Unlimited) ?(local_ assumptions = [||]) t
         "solve" ~assumptions:([%globalize: int array] assumptions : int array)];
   maybe_clear_past_solve_state t;
   if t.has_empty_clause
-  then Unsat { proof = [] }
+  then Unsat { core = [] }
   else (
     match[@exclave_if_stack a] add_assumptions ~assumptions t ~timer with
     | `Continue -> (solve' [@alloc a]) t ~timer
@@ -1049,8 +1049,8 @@ let%template solve ?(time_bound = `Unlimited) ?(local_ assumptions = [||]) t
       (unsat [@alloc a]) t failed_clause_idx
     | `Failed_assumptions (previous_assumption, assumption) ->
       Unsat
-        { proof =
-            [ { Sat_result.Proof_clause.literals =
+        { core =
+            [ { Sat_result.Core_clause.literals =
                   [| previous_assumption; assumption |]
               ; is_theory = false
               }
@@ -1099,20 +1099,21 @@ let add_clause t ~clause =
       ~origin:User
   with
   | `Ok -> `Ok
-  | `Conflict failed_clause_idx -> `Unsat (extract_proof t failed_clause_idx)
+  | `Conflict failed_clause_idx ->
+    `Unsat (extract_unsat_core t failed_clause_idx)
 ;;
 
 let create_with_formula ?theory ?(local_ debug) formula =
   let t = create ?theory ?debug () in
-  let proof = ref None in
+  let core = ref None in
   Array.iter formula ~f:(fun clause ->
-    match !proof with
+    match !core with
     | Some _ -> ()
     | None ->
       (match add_clause t ~clause with
        | `Ok -> ()
-       | `Unsat p -> proof := Some p));
-  match !proof with
+       | `Unsat p -> core := Some p));
+  match !core with
   | None -> `Ok t
   | Some p -> `Unsat p
 ;;

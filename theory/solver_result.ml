@@ -1,7 +1,7 @@
 open! Core
 open! Feel.Import
 
-module Proof_step = struct
+module Core_step = struct
   type t =
     | Asserted of Formula.t
     | Tautology of Formula.t
@@ -10,5 +10,5 @@ end
 
 type t =
   | Sat of { assignments : bool option array }
-  | Unsat of { proof : Proof_step.t list }
+  | Unsat of { core : Core_step.t list }
 [@@deriving sexp]

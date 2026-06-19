@@ -1403,8 +1403,8 @@ let debug = false
 
 let run_solver ~assumptions =
   match Solver.create_with_formula ~debug formula with
-  | `Unsat proof ->
-    print_s [%message ((Unsat { proof } : Sat_result.t) : Sat_result.t)]
+  | `Unsat core ->
+    print_s [%message ((Unsat { core } : Sat_result.t) : Sat_result.t)]
   | `Ok solver ->
     let res = Solver.solve ~assumptions solver in
     print_s [%message (res : Sat_result.t) (Solver.stats solver : Stats.t)]

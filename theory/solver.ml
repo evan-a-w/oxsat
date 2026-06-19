@@ -116,7 +116,7 @@ let rec type_expr_to_term : Type_expr.t -> Uninterpreted_functions.Term.t
 ;;
 
 let assert_formula t formula
-  : [ `Ok | `Unsat of Feel.Sat_result.Proof_clause.t list ]
+  : [ `Ok | `Unsat of Feel.Sat_result.Core_clause.t list ]
   =
   let checkpoint = Formula.Encoding.checkpoint t.encoding in
   let clauses = Formula.encode t.encoding formula in
@@ -181,14 +181,14 @@ let clause_to_formula t (literals : int array) : Formula.t option =
   else None
 ;;
 
-let make_proof t (proof_clauses : Feel.Sat_result.Proof_clause.t list)
-  : Solver_result.Proof_step.t list
+let make_unsat_core t (core_clauses : Feel.Sat_result.Core_clause.t list)
+  : Solver_result.Core_step.t list
   =
-  List.filter_map proof_clauses ~f:(fun { literals; is_theory } ->
+  List.filter_map core_clauses ~f:(fun { literals; is_theory } ->
     if is_theory
     then
       clause_to_formula t literals
-      |> Option.map ~f:(fun f -> Solver_result.Proof_step.Tautology f)
+      |> Option.map ~f:(fun f -> Solver_result.Core_step.Tautology f)
     else
       (* Scan every literal for a formula_by_root_lit match. This handles both
          plain unit clauses and push-scope guarded clauses of the form
@@ -196,7 +196,7 @@ let make_proof t (proof_clauses : Feel.Sat_result.Proof_clause.t list)
          complex formula. *)
       Array.find_map literals ~f:(fun lit ->
         Hashtbl.find t.formula_by_root_lit lit
-        |> Option.map ~f:(fun f -> Solver_result.Proof_step.Asserted f)))
+        |> Option.map ~f:(fun f -> Solver_result.Core_step.Asserted f)))
 ;;
 
 let solve ?time_bound ?(assumptions = [||]) t : Solver_result.t =
@@ -204,7 +204,7 @@ let solve ?time_bound ?(assumptions = [||]) t : Solver_result.t =
   let assumptions = Array.append scope_assumptions assumptions in
   match Feel.Solver.solve ?time_bound ~assumptions t.solver with
   | Sat { assignments } -> Sat { assignments }
-  | Unsat { proof } -> Unsat { proof = make_proof t proof }
+  | Unsat { core } -> Unsat { core = make_unsat_core t core }
 ;;
 
 let stats t = Feel.Solver.stats t.solver

@@ -18,14 +18,14 @@ val create : unit -> t
     new theory atoms appearing in [formula] are registered with the underlying
     theory.
 
-    Returns [`Unsat proof] if this assertion makes the (currently active scopes
+    Returns [`Unsat core] if this assertion makes the (currently active scopes
     of the) formula unsatisfiable at the SAT level independent of any future
     [solve] call -- in that case the offending clause was not enforced,
     mirroring {!Feel.Solver.add_clause}. *)
 val assert_formula
   :  t
   -> Formula.t
-  -> [ `Ok | `Unsat of Feel.Sat_result.Proof_clause.t list ]
+  -> [ `Ok | `Unsat of Feel.Sat_result.Core_clause.t list ]
 
 (** Opens a new assertion scope. Formulas asserted after [push] (until the
     matching [pop]) are only enforced while this scope is active. *)

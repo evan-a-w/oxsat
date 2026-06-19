@@ -28,8 +28,8 @@ let%expect_test "small assumptions" =
     | Sat { assignments } ->
       print_s
         [%message "SAT" (assignments_to_int_array assignments : int array)]
-    | Unsat { proof } ->
-      print_s [%message "UNSAT" (proof : Sat_result.Proof_clause.t list)]
+    | Unsat { core } ->
+      print_s [%message "UNSAT" (core : Sat_result.Core_clause.t list)]
   in
   solve [| 2 |];
   solve [| -2 |];
@@ -37,7 +37,7 @@ let%expect_test "small assumptions" =
     {|
     (SAT ("assignments_to_int_array assignments" (-1 2 -3)))
     (UNSAT
-     (proof
+     (core
       (((literals (3 -1)) (is_theory false)) ((literals (-3)) (is_theory false))
        ((literals (1 2)) (is_theory false)))))
     |}]
@@ -718,7 +718,7 @@ let%expect_test "regalloc" =
     {|
     (res
      (Unsat
-      (proof
+      (core
        (((literals (-91 -13)) (is_theory false))
         ((literals (91 89 79 81 84 80 82 86 87 88 85 90 83)) (is_theory false))
         ((literals (-89 -167)) (is_theory false))

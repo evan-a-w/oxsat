@@ -1,7 +1,7 @@
 open! Core
 open! Import
 
-module Proof_clause = struct
+module Core_clause = struct
   type t =
     { literals : int array
     ; is_theory : bool
@@ -11,5 +11,5 @@ end
 
 type t =
   | Sat of { assignments : bool option array }
-  | Unsat of { proof : Proof_clause.t list }
+  | Unsat of { core : Core_clause.t list }
 [@@deriving sexp]

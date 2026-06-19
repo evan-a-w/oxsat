@@ -178,7 +178,7 @@ let%expect_test "EUF: transitivity violation is unsat" =
   [%expect
     {|
     (Unsat
-     (proof
+     (core
       ((Tautology
         (Or
          ((Not (Atom (Eq ((Var x) (Var z))))) (Not (Atom (Eq ((Var x) (Var y)))))
@@ -197,7 +197,7 @@ let%expect_test "EUF: congruence conflict (f(x) <> f(y) with x = y)" =
   [%expect
     {|
     (Unsat
-     (proof
+     (core
       ((Tautology
         (Or
          ((Not (Atom (Eq ((Var x) (Var y)))))
@@ -226,7 +226,7 @@ let%expect_test "EUF: congruence positive propagation (x = y forces f(x) = \
   [%expect
     {|
     (Unsat
-     (proof
+     (core
       ((Tautology
         (Or
          ((Not (Atom (Eq ((Var x) (Var y)))))
@@ -284,7 +284,7 @@ let%expect_test "incremental: new EUF atoms registered after a solve" =
   [%expect
     {|
     (Unsat
-     (proof
+     (core
       ((Tautology
         (Or
          ((Not (Atom (Eq ((Var x) (Var y)))))
@@ -315,7 +315,7 @@ let%expect_test "push/pop: retracting a contradicting constraint" =
   [%expect
     {|
     (Unsat
-     (proof
+     (core
       ((Asserted (Not (Atom (Eq ((Var x) (Var y))))))
        (Asserted (Atom (Eq ((Var x) (Var y))))))))
     |}];
@@ -340,7 +340,7 @@ let%expect_test "push/pop: nested scopes" =
   [%expect
     {|
     (Unsat
-     (proof
+     (core
       ((Asserted (Not (Atom (Eq ((Var y) (Var z))))))
        (Tautology
         (Or
@@ -361,10 +361,12 @@ let%expect_test "push/pop: nested scopes" =
     {| (Sat (assignments (() (false) (true) (true) (false) (false) (false)))) |}]
 ;;
 
-let%expect_test "push/pop: Tseitin-encoded Or inside scope appears in proof" =
+let%expect_test "push/pop: Tseitin-encoded Or inside scope appears in unsat \
+                 core"
+  =
   (* An Or formula creates Tseitin auxiliary clauses. When asserted inside a
      push scope those clauses are guarded by an activation literal, making them
-     multi-literal. The proof must still show the original Or formula. *)
+     multi-literal. The unsat core must still show the original Or formula. *)
   let solver = Solver.create () in
   Solver.push solver;
   assert_ok solver (Or [ eq x y; eq y z ]);
@@ -374,7 +376,7 @@ let%expect_test "push/pop: Tseitin-encoded Or inside scope appears in proof" =
   [%expect
     {|
     (Unsat
-     (proof
+     (core
       ((Asserted (Not (Atom (Eq ((Var x) (Var y))))))
        (Asserted
         (Or ((Atom (Eq ((Var x) (Var y)))) (Atom (Eq ((Var y) (Var z)))))))
@@ -395,7 +397,7 @@ let%expect_test "push/pop: EUF congruence conflict inside a scope is retracted \
   [%expect
     {|
     (Unsat
-     (proof
+     (core
       ((Tautology
         (Or
          ((Not (Atom (Eq ((Var x) (Var y)))))
@@ -460,7 +462,7 @@ let%expect_test "Has_type: conflicting ground types are unsat" =
   [%expect
     {|
     (Unsat
-     (proof
+     (core
       ((Tautology
         (Or
          ((Not (Atom (Has_type (x (Base Float)))))
@@ -487,7 +489,7 @@ let%expect_test "Has_type: structural conflict (Array vs Int)" =
   [%expect
     {|
     (Unsat
-     (proof
+     (core
       ((Tautology
         (Or
          ((Not (Atom (Has_type (x (Base Int)))))
@@ -521,7 +523,7 @@ let%expect_test "Has_type: push/pop retracts type conflict" =
   [%expect
     {|
     (Unsat
-     (proof
+     (core
       ((Tautology
         (Or
          ((Not (Atom (Has_type (x (Base Float)))))
@@ -563,7 +565,7 @@ let%expect_test "Type_eq: TypeEq(a, Int) and TypeEq(a, Float) conflict via \
   [%expect
     {|
     (Unsat
-     (proof
+     (core
       ((Tautology
         (Or
          ((Not (Atom (Type_eq ((Base Float) (Var a)))))
