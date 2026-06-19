@@ -179,7 +179,7 @@ let%expect_test "EUF: transitivity violation is unsat" =
     {|
     (Unsat
      (core
-      ((Tautology
+      ((Theory_lemma
         (Or
          ((Not (Atom (Eq ((Var x) (Var z))))) (Not (Atom (Eq ((Var x) (Var y)))))
           (Atom (Eq ((Var y) (Var z)))))))
@@ -198,7 +198,7 @@ let%expect_test "EUF: congruence conflict (f(x) <> f(y) with x = y)" =
     {|
     (Unsat
      (core
-      ((Tautology
+      ((Theory_lemma
         (Or
          ((Not (Atom (Eq ((Var x) (Var y)))))
           (Atom
@@ -227,7 +227,7 @@ let%expect_test "EUF: congruence positive propagation (x = y forces f(x) = \
     {|
     (Unsat
      (core
-      ((Tautology
+      ((Theory_lemma
         (Or
          ((Not (Atom (Eq ((Var x) (Var y)))))
           (Atom
@@ -285,7 +285,7 @@ let%expect_test "incremental: new EUF atoms registered after a solve" =
     {|
     (Unsat
      (core
-      ((Tautology
+      ((Theory_lemma
         (Or
          ((Not (Atom (Eq ((Var x) (Var y)))))
           (Atom
@@ -342,7 +342,7 @@ let%expect_test "push/pop: nested scopes" =
     (Unsat
      (core
       ((Asserted (Not (Atom (Eq ((Var y) (Var z))))))
-       (Tautology
+       (Theory_lemma
         (Or
          ((Atom (Eq ((Var y) (Var z)))) (Not (Atom (Eq ((Var x) (Var y)))))
           (Not (Atom (Eq ((Var x) (Var z))))))))
@@ -398,7 +398,7 @@ let%expect_test "push/pop: EUF congruence conflict inside a scope is retracted \
     {|
     (Unsat
      (core
-      ((Tautology
+      ((Theory_lemma
         (Or
          ((Not (Atom (Eq ((Var x) (Var y)))))
           (Atom
@@ -463,7 +463,7 @@ let%expect_test "Has_type: conflicting ground types are unsat" =
     {|
     (Unsat
      (core
-      ((Tautology
+      ((Theory_lemma
         (Or
          ((Not (Atom (Has_type (x (Base Float)))))
           (Not (Atom (Has_type (x (Base Int))))))))
@@ -490,7 +490,7 @@ let%expect_test "Has_type: structural conflict (Array vs Int)" =
     {|
     (Unsat
      (core
-      ((Tautology
+      ((Theory_lemma
         (Or
          ((Not (Atom (Has_type (x (Base Int)))))
           (Not (Atom (Has_type (x (App Array ((Var a))))))))))
@@ -524,7 +524,7 @@ let%expect_test "Has_type: push/pop retracts type conflict" =
     {|
     (Unsat
      (core
-      ((Tautology
+      ((Theory_lemma
         (Or
          ((Not (Atom (Has_type (x (Base Float)))))
           (Not (Atom (Has_type (x (Base Int))))))))
@@ -566,7 +566,7 @@ let%expect_test "Type_eq: TypeEq(a, Int) and TypeEq(a, Float) conflict via \
     {|
     (Unsat
      (core
-      ((Tautology
+      ((Theory_lemma
         (Or
          ((Not (Atom (Type_eq ((Base Float) (Var a)))))
           (Not (Atom (Type_eq ((Base Int) (Var a)))))

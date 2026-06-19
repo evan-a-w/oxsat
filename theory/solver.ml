@@ -188,7 +188,7 @@ let make_unsat_core t (core_clauses : Feel.Sat_result.Core_clause.t list)
     if is_theory
     then
       clause_to_formula t literals
-      |> Option.map ~f:(fun f -> Solver_result.Core_step.Tautology f)
+      |> Option.map ~f:(fun f -> Solver_result.Core_step.Theory_lemma f)
     else
       (* Scan every literal for a formula_by_root_lit match. This handles both
          plain unit clauses and push-scope guarded clauses of the form

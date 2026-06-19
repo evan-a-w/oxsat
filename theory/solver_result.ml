@@ -4,7 +4,7 @@ open! Feel.Import
 module Core_step = struct
   type t =
     | Asserted of Formula.t
-    | Tautology of Formula.t
+    | Theory_lemma of Formula.t
   [@@deriving sexp]
 end
 
