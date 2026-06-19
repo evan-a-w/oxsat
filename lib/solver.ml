@@ -832,32 +832,36 @@ let backtrack t ~failed_clause ~failed_clause_idx =
 let extract_proof t failed_clause_idx : Sat_result.Proof_clause.t list =
   let seen_vars = Stamp_set.create () in
   Stamp_set.reset seen_vars;
+  let seen_clause_idxs = Hash_set.create (module Core.Int) in
   let result = Vec.Value.create () in
   let rec explore clause_idx =
-    let clause = Vec.Value.get t.clauses clause_idx in
-    (match clause.origin with
-     | User | Theory ->
-       Vec.Value.push
-         result
-         { Sat_result.Proof_clause.literals = Vec.Value.to_array clause.clause
-         ; is_theory =
-             (match clause.origin with
-              | Theory -> true
-              | User | Learned -> false)
-         }
-     | Learned -> ());
-    Vec.Value.iter clause.clause ~f:(fun literal ->
-      let var = Int.abs literal in
-      if not (Stamp_set.is_seen seen_vars ~var)
-      then (
-        Stamp_set.mark_seen seen_vars ~var;
-        let var_obj = literal_var t ~literal in
-        match%optional_u (var_obj.trail_entry : Trail_entry.Option_u.t) with
-        | None -> ()
-        | Some trail_entry ->
-          (match trail_entry.#reason with
-           | T #(Decision, ()) -> ()
-           | T #(Clause_idx, reason_clause_idx) -> explore reason_clause_idx)))
+    if not (Hash_set.mem seen_clause_idxs clause_idx)
+    then (
+      Hash_set.add seen_clause_idxs clause_idx;
+      let clause = Vec.Value.get t.clauses clause_idx in
+      (match clause.origin with
+       | User | Theory ->
+         Vec.Value.push
+           result
+           { Sat_result.Proof_clause.literals = Vec.Value.to_array clause.clause
+           ; is_theory =
+               (match clause.origin with
+                | Theory -> true
+                | User | Learned -> false)
+           }
+       | Learned -> ());
+      Vec.Value.iter clause.clause ~f:(fun literal ->
+        let var = Int.abs literal in
+        if not (Stamp_set.is_seen seen_vars ~var)
+        then (
+          Stamp_set.mark_seen seen_vars ~var;
+          let var_obj = literal_var t ~literal in
+          match%optional_u (var_obj.trail_entry : Trail_entry.Option_u.t) with
+          | None -> ()
+          | Some trail_entry ->
+            (match trail_entry.#reason with
+             | T #(Decision, ()) -> ()
+             | T #(Clause_idx, reason_clause_idx) -> explore reason_clause_idx))))
   in
   explore failed_clause_idx;
   Vec.Value.to_list result

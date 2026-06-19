@@ -189,11 +189,14 @@ let make_proof t (proof_clauses : Feel.Sat_result.Proof_clause.t list)
     then
       clause_to_formula t literals
       |> Option.map ~f:(fun f -> Solver_result.Proof_step.Tautology f)
-    else if Array.length literals = 1
-    then
-      Hashtbl.find t.formula_by_root_lit literals.(0)
-      |> Option.map ~f:(fun f -> Solver_result.Proof_step.Asserted f)
-    else None)
+    else
+      (* Scan every literal for a formula_by_root_lit match. This handles both
+         plain unit clauses and push-scope guarded clauses of the form
+         [-activation; root_lit], where root_lit is the Tseitin root for a
+         complex formula. *)
+      Array.find_map literals ~f:(fun lit ->
+        Hashtbl.find t.formula_by_root_lit lit
+        |> Option.map ~f:(fun f -> Solver_result.Proof_step.Asserted f)))
 ;;
 
 let solve ?time_bound ?(assumptions = [||]) t : Solver_result.t =

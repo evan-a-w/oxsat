@@ -312,7 +312,13 @@ let%expect_test "push/pop: retracting a contradicting constraint" =
   Solver.push solver;
   assert_ok solver (neq x y);
   print_result (Solver.solve solver);
-  [%expect {| (Unsat (proof ((Asserted (Atom (Eq ((Var x) (Var y)))))))) |}];
+  [%expect
+    {|
+    (Unsat
+     (proof
+      ((Asserted (Not (Atom (Eq ((Var x) (Var y))))))
+       (Asserted (Atom (Eq ((Var x) (Var y))))))))
+    |}];
   Solver.pop solver;
   print_result (Solver.solve solver);
   [%expect {| (Sat (assignments (() (false) (true) (false)))) |}]
@@ -335,11 +341,13 @@ let%expect_test "push/pop: nested scopes" =
     {|
     (Unsat
      (proof
-      ((Tautology
+      ((Asserted (Not (Atom (Eq ((Var y) (Var z))))))
+       (Tautology
         (Or
          ((Atom (Eq ((Var y) (Var z)))) (Not (Atom (Eq ((Var x) (Var y)))))
           (Not (Atom (Eq ((Var x) (Var z))))))))
-       (Asserted (Atom (Eq ((Var x) (Var y))))))))
+       (Asserted (Atom (Eq ((Var x) (Var y)))))
+       (Asserted (Atom (Eq ((Var x) (Var z))))))))
     |}];
   Solver.pop solver;
   (* back to: x=y, y<>z -- satisfiable *)
@@ -351,6 +359,27 @@ let%expect_test "push/pop: nested scopes" =
   print_result (Solver.solve solver);
   [%expect
     {| (Sat (assignments (() (false) (true) (true) (false) (false) (false)))) |}]
+;;
+
+let%expect_test "push/pop: Tseitin-encoded Or inside scope appears in proof" =
+  (* An Or formula creates Tseitin auxiliary clauses. When asserted inside a
+     push scope those clauses are guarded by an activation literal, making them
+     multi-literal. The proof must still show the original Or formula. *)
+  let solver = Solver.create () in
+  Solver.push solver;
+  assert_ok solver (Or [ eq x y; eq y z ]);
+  assert_ok solver (neq x y);
+  assert_ok solver (neq y z);
+  print_result (Solver.solve solver);
+  [%expect
+    {|
+    (Unsat
+     (proof
+      ((Asserted (Not (Atom (Eq ((Var x) (Var y))))))
+       (Asserted
+        (Or ((Atom (Eq ((Var x) (Var y)))) (Atom (Eq ((Var y) (Var z)))))))
+       (Asserted (Not (Atom (Eq ((Var y) (Var z)))))))))
+    |}]
 ;;
 
 let%expect_test "push/pop: EUF congruence conflict inside a scope is retracted \
@@ -374,7 +403,13 @@ let%expect_test "push/pop: EUF congruence conflict inside a scope is retracted \
            (Eq
             ((App ((~function_ f) (~args ((Var x)))))
              (App ((~function_ f) (~args ((Var y)))))))))))
-       (Asserted (Atom (Eq ((Var x) (Var y))))))))
+       (Asserted (Atom (Eq ((Var x) (Var y)))))
+       (Asserted
+        (Not
+         (Atom
+          (Eq
+           ((App ((~function_ f) (~args ((Var x)))))
+            (App ((~function_ f) (~args ((Var y)))))))))))))
     |}];
   Solver.pop solver;
   print_result (Solver.solve solver);
@@ -491,6 +526,7 @@ let%expect_test "Has_type: push/pop retracts type conflict" =
         (Or
          ((Not (Atom (Has_type (x (Base Float)))))
           (Not (Atom (Has_type (x (Base Int))))))))
+       (Asserted (Atom (Has_type (x (Base Float)))))
        (Asserted (Atom (Has_type (x (Base Int))))))))
     |}];
   Solver.pop solver;
