@@ -20,6 +20,7 @@ let reduce ~num ~den =
     { num = Int.( / ) num g; den = Int.( / ) den g })
 ;;
 
+let is_integral { num = _; den } = den = 1
 let zero = { num = 0; den = 1 }
 let one = { num = 1; den = 1 }
 let of_int num = { num; den = 1 }

@@ -7,6 +7,9 @@ module Base : sig
     | Int
     | Float
   [@@deriving sexp, compare, equal, hash, enumerate]
+
+  include Comparable.S with type t := t
+  include Hashable.S with type t := t
 end
 
 (** A type expression - a tree of type constructors, type variables, and ground
@@ -21,3 +24,6 @@ type t =
     constant "term variables" when embedding type expressions into the
     type-level [Uninterpreted_functions] instance. *)
 val base_tvar : Base.t -> Tvar.t
+
+include Comparable.S with type t := t
+include Hashable.S with type t := t

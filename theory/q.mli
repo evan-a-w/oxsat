@@ -34,3 +34,5 @@ val den : t -> int
 
 (** For debug printing only; not exact. *)
 val to_float : t -> float
+
+val is_integral : t -> bool

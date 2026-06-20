@@ -37,16 +37,18 @@ module Snapshot : sig
   type t
 end
 
-type t [@@deriving sexp]
+type t [@@deriving sexp_of]
 type constraint_ [@@deriving sexp, compare, equal, hash]
 
-val add_nonbasic : t -> int
+val add_var : t -> int
 val add_constraint : t -> Sum.t * Op.t * Sum.t -> constraint_
 val remove_constraint : t -> constraint_:constraint_ -> unit
 val solve : t -> [ `Sat | `Unsat ]
 val snapshot_assignments : t -> Snapshot.t
 
-(* if [solve] returned [`Unsat], must restore to a snapshot before calling
+(* if [solve] returned [`Unsat], may restore to a snapshot before calling
    [solve] again (which one might do after calling [remove_constraint] some
    number of times) *)
 val restore_assignments : t -> Snapshot.t -> unit
+val assignment : t -> var:int -> Q.t
+val new_assignments : t -> Q.t Int.Hash_queue.t

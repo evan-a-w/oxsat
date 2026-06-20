@@ -126,8 +126,14 @@ type t =
   ; basic_vars : Var.t Vec.Value.t
   ; nonbasic_vars : Var.t Vec.Value.t
   ; vars : Var.t Vec.Value.t
+  ; new_assignments : Q.t Int.Hash_queue.t
   }
-[@@deriving sexp]
+[@@deriving sexp_of, fields]
+
+let assign t ~(var : Var.t) ~q =
+  var.assignment <- q;
+  Hash_queue.replace_or_enqueue_front t.new_assignments var.id q
+;;
 
 type constraint_ = int [@@deriving sexp, compare, equal, hash]
 
@@ -234,7 +240,7 @@ let pivot t ~row ~col ~diff_to_col =
       let mult = Vec.Value.get row' col in
       let basic_var = Vec.Value.get t.basic_vars i in
       (* here we apply the diff to the var as well *)
-      basic_var.assignment <- Q.((diff_to_col * mult) + basic_var.assignment);
+      assign t ~var:basic_var ~q:Q.((diff_to_col * mult) + basic_var.assignment);
       for j = 0 to Vec.Value.length row' - 1 do
         if j = col
         then Vec.Value.set row' j (Q.( * ) (get_tableau t ~row ~col) mult)
@@ -262,7 +268,8 @@ let%expect_test "pivot example" =
   let nb0 : Var.t = { assignment = Q.zero; bound = unbounded; id = 3 } in
   let nb1 : Var.t = { assignment = Q.zero; bound = unbounded; id = 4 } in
   let t =
-    { tableau =
+    { new_assignments = Int.Hash_queue.create ()
+    ; tableau =
         Vec.Value.of_list
           [ Vec.Value.of_list [ Q.one; Q.one ]
           ; Vec.Value.of_list [ Q.of_int 2; Q.of_int (-1) ]
@@ -362,8 +369,8 @@ let rec solve t =
     (match candidate_nonbasic with
      | None -> `Unsat
      | Some (col, nonbasic_var, need_apply) ->
-       nonbasic_var.assignment <- Q.(nonbasic_var.assignment + need_apply);
-       basic_var.assignment <- Q.(basic_var.assignment + diff);
+       assign t ~var:nonbasic_var ~q:Q.(nonbasic_var.assignment + need_apply);
+       assign t ~var:basic_var ~q:Q.(basic_var.assignment + diff);
        pivot t ~row ~col ~diff_to_col:need_apply;
        solve t)
 ;;
@@ -379,7 +386,8 @@ let%expect_test "example simplex" =
   let nb0 : Var.t = { assignment = Q.zero; bound = unbounded; id = 0 } in
   let nb1 : Var.t = { assignment = Q.zero; bound = unbounded; id = 1 } in
   let t =
-    { tableau =
+    { new_assignments = Int.Hash_queue.create ()
+    ; tableau =
         Vec.Value.of_list
           [ Vec.Value.of_list [ Q.one; Q.one ]
           ; Vec.Value.of_list [ Q.of_int 2; Q.of_int (-1) ]
@@ -471,4 +479,5 @@ let restore_assignments t (snapshot : Snapshot.t) =
   Array.iteri snapshot ~f:(fun i q -> (Vec.Value.get t.vars i).assignment <- q)
 ;;
 
-let add_nonbasic t = (add_nonbasic t).id
+let add_var t = (add_nonbasic t).id
+let assignment t ~var = (Vec.Value.get t.vars var).assignment
