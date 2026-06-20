@@ -39,6 +39,20 @@ type t =
   ; mutable current_decision_level : int
   }
 
+let undo_entry t ~(trail_entry : Trail_entry.t) =
+  match trail_entry.kind with
+  | Add_constraint constraint_ ->
+    Simplex.remove_constraint t.simplex ~constraint_
+;;
+
+(* | Make_integral_assignment tvar -> *)
+(* Hash_queue.enqueue_front_exn t.non_integral_ints tvar () *)
+(* | Make_non_integral_assignment tvar -> *)
+(* Hash_queue.remove_exn t.non_integral_ints tvar *)
+(* | Relaxation { var = _; lb; ub } -> *)
+(* Simplex.remove_constraint t.simplex ~constraint_:lb; *)
+(* Simplex.remove_constraint t.simplex ~constraint_:ub *)
+
 let rec undo t ~to_decision_level_excl =
   match Vec.Value.length t.trail with
   | 0 -> ()
@@ -48,29 +62,8 @@ let rec undo t ~to_decision_level_excl =
      | false -> t.current_decision_level <- trail_entry.decision_level
      | true ->
        ignore (Vec.Value.pop_exn t.trail : Trail_entry.t);
-       (match trail_entry.kind with
-        | Add_constraint constraint_ ->
-          Simplex.remove_constraint t.simplex ~constraint_
-          (* | Make_integral_assignment tvar -> *)
-          (* Hash_queue.enqueue_front_exn t.non_integral_ints tvar () *)
-          (* | Make_non_integral_assignment tvar -> *)
-          (* Hash_queue.remove_exn t.non_integral_ints tvar *)
-          (* | Relaxation { var = _; lb; ub } -> *)
-          (* Simplex.remove_constraint t.simplex ~constraint_:lb; *)
-          (* Simplex.remove_constraint t.simplex ~constraint_:ub *));
+       undo_entry t ~trail_entry;
        undo t ~to_decision_level_excl)
-;;
-
-let rec undo_to_length t ~length =
-  if Vec.Value.length t.trail <= length
-  then ()
-  else (
-    let trail_entry = Vec.Value.get t.trail (Vec.Value.length t.trail - 1) in
-    ignore (Vec.Value.pop_exn t.trail : Trail_entry.t);
-    (match trail_entry.kind with
-     | Add_constraint constraint_ ->
-       Simplex.remove_constraint t.simplex ~constraint_);
-    undo_to_length t ~length)
 ;;
 
 let push_trail t ~kind =
@@ -109,12 +102,11 @@ let simplex_solve t =
 
 let rec solve t =
   let[@inline always] try_with_constraint constraint_ =
-    let length = Vec.Value.length t.trail in
     let constraint_ = Simplex.add_constraint t.simplex constraint_ in
     push_trail t ~kind:(Add_constraint constraint_);
     let res = solve t in
     (match res with
-     | `Unsat -> undo_to_length t ~length
+     | `Unsat -> undo_entry t ~trail_entry:(Vec.Value.pop_exn t.trail)
      | `Sat -> ());
     res
   in
