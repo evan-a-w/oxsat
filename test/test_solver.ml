@@ -83,13 +83,19 @@ let%expect_test "contradictory unit clauses are unsatisfiable" =
   ignore (Solver.add_clause solver ~clause:[| 1 |] : [ `Ok | `Unsat of _ ]);
   let result =
     match Solver.add_clause solver ~clause:[| -1 |] with
-    | `Unsat core -> Sat_result.Unsat { unsat_core = core }
+    | `Unsat core -> Sat_result.Unsat { core }
     | `Ok -> Solver.solve solver
   in
   (match result with
    | Sat _ -> print_endline "SAT"
-   | Unsat { unsat_core } -> print_s [%message "UNSAT" (unsat_core : int array)]);
-  [%expect {| (UNSAT (unsat_core (1))) |}]
+   | Unsat { core } ->
+     print_s [%message "UNSAT" (core : Sat_result.Core_clause.t list)]);
+  [%expect
+    {|
+    (UNSAT
+     (core
+      (((literals (-1)) (is_theory false)) ((literals (1)) (is_theory false)))))
+    |}]
 ;;
 
 let%expect_test "simple two-literal clause" =
@@ -110,8 +116,9 @@ let%expect_test "contradictory assumptions are unsat" =
   (match result with
    | Sat { assignments } ->
      print_s [%message "SAT" (assignments_to_int_array assignments : int array)]
-   | Unsat { unsat_core } -> print_s [%message "UNSAT" (unsat_core : int array)]);
-  [%expect {| (UNSAT (unsat_core (1 -1))) |}]
+   | Unsat { core } ->
+     print_s [%message "UNSAT" (core : Sat_result.Core_clause.t list)]);
+  [%expect {| (UNSAT (core (((literals (1 -1)) (is_theory false))))) |}]
 ;;
 
 let%expect_test "adding clause after solve can change model" =
@@ -129,8 +136,8 @@ let%expect_test "adding clause after solve can change model" =
    | Sat { assignments } ->
      print_s
        [%message "after" (assignments_to_int_array assignments : int array)]
-   | Unsat { unsat_core } ->
-     print_s [%message "after UNSAT" (unsat_core : int array)]);
+   | Unsat { core } ->
+     print_s [%message "after UNSAT" (core : Sat_result.Core_clause.t list)]);
   [%expect
     {|
     (before ("assignments_to_int_array assignments" (1 2)))
@@ -184,7 +191,7 @@ let%expect_test "unit propagation leads to conflict" =
     let add clause =
       match Solver.add_clause solver ~clause with
       | `Ok -> None
-      | `Unsat core -> Some (Sat_result.Unsat { unsat_core = core })
+      | `Unsat core -> Some (Sat_result.Unsat { core })
     in
     match add [| 1 |] with
     | Some r -> r
@@ -198,8 +205,15 @@ let%expect_test "unit propagation leads to conflict" =
   in
   (match result with
    | Sat _ -> print_endline "SAT"
-   | Unsat { unsat_core } -> print_s [%message "UNSAT" (unsat_core : int array)]);
-  [%expect {| (UNSAT (unsat_core (2))) |}]
+   | Unsat { core } ->
+     print_s [%message "UNSAT" (core : Sat_result.Core_clause.t list)]);
+  [%expect
+    {|
+    (UNSAT
+     (core
+      (((literals (-2)) (is_theory false)) ((literals (2 -1)) (is_theory false))
+       ((literals (1)) (is_theory false)))))
+    |}]
 ;;
 
 let%expect_test "three-variable satisfiable formula" =
@@ -230,8 +244,15 @@ let%expect_test "pigeonhole principle - 2 pigeons, 1 hole (unsat)" =
   let result = Solver.solve solver in
   (match result with
    | Sat _ -> print_endline "SAT"
-   | Unsat { unsat_core } -> print_s [%message "UNSAT" (unsat_core : int array)]);
-  [%expect {| (UNSAT (unsat_core (1))) |}]
+   | Unsat { core } ->
+     print_s [%message "UNSAT" (core : Sat_result.Core_clause.t list)]);
+  [%expect
+    {|
+    (UNSAT
+     (core
+      (((literals (-2 -1)) (is_theory false)) ((literals (2)) (is_theory false))
+       ((literals (1)) (is_theory false)))))
+    |}]
 ;;
 
 let%expect_test "clause with multiple literals satisfied by one assignment" =
@@ -284,8 +305,9 @@ let run_dimacs s =
   let result = Solver.solve solver in
   match result with
   | Sat _ -> print_endline "SAT"
-  | Unsat { unsat_core } ->
-    print_s [%message "UNSAT" ~unsat_core:(unsat_core : int array)]
+  | Unsat { core } ->
+    print_s
+      [%message "UNSAT" ~unsat_core:(core : Sat_result.Core_clause.t list)]
 ;;
 
 let%expect_test "sudoku" =
@@ -301,7 +323,14 @@ let%expect_test "succ dimacs" =
 
 let%expect_test "fail dimacs" =
   run_dimacs Examples.Dimacs.fail_eg;
-  [%expect {| (UNSAT (unsat_core (106))) |}]
+  [%expect
+    {|
+    (UNSAT
+     (unsat_core
+      (((literals (-90 -91 -88 -89 -87 -86)) (is_theory false))
+       ((literals (-112 -111 -106 -107 -110 -108)) (is_theory false))
+       ((literals (-97 -98 -92 -95 -96 -94)) (is_theory false)))))
+    |}]
 ;;
 
 let%expect_test "assumptions" =
@@ -351,8 +380,9 @@ let%expect_test "assumptions" =
       print_s
         [%message
           "SAT" ~assignments:(assignments_to_int_array assignments : int array)]
-    | Unsat { unsat_core } ->
-      print_s [%message "UNSAT" ~unsat_core:(unsat_core : int array)]
+    | Unsat { core } ->
+      print_s
+        [%message "UNSAT" ~unsat_core:(core : Sat_result.Core_clause.t list)]
   in
   solve ();
   solve ~assumptions:[| 1 |] ();
@@ -367,9 +397,9 @@ let%expect_test "assumptions" =
     (SAT (assignments (1 -2 3 4 5 6)))
     (SAT (assignments (1 -2 3 4 5 6)))
     (SAT (assignments (1 2 3 4 -5 -6)))
-    (UNSAT (unsat_core (2 1)))
-    (SAT (assignments (1 -2 3 -4 -5 6)))
-    (UNSAT (unsat_core (2)))
+    (UNSAT (unsat_core ()))
+    (SAT (assignments (-1 -2 -3 4 -5 6)))
+    (UNSAT (unsat_core (((literals (-6 -2)) (is_theory false)))))
     (SAT (assignments (-1 -2 -3 -4 -5 -6)))
     (SAT (assignments (-1 -2 -3 -4 -5 6)))
     |}]

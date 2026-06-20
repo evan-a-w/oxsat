@@ -28,15 +28,18 @@ let%expect_test "small assumptions" =
     | Sat { assignments } ->
       print_s
         [%message "SAT" (assignments_to_int_array assignments : int array)]
-    | Unsat { unsat_core } ->
-      print_s [%message "UNSAT" (unsat_core : int array)]
+    | Unsat { core } ->
+      print_s [%message "UNSAT" (core : Sat_result.Core_clause.t list)]
   in
   solve [| 2 |];
   solve [| -2 |];
   [%expect
     {|
     (SAT ("assignments_to_int_array assignments" (-1 2 -3)))
-    (UNSAT (unsat_core (1)))
+    (UNSAT
+     (core
+      (((literals (3 -1)) (is_theory false)) ((literals (-3)) (is_theory false))
+       ((literals (1 2)) (is_theory false)))))
     |}]
 ;;
 
@@ -715,8 +718,71 @@ let%expect_test "regalloc" =
     {|
     (res
      (Unsat
-      (unsat_core
-       (167 -82 -81 -84 -80 -86 -87 -88 -85 -90 -83 -1 -6 -4 -3 -12 -7 -10 -5 -9
-        -8 -2 -79))))
+      (core
+       (((literals (-91 -13)) (is_theory false))
+        ((literals (91 89 79 81 84 80 82 86 87 88 85 90 83)) (is_theory false))
+        ((literals (-89 -167)) (is_theory false))
+        ((literals (167 169 157 159 160 162 165 164 168 166 163 158 161))
+         (is_theory false))
+        ((literals (-159 -42)) (is_theory false))
+        ((literals (-160 -30)) (is_theory false))
+        ((literals (-162 -71)) (is_theory false))
+        ((literals (-165 -126)) (is_theory false))
+        ((literals (-164 -138)) (is_theory false))
+        ((literals (138 141 131 133 134 136 142 137 135 132 140 139 143))
+         (is_theory false))
+        ((literals (-133 -42)) (is_theory false))
+        ((literals (-134 -30)) (is_theory false))
+        ((literals (-136 -71)) (is_theory false))
+        ((literals (-142 -155)) (is_theory false))
+        ((literals (-132 -54)) (is_theory false))
+        ((literals (54 57 53 58 56 55 59 60 61 62 63 64 65)) (is_theory false))
+        ((literals (-58 -71)) (is_theory false))
+        ((literals (-55 -42)) (is_theory false))
+        ((literals (-139 -126)) (is_theory false))
+        ((literals (-168 -155)) (is_theory false))
+        ((literals (-166 -114)) (is_theory false))
+        ((literals (-163 -20)) (is_theory false))
+        ((literals (20 23 14 18 16 19 17 15 22 21 24 25 26)) (is_theory false))
+        ((literals (-23 -114)) (is_theory false))
+        ((literals (-16 -42)) (is_theory false))
+        ((literals (-19 -71)) (is_theory false))
+        ((literals (-15 -54)) (is_theory false))
+        ((literals (-22 -126)) (is_theory false))
+        ((literals (-21 -138)) (is_theory false))
+        ((literals (-158 -54)) (is_theory false))
+        ((literals (-161 -96)) (is_theory false))
+        ((literals (96 104 92 94 95 97 93 102 99 101 100 103 98))
+         (is_theory false))
+        ((literals (-94 -42)) (is_theory false))
+        ((literals (-95 -30)) (is_theory false))
+        ((literals (-97 -71)) (is_theory false))
+        ((literals (-93 -54)) (is_theory false))
+        ((literals (-99 -138)) (is_theory false))
+        ((literals (-100 -126)) (is_theory false))
+        ((literals (-103 -155)) (is_theory false))
+        ((literals (-98 -20)) (is_theory false))
+        ((literals (-81 -42)) (is_theory false))
+        ((literals (-84 -71)) (is_theory false))
+        ((literals (-80 -54)) (is_theory false))
+        ((literals (-82 -30)) (is_theory false))
+        ((literals (-86 -138)) (is_theory false))
+        ((literals (-87 -126)) (is_theory false))
+        ((literals (-88 -114)) (is_theory false))
+        ((literals (-85 -20)) (is_theory false))
+        ((literals (-90 -155)) (is_theory false))
+        ((literals (-83 -96)) (is_theory false))
+        ((literals (13 11 1 6 4 3 12 7 10 5 9 8 2)) (is_theory false))
+        ((literals (-11 -167)) (is_theory false))
+        ((literals (-6 -71)) (is_theory false))
+        ((literals (-4 -30)) (is_theory false))
+        ((literals (-3 -42)) (is_theory false))
+        ((literals (-12 -155)) (is_theory false))
+        ((literals (-7 -20)) (is_theory false))
+        ((literals (-10 -114)) (is_theory false))
+        ((literals (-5 -96)) (is_theory false))
+        ((literals (-9 -126)) (is_theory false))
+        ((literals (-8 -138)) (is_theory false))
+        ((literals (-2 -54)) (is_theory false))))))
     |}]
 ;;

@@ -18,11 +18,14 @@ val create : unit -> t
     new theory atoms appearing in [formula] are registered with the underlying
     theory.
 
-    Returns [`Unsat unsat_core] if this assertion makes the (currently active
-    scopes of the) formula unsatisfiable at the SAT level independent of any
-    future [solve] call -- in that case the offending clause was not enforced,
+    Returns [`Unsat core] if this assertion makes the (currently active scopes
+    of the) formula unsatisfiable at the SAT level independent of any future
+    [solve] call -- in that case the offending clause was not enforced,
     mirroring {!Feel.Solver.add_clause}. *)
-val assert_formula : t -> Formula.t -> [ `Ok | `Unsat of int array ]
+val assert_formula
+  :  t
+  -> Formula.t
+  -> [ `Ok | `Unsat of Feel.Sat_result.Core_clause.t list ]
 
 (** Opens a new assertion scope. Formulas asserted after [push] (until the
     matching [pop]) are only enforced while this scope is active. *)
@@ -38,8 +41,9 @@ val stats : t -> Feel.Stats.t
 
 (** Checks satisfiability of all formulas asserted in currently active scopes.
     [assumptions] are additional unit assumptions for this call only. On
-    [Unsat], each literal in [core] has its theory atom resolved so callers see
-    actual [Atom.t] expressions rather than raw SAT variable indices. *)
+    [Unsat], [reason] is a [Formula.And] of the conflicting formulas, with
+    Tseitin auxiliary variables resolved back to the original [Formula.t] that
+    introduced them. *)
 val solve
   :  ?time_bound:Feel.Solver.time_bound
   -> ?assumptions:int array

@@ -25,7 +25,7 @@ let solve_clauses clauses =
       | `Ok -> ()
       | `Unsat core -> early_unsat := Some core));
   match !early_unsat with
-  | Some core -> Sat_result.Unsat { unsat_core = core }
+  | Some core -> Sat_result.Unsat { core }
   | None -> Solver.solve solver
 ;;
 

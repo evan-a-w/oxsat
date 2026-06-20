@@ -414,7 +414,7 @@ let ensure_literal t ~literal =
     var.exists <- true)
 ;;
 
-let add_clause t ~literals ~learned =
+let add_clause t ~literals ~origin =
   let len = Vec.Value.length literals in
   if len = 0 then t.has_empty_clause <- true;
   let satisfied = stack_ (ref false) in
@@ -448,7 +448,7 @@ let add_clause t ~literals ~learned =
   let clause : Clause.t =
     { clause = literals
     ; has_unit = false
-    ; learned
+    ; origin
     ; lbd = 0
     ; deleted = false
     ; activity = 0.0
@@ -525,7 +525,7 @@ let propagate_theory t = exclave_
           add_clause
             t
             ~literals:(Vec.Value.of_array_taking_ownership clause)
-            ~learned:true
+            ~origin:Theory
         with
         | `Ok -> `Continue
         | `Conflict _ as res -> res))
@@ -741,7 +741,9 @@ let reduce_db t =
   let candidates =
     Array.init n ~f:(fun i ->
       let c = Vec.Value.get t.clauses i in
-      if c.Clause.learned
+      if (match c.Clause.origin with
+          | Clause.Origin.Learned -> true
+          | User | Theory -> false)
          && c.lbd >= 4
          && Vec.Value.length c.clause > 3
          && (not c.deleted)
@@ -804,7 +806,7 @@ let backtrack t ~failed_clause ~failed_clause_idx =
   t.conflicts_since_restart <- t.conflicts_since_restart + 1;
   Vsids.decay t.vsids;
   remove_greater_than_decision_level t ~decision_level:backjump_level;
-  let result = add_clause t ~literals:learned_literals ~learned:true in
+  let result = add_clause t ~literals:learned_literals ~origin:Learned in
   (match result with
    | `Ok ->
      let clause = Vec.Value.get t.clauses (Vec.Value.length t.clauses - 1) in
@@ -822,18 +824,52 @@ let backtrack t ~failed_clause ~failed_clause_idx =
   result
 ;;
 
-let unsat_core t failed_clause_idx =
-  let failed_clause = Vec.Value.get t.clauses failed_clause_idx in
-  let #(~learned_literals, ~backjump_level:_) =
-    analyze_conflict t ~failed_clause ~failed_clause_idx
+(* Traverses the reason graph from [failed_clause_idx] and collects every User
+   and Theory clause that transitively caused the conflict. Learned (CDCL)
+   clauses are transparent: we recurse into their literals' reasons instead. For
+   User/Theory clauses we also recurse so we reach the User clauses that made
+   each Theory clause's literals false. *)
+let extract_unsat_core t failed_clause_idx : Sat_result.Core_clause.t list =
+  let seen_vars = Stamp_set.create () in
+  Stamp_set.reset seen_vars;
+  let seen_clause_idxs = Hash_set.create (module Core.Int) in
+  let result = Vec.Value.create () in
+  let rec explore clause_idx =
+    if not (Hash_set.mem seen_clause_idxs clause_idx)
+    then (
+      Hash_set.add seen_clause_idxs clause_idx;
+      let clause = Vec.Value.get t.clauses clause_idx in
+      (match clause.origin with
+       | User | Theory ->
+         Vec.Value.push
+           result
+           { Sat_result.Core_clause.literals = Vec.Value.to_array clause.clause
+           ; is_theory =
+               (match clause.origin with
+                | Theory -> true
+                | User | Learned -> false)
+           }
+       | Learned -> ());
+      Vec.Value.iter clause.clause ~f:(fun literal ->
+        let var = Int.abs literal in
+        if not (Stamp_set.is_seen seen_vars ~var)
+        then (
+          Stamp_set.mark_seen seen_vars ~var;
+          let var_obj = literal_var t ~literal in
+          match%optional_u (var_obj.trail_entry : Trail_entry.Option_u.t) with
+          | None -> ()
+          | Some trail_entry ->
+            (match trail_entry.#reason with
+             | T #(Decision, ()) -> ()
+             | T #(Clause_idx, reason_clause_idx) -> explore reason_clause_idx))))
   in
-  Vec.Value.map_inplace learned_literals ~f:(fun x -> -x);
-  Vec.Value.to_array learned_literals
+  explore failed_clause_idx;
+  Vec.Value.to_list result
 ;;
 
 let%template unsat t failed_clause_idx : Sat_result.t @ m =
-  let unsat_core = unsat_core t failed_clause_idx in
-  Unsat { unsat_core } [@exclave_if_stack a]
+  let core = extract_unsat_core t failed_clause_idx in
+  Unsat { core } [@exclave_if_stack a]
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
@@ -1004,7 +1040,7 @@ let%template solve ?(time_bound = `Unlimited) ?(local_ assumptions = [||]) t
         "solve" ~assumptions:([%globalize: int array] assumptions : int array)];
   maybe_clear_past_solve_state t;
   if t.has_empty_clause
-  then Unsat { unsat_core = [||] }
+  then Unsat { core = [] }
   else (
     match[@exclave_if_stack a] add_assumptions ~assumptions t ~timer with
     | `Continue -> (solve' [@alloc a]) t ~timer
@@ -1012,7 +1048,14 @@ let%template solve ?(time_bound = `Unlimited) ?(local_ assumptions = [||]) t
       pop_trail_after_conflict t ~failed_clause_idx;
       (unsat [@alloc a]) t failed_clause_idx
     | `Failed_assumptions (previous_assumption, assumption) ->
-      Unsat { unsat_core = [| previous_assumption; assumption |] })
+      Unsat
+        { core =
+            [ { Sat_result.Core_clause.literals =
+                  [| previous_assumption; assumption |]
+              ; is_theory = false
+              }
+            ]
+        })
 [@@alloc a @ m = (stack_local, heap_global)]
 ;;
 
@@ -1053,23 +1096,24 @@ let add_clause t ~clause =
     add_clause
       t
       ~literals:(Vec.Value.of_array_taking_ownership clause)
-      ~learned:false
+      ~origin:User
   with
   | `Ok -> `Ok
-  | `Conflict failed_clause_idx -> `Unsat (unsat_core t failed_clause_idx)
+  | `Conflict failed_clause_idx ->
+    `Unsat (extract_unsat_core t failed_clause_idx)
 ;;
 
 let create_with_formula ?theory ?(local_ debug) formula =
   let t = create ?theory ?debug () in
-  let unsat_core = stack_ (ref Null) in
+  let core = ref None in
   Array.iter formula ~f:(fun clause ->
-    match !unsat_core with
-    | This _ -> ()
-    | Null ->
+    match !core with
+    | Some _ -> ()
+    | None ->
       (match add_clause t ~clause with
        | `Ok -> ()
-       | `Unsat core -> unsat_core := This core));
-  match !unsat_core with
-  | Null -> `Ok t
-  | This core -> `Unsat core
+       | `Unsat p -> core := Some p));
+  match !core with
+  | None -> `Ok t
+  | Some p -> `Unsat p
 ;;
