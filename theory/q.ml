@@ -71,12 +71,9 @@ let floor ({ num; den } as t) =
 
 let%expect_test "floor" =
   print_s [%sexp (of_int 1 / of_int 2 |> floor : t)];
+  [%expect {| ((num 0) (den 1)) |}];
   print_s [%sexp (of_int (-1) / of_int 2 |> floor : t)];
-  [%expect {|
-    ((num 0) (den 1))
-    ((num 0) (den 1))
-    |}];
-  [%expect {| |}];
+  [%expect {| ((num 0) (den 1)) |}];
   print_s [%sexp (of_int 3 / of_int 2 |> floor : t)];
   [%expect {| ((num 1) (den 1)) |}];
   print_s [%sexp (of_int 3 / of_int (-2) |> floor : t)];
@@ -91,12 +88,9 @@ let ceil t =
 
 let%expect_test "ceil" =
   print_s [%sexp (of_int 1 / of_int 2 |> ceil : t)];
+  [%expect {| ((num 1) (den 1)) |}];
   print_s [%sexp (of_int (-1) / of_int 2 |> ceil : t)];
-  [%expect {|
-    ((num 1) (den 1))
-    ((num -1) (den 1))
-    |}];
-  [%expect {| |}];
+  [%expect {| ((num -1) (den 1)) |}];
   print_s [%sexp (of_int 3 / of_int 2 |> ceil : t)];
   [%expect {| ((num 2) (den 1)) |}];
   print_s [%sexp (of_int 3 / of_int (-2) |> ceil : t)];
