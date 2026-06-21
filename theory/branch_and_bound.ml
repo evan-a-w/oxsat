@@ -15,13 +15,6 @@ end
 module Trail_entry = struct
   module Kind = struct
     type t = Add_constraint of Simplex.constraint_
-    (* | Make_integral_assignment of Tvar.t *)
-    (* | Make_non_integral_assignment of Tvar.t *)
-    (* | Relaxation of *)
-    (*     { var : int *)
-    (* ; lb : Simplex.constraint_ *)
-    (* ; ub : Simplex.constraint_ *)
-    (*     } *)
   end
 
   type t =
@@ -44,14 +37,6 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
   | Add_constraint constraint_ ->
     Simplex.remove_constraint t.simplex ~constraint_
 ;;
-
-(* | Make_integral_assignment tvar -> *)
-(* Hash_queue.enqueue_front_exn t.non_integral_ints tvar () *)
-(* | Make_non_integral_assignment tvar -> *)
-(* Hash_queue.remove_exn t.non_integral_ints tvar *)
-(* | Relaxation { var = _; lb; ub } -> *)
-(* Simplex.remove_constraint t.simplex ~constraint_:lb; *)
-(* Simplex.remove_constraint t.simplex ~constraint_:ub *)
 
 let rec undo t ~to_decision_level_excl =
   match Vec.Value.length t.trail with
@@ -84,16 +69,9 @@ let simplex_solve t =
        | Some (tvar, Int) ->
          let marked_nonintegral = Hash_queue.mem t.non_integral_ints tvar in
          if marked_nonintegral && Q.is_integral q
-         then
-           Hash_queue.remove_exn
-             t.non_integral_ints
-             tvar (* push_trail t ~kind:(Make_integral_assignment tvar) *)
+         then Hash_queue.remove_exn t.non_integral_ints tvar
          else if (not marked_nonintegral) && not (Q.is_integral q)
-         then
-           Hash_queue.enqueue_front_exn
-             t.non_integral_ints
-             tvar
-             () (* push_trail t ~kind:(Make_non_integral_assignment tvar) *));
+         then Hash_queue.enqueue_front_exn t.non_integral_ints tvar ());
       go ()
   in
   go ();
@@ -101,8 +79,10 @@ let simplex_solve t =
 ;;
 
 let rec solve t =
-  let[@inline always] try_with_constraint constraint_ =
-    let constraint_ = Simplex.add_constraint t.simplex constraint_ in
+  let[@inline always] try_with var op const =
+    let constraint_ =
+      Simplex.add_constraint t.simplex ([ Q.one, var ], op, const)
+    in
     push_trail t ~kind:(Add_constraint constraint_);
     let res = solve t in
     (match res with
@@ -123,5 +103,7 @@ let rec solve t =
            { tvar = nonintegral; type_ = Int }
        in
        let assignment = Simplex.assignment t.simplex ~var in
-       `Unsat)
+       (match try_with var `Le (Q.floor assignment) with
+        | `Sat -> `Sat
+        | `Unsat -> try_with var `Ge (Q.ceil assignment)))
 ;;

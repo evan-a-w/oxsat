@@ -57,3 +57,50 @@ let max a b = if compare a b >= 0 then a else b
 let to_float a = Float.( / ) (Float.of_int a.num) (Float.of_int a.den)
 let num a = a.num
 let den a = a.den
+
+let floor ({ num; den } as t) =
+  if is_integral t
+  then t
+  else (
+    let num' = Int.abs num in
+    let r = num' mod den in
+    if Int.O.(num' - r = 0)
+    then zero
+    else { num = Int.O.((num' - r) * (num / num') / den); den = 1 })
+;;
+
+let%expect_test "floor" =
+  print_s [%sexp (of_int 1 / of_int 2 |> floor : t)];
+  print_s [%sexp (of_int (-1) / of_int 2 |> floor : t)];
+  [%expect {|
+    ((num 0) (den 1))
+    ((num 0) (den 1))
+    |}];
+  [%expect {| |}];
+  print_s [%sexp (of_int 3 / of_int 2 |> floor : t)];
+  [%expect {| ((num 1) (den 1)) |}];
+  print_s [%sexp (of_int 3 / of_int (-2) |> floor : t)];
+  [%expect {| ((num -1) (den 1)) |}];
+  print_s [%sexp (of_int 84 / of_int 32 |> floor : t)];
+  [%expect {| ((num 2) (den 1)) |}]
+;;
+
+let ceil t =
+  if is_integral t then t else floor (t + of_int (Int.( * ) 1 (sign' t)))
+;;
+
+let%expect_test "ceil" =
+  print_s [%sexp (of_int 1 / of_int 2 |> ceil : t)];
+  print_s [%sexp (of_int (-1) / of_int 2 |> ceil : t)];
+  [%expect {|
+    ((num 1) (den 1))
+    ((num -1) (den 1))
+    |}];
+  [%expect {| |}];
+  print_s [%sexp (of_int 3 / of_int 2 |> ceil : t)];
+  [%expect {| ((num 2) (den 1)) |}];
+  print_s [%sexp (of_int 3 / of_int (-2) |> ceil : t)];
+  [%expect {| ((num -2) (den 1)) |}];
+  print_s [%sexp (of_int 84 / of_int 32 |> ceil : t)];
+  [%expect {| ((num 3) (den 1)) |}]
+;;

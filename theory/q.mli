@@ -36,3 +36,5 @@ val den : t -> int
 val to_float : t -> float
 
 val is_integral : t -> bool
+val floor : t -> t
+val ceil : t -> t
