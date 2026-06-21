@@ -90,7 +90,7 @@ let rec solve t =
      | `Sat -> ());
     res
   in
-  match Simplex.solve t.simplex with
+  match simplex_solve t with
   | `Unsat -> `Unsat
   | `Sat ->
     (* relaxed problem is feasible *)
