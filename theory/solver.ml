@@ -1,26 +1,31 @@
 open! Core
 open! Feel.Import
 
-(* Composite theory dispatching to value-level EUF, type-level EUF, and
-   Tvar_types. *)
+(* Composite theory dispatching to value-level EUF, type-level EUF, Tvar_types,
+   and branch-and-bound arithmetic. *)
 module Combined_theory = struct
   type t =
     { uf : Uninterpreted_functions.t
     ; type_uf : Uninterpreted_functions.t
     ; tt : Tvar_types.t
+    ; bb : Branch_and_bound.t
     }
 
   let assert_literal t ~decision_level ~literal =
     Uninterpreted_functions.assert_literal t.uf ~decision_level ~literal;
     Uninterpreted_functions.assert_literal t.type_uf ~decision_level ~literal;
-    Tvar_types.assert_literal t.tt ~decision_level ~literal
+    Tvar_types.assert_literal t.tt ~decision_level ~literal;
+    Branch_and_bound.assert_literal t.bb ~decision_level ~literal
   ;;
 
   let maybe_get_lemma t = exclave_
     match Uninterpreted_functions.maybe_get_lemma t.uf [@nontail] with
     | `Consistent ->
       (match Uninterpreted_functions.maybe_get_lemma t.type_uf [@nontail] with
-       | `Consistent -> Tvar_types.maybe_get_lemma t.tt
+       | `Consistent ->
+         (match Tvar_types.maybe_get_lemma t.tt [@nontail] with
+          | `Consistent -> Branch_and_bound.maybe_get_lemma t.bb
+          | lemma -> lemma)
        | lemma -> lemma)
     | lemma -> lemma
   ;;
@@ -28,13 +33,15 @@ module Combined_theory = struct
   let undo t ~to_decision_level_excl =
     Uninterpreted_functions.undo t.uf ~to_decision_level_excl;
     Uninterpreted_functions.undo t.type_uf ~to_decision_level_excl;
-    Tvar_types.undo t.tt ~to_decision_level_excl
+    Tvar_types.undo t.tt ~to_decision_level_excl;
+    Branch_and_bound.undo t.bb ~to_decision_level_excl
   ;;
 
   let on_new_var t ~var =
     Uninterpreted_functions.on_new_var t.uf ~var;
     Uninterpreted_functions.on_new_var t.type_uf ~var;
-    Tvar_types.on_new_var t.tt ~var
+    Tvar_types.on_new_var t.tt ~var;
+    Branch_and_bound.on_new_var t.bb ~var
   ;;
 end
 
@@ -43,6 +50,7 @@ type t =
   ; uf : Uninterpreted_functions.t
   ; type_uf : Uninterpreted_functions.t
   ; tt : Tvar_types.t
+  ; bb : Branch_and_bound.t
   ; encoding : Formula.Encoding.t
   ; mutable scopes : int list (* activation literals, innermost first *)
   ; formula_by_root_lit : Formula.t Int.Table.t
@@ -52,7 +60,8 @@ let create () =
   let uf = Uninterpreted_functions.create ~atoms:[] in
   let type_uf = Uninterpreted_functions.create ~atoms:[] in
   let tt = Tvar_types.create () in
-  let combined = { Combined_theory.uf; type_uf; tt } in
+  let bb = Branch_and_bound.create () in
+  let combined = { Combined_theory.uf; type_uf; tt; bb } in
   let solver =
     Feel.Solver.create
       ~theory:(Feel.Theory.pack (module Combined_theory) combined)
@@ -63,6 +72,7 @@ let create () =
     ; uf
     ; type_uf
     ; tt
+    ; bb
     ; encoding = Formula.Encoding.create ()
     ; scopes = []
     ; formula_by_root_lit = Int.Table.create ()
@@ -136,7 +146,7 @@ let assert_formula t formula
       match atom with
       | #Uninterpreted_functions.Atom.t as atom ->
         Uninterpreted_functions.add_atom t.uf ~atom ~sat_var
-      | `Le (_, _) -> ()
+      | `Le (_, _) as atom -> Branch_and_bound.add_atom t.bb ~atom ~sat_var
       | `Has_type (var, type_expr) ->
         Tvar_types.add_atom t.tt ~atom:(`Has_type (var, type_expr)) ~sat_var
       | `Type_eq (te1, te2) ->
@@ -216,3 +226,7 @@ let assert_type t var type_expr =
 ;;
 
 let get_type t var = Tvar_types.get_type t.tt var
+
+let register_arithmetic_var t tvar type_ =
+  Branch_and_bound.register_tvar_with_type t.bb tvar type_
+;;

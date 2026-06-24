@@ -9,6 +9,7 @@ open! Core
 type t [@@deriving sexp, hash, equal]
 
 val compare : t -> t -> int
+val ( > ) : t -> t -> bool
 val zero : t
 val one : t
 val of_int : int -> t

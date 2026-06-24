@@ -490,8 +490,44 @@ let restore_assignments t (snapshot : Snapshot.t) =
   Array.iteri snapshot ~f:(fun i q -> (Vec.Value.get t.vars i).assignment <- q)
 ;;
 
+let create () =
+  { tableau = Vec.Value.create ()
+  ; basic_vars = Vec.Value.create ()
+  ; nonbasic_vars = Vec.Value.create ()
+  ; vars = Vec.Value.create ()
+  ; new_assignments = Int.Hash_queue.create ()
+  }
+;;
+
 let add_var t = (add_nonbasic t).id
 let assignment t ~var = (Vec.Value.get t.vars var).assignment
+
+let fold_conflict_row t ~f =
+  let failing =
+    Vec.Value.findi t.basic_vars ~f:(fun (row : int) (var : Var.t) ->
+      match Var.diff_to_become_in_bounds var with
+      | None -> None
+      | Some (diff : Q.t) -> Some (row, var, diff))
+  in
+  match failing with
+  | None -> None
+  | Some (row, basic_var, diff) ->
+    let needs_increase = Q.(diff > zero) in
+    f ~var_id:basic_var.id ~bound_side:(if needs_increase then `Ge else `Le);
+    Vec.Value.iteri t.nonbasic_vars ~f:(fun col nonbasic_var ->
+      let coeff = get_tableau t ~row ~col in
+      if not (Q.is_zero coeff)
+      then (
+        let need_le_witness =
+          match needs_increase, Q.(coeff > zero) with
+          | true, true | false, false -> true
+          | true, false | false, true -> false
+        in
+        f
+          ~var_id:nonbasic_var.id
+          ~bound_side:(if need_le_witness then `Le else `Ge)));
+    Some ()
+;;
 
 let add_constraint t (lhs, op, rhs) =
   let nonbasic_coefficients =

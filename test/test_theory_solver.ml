@@ -593,3 +593,60 @@ let%expect_test "Type_eq: normalize makes Type_eq(a, b) = Type_eq(b, a)" =
   print_s [%sexp ([%equal: Atom.t] atom1 atom2 : bool)];
   [%expect {| true |}]
 ;;
+
+(* ----- Arithmetic (branch-and-bound) ----- *)
+
+let xv_int = Tvar.of_string "x"
+let yv_int = Tvar.of_string "y"
+let le tvar c : Formula.t = Atom (`Le (Linear_expr.var tvar, Q.of_int c))
+
+let ge tvar c : Formula.t =
+  Not (Atom (`Le (Linear_expr.var tvar, Q.of_int (c - 1))))
+;;
+
+let setup_int_solver () =
+  let solver = Solver.create () in
+  Solver.register_arithmetic_var solver xv_int Int;
+  Solver.register_arithmetic_var solver yv_int Int;
+  solver
+;;
+
+let%expect_test "arithmetic: x <= 5 is sat" =
+  let solver = setup_int_solver () in
+  assert_ok solver (le xv_int 5);
+  print_result (Solver.solve solver);
+  [%expect {| (Sat (assignments (() (false) (true)))) |}]
+;;
+
+let%expect_test "arithmetic: x <= 5 and x >= 7 is unsat" =
+  let solver = setup_int_solver () in
+  assert_ok solver (le xv_int 5);
+  assert_ok solver (ge xv_int 7);
+  print_result (Solver.solve solver);
+  [%expect
+    {|
+    (Unsat
+     (core
+      ((Theory_lemma (Or ((Not (Atom (Le ((coeffs ((x ((num 1) (den 1)))) (const ((num 0) (den 1)))) ((num 7) (den 1))))) (Not (Atom (Le ((coeffs ((x ((num 1) (den 1)))) (const ((num 0) (den 1)))) ((num 5) (den 1))))))))
+        (Asserted (Not (Atom (Le ((coeffs ((x ((num 1) (den 1)))) (const ((num 0) (den 1)))) ((num 6) (den 1)))))))
+        (Asserted (Atom (Le ((coeffs ((x ((num 1) (den 1)))) (const ((num 0) (den 1)))) ((num 5) (den 1)))))))))
+    |}]
+;;
+
+let%expect_test "arithmetic: x <= 3 and x >= 3 is sat (x = 3)" =
+  let solver = setup_int_solver () in
+  assert_ok solver (le xv_int 3);
+  assert_ok solver (ge xv_int 3);
+  print_result (Solver.solve solver);
+  [%expect {| (Sat (assignments (() (false) (true) (true)))) |}]
+;;
+
+let%expect_test "arithmetic: integer branching - x >= 0, x <= 1, x must be 0 \
+                 or 1"
+  =
+  let solver = setup_int_solver () in
+  assert_ok solver (ge xv_int 0);
+  assert_ok solver (le xv_int 1);
+  print_result (Solver.solve solver);
+  [%expect {| (Sat (assignments (() (false) (true) (true)))) |}]
+;;

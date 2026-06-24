@@ -52,6 +52,7 @@ let is_zero a = a.num = 0
 
 (* [a.den], [b.den] > 0, so cross-multiplying preserves order. *)
 let compare a b = Int.compare (Int.( * ) a.num b.den) (Int.( * ) b.num a.den)
+let ( > ) a b = compare a b > 0
 let min a b = if compare a b <= 0 then a else b
 let max a b = if compare a b >= 0 then a else b
 let to_float a = Float.( / ) (Float.of_int a.num) (Float.of_int a.den)

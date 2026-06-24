@@ -52,3 +52,8 @@ val solve
 
 val assert_type : t -> Tvar.t -> Type_expr.t -> unit
 val get_type : t -> Tvar.t -> Type_expr.t option
+
+(** Registers [tvar] as an arithmetic variable of base type [type_], creating a
+    simplex variable for it. Must be called before any [Le] atom referencing
+    [tvar] is asserted, so that the theory can determine its numeric type. *)
+val register_arithmetic_var : t -> Tvar.t -> Type_expr.Base.t -> unit
