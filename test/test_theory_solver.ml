@@ -650,3 +650,19 @@ let%expect_test "arithmetic: integer branching - x >= 0, x <= 1, x must be 0 \
   print_result (Solver.solve solver);
   [%expect {| (Sat (assignments (() (false) (true) (true)))) |}]
 ;;
+
+(* [2x <= 3, x >= 0] has a fractional LP relaxation (x = 3/2); the integer
+   solution must branch to [x <= 1] (since [x >= 2] is infeasible against the
+   upper bound). Neither branch atom is asserted up front, so this exercises
+   [Solver.sat_var_for_atom] allocating fresh sat vars for the branch lemma. *)
+let%expect_test "arithmetic: fractional LP relaxation forces integer branching" =
+  let solver = setup_int_solver () in
+  let two_x_le_3 : Formula.t =
+    Atom (`Le (Linear_expr.scale (Q.of_int 2) (Linear_expr.var xv_int), Q.of_int 3))
+  in
+  assert_ok solver two_x_le_3;
+  assert_ok solver (ge xv_int 0);
+  print_result (Solver.solve solver);
+  [%expect
+    {| (Sat (assignments (() (false)))) |}]
+;;

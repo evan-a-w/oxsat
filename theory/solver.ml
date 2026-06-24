@@ -56,11 +56,67 @@ type t =
   ; formula_by_root_lit : Formula.t Int.Table.t
   }
 
+(* Converts a [Type_expr.t] to an [Uninterpreted_functions.Term.t] so it can be
+   registered with the type-level EUF instance. Base types become constant term
+   variables using the canonical tvars from [Type_expr.base_tvar]. *)
+let rec type_expr_to_term : Type_expr.t -> Uninterpreted_functions.Term.t
+  = function
+  | Base b -> `Var (Type_expr.base_tvar b)
+  | Var v -> `Var v
+  | App (ctor, args) ->
+    `App (~function_:ctor, ~args:(List.map args ~f:type_expr_to_term))
+;;
+
+(* Registers [atom] with whichever theory owns its kind, under [sat_var]. Used
+   both for atoms freshly encoded by [assert_formula] and for atoms a theory
+   requests directly via [sat_var_for_atom] (e.g. branch-and-bound's branch
+   lemma atoms, which aren't reached via [Formula.encode]). *)
+let register_atom_with_theory t (atom : Atom.t) ~sat_var =
+  match atom with
+  | #Uninterpreted_functions.Atom.t as atom ->
+    Uninterpreted_functions.add_atom t.uf ~atom ~sat_var
+  | `Le (_, _) as atom -> Branch_and_bound.add_atom t.bb ~atom ~sat_var
+  | `Has_type (var, type_expr) ->
+    Tvar_types.add_atom t.tt ~atom:(`Has_type (var, type_expr)) ~sat_var
+  | `Type_eq (te1, te2) ->
+    let t1 = type_expr_to_term te1 in
+    let t2 = type_expr_to_term te2 in
+    let uf_atom = Uninterpreted_functions.Atom.normalize (`Eq (t1, t2)) in
+    Uninterpreted_functions.add_atom t.type_uf ~atom:uf_atom ~sat_var
+;;
+
+(* The SAT variable representing [atom], allocating and registering a fresh one
+   with the owning theory if [atom] hasn't been seen before. Unlike
+   [assert_formula], this does not add any clause -- callers (typically a
+   theory's [maybe_get_lemma]) are expected to use the returned variable in a
+   lemma clause they emit themselves, which is what introduces the variable to
+   the underlying SAT core (see [Feel.Solver.ensure_literal]). *)
+let sat_var_for_atom t atom =
+  let checkpoint = Formula.Encoding.checkpoint t.encoding in
+  let sat_var = Formula.Encoding.sat_var_for_atom t.encoding atom in
+  List.iter
+    (Formula.Encoding.new_atoms_since t.encoding ~checkpoint)
+    ~f:(fun (atom, sat_var) -> register_atom_with_theory t atom ~sat_var);
+  sat_var
+;;
+
 let create () =
   let uf = Uninterpreted_functions.create ~atoms:[] in
   let type_uf = Uninterpreted_functions.create ~atoms:[] in
   let tt = Tvar_types.create () in
-  let bb = Branch_and_bound.create () in
+  (* [Branch_and_bound.create] needs a [sat_var_for_atom] callback that, once
+     wired up below, allocates through this very [t] -- but [t] doesn't exist
+     until after the theory (and hence [bb]) is built. Tie the knot with a
+     forward reference, set immediately after [t] is constructed and never
+     reassigned; [sat_var_for_atom] is never called before then since it's only
+     reachable via [maybe_get_lemma] during [solve]. *)
+  let t_ref : t or_null ref = ref Null in
+  let bb =
+    Branch_and_bound.create ~sat_var_for_atom:(fun atom ->
+      match !t_ref with
+      | Null -> assert false
+      | This t -> sat_var_for_atom t atom)
+  in
   let combined = { Combined_theory.uf; type_uf; tt; bb } in
   let solver =
     Feel.Solver.create
@@ -78,6 +134,7 @@ let create () =
     ; formula_by_root_lit = Int.Table.create ()
     }
   in
+  t_ref := This t;
   (* Pre-register pairwise disequalities between distinct base types. This makes
      the type-level EUF aware that e.g. [Int ≠ Float], so that asserting
      [TypeEq('a, Int)] and [TypeEq('a, Float)] yields a conflict. Registered via
@@ -114,17 +171,6 @@ let guard_clauses ~activation clauses =
   List.map clauses ~f:(fun clause -> Array.append [| -activation |] clause)
 ;;
 
-(* Converts a [Type_expr.t] to an [Uninterpreted_functions.Term.t] so it can be
-   registered with the type-level EUF instance. Base types become constant term
-   variables using the canonical tvars from [Type_expr.base_tvar]. *)
-let rec type_expr_to_term : Type_expr.t -> Uninterpreted_functions.Term.t
-  = function
-  | Base b -> `Var (Type_expr.base_tvar b)
-  | Var v -> `Var v
-  | App (ctor, args) ->
-    `App (~function_:ctor, ~args:(List.map args ~f:type_expr_to_term))
-;;
-
 let assert_formula t formula
   : [ `Ok | `Unsat of Feel.Sat_result.Core_clause.t list ]
   =
@@ -142,18 +188,7 @@ let assert_formula t formula
      [add_clause]) recognizes them as theory atoms from the start. *)
   List.iter
     (Formula.Encoding.new_atoms_since t.encoding ~checkpoint)
-    ~f:(fun (atom, sat_var) ->
-      match atom with
-      | #Uninterpreted_functions.Atom.t as atom ->
-        Uninterpreted_functions.add_atom t.uf ~atom ~sat_var
-      | `Le (_, _) as atom -> Branch_and_bound.add_atom t.bb ~atom ~sat_var
-      | `Has_type (var, type_expr) ->
-        Tvar_types.add_atom t.tt ~atom:(`Has_type (var, type_expr)) ~sat_var
-      | `Type_eq (te1, te2) ->
-        let t1 = type_expr_to_term te1 in
-        let t2 = type_expr_to_term te2 in
-        let uf_atom = Uninterpreted_functions.Atom.normalize (`Eq (t1, t2)) in
-        Uninterpreted_functions.add_atom t.type_uf ~atom:uf_atom ~sat_var);
+    ~f:(fun (atom, sat_var) -> register_atom_with_theory t atom ~sat_var);
   List.fold_until
     clauses
     ~init:`Ok

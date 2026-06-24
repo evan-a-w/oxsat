@@ -27,6 +27,16 @@ val assert_formula
   -> Formula.t
   -> [ `Ok | `Unsat of Feel.Sat_result.Core_clause.t list ]
 
+(** The SAT variable representing [atom], allocating and registering a fresh
+    one with the owning theory if [atom] (after normalization) hasn't been seen
+    before. Unlike [assert_formula], this does not assert anything -- the atom
+    remains unconstrained until some clause referencing its variable is added
+    (e.g. by a theory lemma returned from [Theory.S.maybe_get_lemma], or by a
+    later [assert_formula] call). Intended for theories that need to name a
+    fresh atom (such as a branch-and-bound split point) before it has appeared
+    in any asserted formula. *)
+val sat_var_for_atom : t -> Atom.t -> int
+
 (** Opens a new assertion scope. Formulas asserted after [push] (until the
     matching [pop]) are only enforced while this scope is active. *)
 val push : t -> unit

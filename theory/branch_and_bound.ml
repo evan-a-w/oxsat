@@ -51,6 +51,7 @@ type t =
   ; sat_var_by_atom : int Atom.Table.t
   ; bound_witness_by_simplex_var : Bound_witness.t Int.Table.t
   ; mutable conflict : int array option
+  ; sat_var_for_atom : Atom.t -> int
   }
 
 let get_or_add_simplex_var t tvar type_ =
@@ -67,7 +68,7 @@ let get_or_add_simplex_var t tvar type_ =
       var)
 ;;
 
-let create () =
+let create ~sat_var_for_atom =
   { simplex_var_by_tvar_and_type = Tvar_and_type.Table.create ()
   ; tvar_type_by_simplex_var = Int.Table.create ()
   ; simplex = Simplex.create ()
@@ -77,6 +78,7 @@ let create () =
   ; sat_var_by_atom = Atom.Table.create ()
   ; bound_witness_by_simplex_var = Int.Table.create ()
   ; conflict = None
+  ; sat_var_for_atom
   }
 ;;
 
@@ -280,7 +282,7 @@ let maybe_get_lemma t = exclave_
      | None ->
        (match find_nonintegral_int t with
         | None -> `Consistent
-        | Some (nonintegral, simplex_var, q) ->
+        | Some (nonintegral, _simplex_var, q) ->
           let floor_q = Q.floor q in
           let ceil_q = Q.ceil q in
           let tvar_expr = Linear_expr.var nonintegral in
@@ -288,31 +290,14 @@ let maybe_get_lemma t = exclave_
           let ge_atom : Atom.t =
             Atom.normalize (`Le (Linear_expr.neg tvar_expr, Q.neg ceil_q))
           in
-          (match
-             ( Hashtbl.find t.sat_var_by_atom le_atom
-             , Hashtbl.find t.sat_var_by_atom ge_atom )
-           with
-           | Some le_sv, Some ge_sv ->
-             (* Both branch atoms are known to the SAT solver: emit the
-                tautology [x <= floor(q)] \/ [x >= ceil(q)] and let the SAT
-                solver branch. *)
-             `Lemma { Modes.Global.global = [| le_sv; ge_sv |] }
-           | _ ->
-             (* Branch atoms not registered: add x <= floor(q) directly as an
-                untracked constraint, forcing integrality without SAT branching. *)
-             add_untracked_constraint
-               t
-               ~lhs:[ Q.one, simplex_var ]
-               ~op:`Le
-               ~rhs:floor_q;
-             (match Simplex.solve t.simplex with
-              | `Sat -> `Consistent
-              | `Unsat ->
-                (match collect_conflict_lemma t with
-                 | Some clause ->
-                   t.conflict <- Some clause;
-                   `Lemma { Modes.Global.global = clause }
-                 | None -> `Consistent)))))
+          (* Ensure both branch atoms have sat vars (allocating fresh ones via
+             [sat_var_for_atom] if either hasn't been asserted before), then
+             emit the tautology [x <= floor(q)] \/ [x >= ceil(q)] so the SAT
+             solver -- not this theory -- decides which branch to explore and
+             how to backtrack out of it. *)
+          let le_sv = t.sat_var_for_atom le_atom in
+          let ge_sv = t.sat_var_for_atom ge_atom in
+          `Lemma { Modes.Global.global = [| le_sv; ge_sv |] }))
 ;;
 
 let on_new_var _t ~var:_ = ()
