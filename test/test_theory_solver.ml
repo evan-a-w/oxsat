@@ -664,5 +664,5 @@ let%expect_test "arithmetic: fractional LP relaxation forces integer branching" 
   assert_ok solver (ge xv_int 0);
   print_result (Solver.solve solver);
   [%expect
-    {| (Sat (assignments (() (false)))) |}]
+    {| (Sat (assignments (() (false) (true) (true) (true) (false)))) |}]
 ;;
