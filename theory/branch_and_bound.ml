@@ -13,13 +13,9 @@ module Tvar_and_type = struct
 end
 
 module Trail_entry = struct
-  module Kind = struct
-    type t = Add_constraint of Simplex.constraint_
-  end
-
   type t =
     { decision_level : int
-    ; kind : Kind.t
+    ; constraint_ : Simplex.constraint_
     }
 end
 
@@ -32,10 +28,8 @@ type t =
   ; mutable current_decision_level : int
   }
 
-let undo_entry t ~(trail_entry : Trail_entry.t) =
-  match trail_entry.kind with
-  | Add_constraint constraint_ ->
-    Simplex.remove_constraint t.simplex ~constraint_
+let undo_entry t ({ constraint_; _ } : Trail_entry.t) =
+  Simplex.remove_constraint t.simplex ~constraint_
 ;;
 
 let rec undo t ~to_decision_level_excl =
@@ -47,14 +41,14 @@ let rec undo t ~to_decision_level_excl =
      | false -> t.current_decision_level <- trail_entry.decision_level
      | true ->
        ignore (Vec.Value.pop_exn t.trail : Trail_entry.t);
-       undo_entry t ~trail_entry;
+       undo_entry t trail_entry;
        undo t ~to_decision_level_excl)
 ;;
 
-let push_trail t ~kind =
+let push_trail t ~constraint_ =
   Vec.Value.push
     t.trail
-    ({ decision_level = t.current_decision_level; kind } : Trail_entry.t)
+    ({ decision_level = t.current_decision_level; constraint_ } : Trail_entry.t)
 ;;
 
 let simplex_solve t =
@@ -83,10 +77,10 @@ let rec solve t =
     let constraint_ =
       Simplex.add_constraint t.simplex ([ Q.one, var ], op, const)
     in
-    push_trail t ~kind:(Add_constraint constraint_);
+    push_trail t ~constraint_;
     let res = solve t in
     (match res with
-     | `Unsat -> undo_entry t ~trail_entry:(Vec.Value.pop_exn t.trail)
+     | `Unsat -> undo_entry t (Vec.Value.pop_exn t.trail)
      | `Sat -> ());
     res
   in
