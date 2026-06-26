@@ -27,5 +27,12 @@ let base_tvar = function
    symbol of the same name -- those are never prefixed with [':']. *)
 let tvar_for_term tvar = Tvar.of_string (":" ^ Tvar.to_string tvar)
 
+let rec to_term : t -> Term.t = function
+  | Base b -> `Var (base_tvar b)
+  | Var v -> `Var (tvar_for_term v)
+  | App (ctor, args) ->
+    `App (~function_:(tvar_for_term ctor), ~args:(List.map args ~f:to_term))
+;;
+
 include functor Hashable.Make
 include functor Comparable.Make

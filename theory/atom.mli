@@ -16,12 +16,11 @@ type t =
   [ `Eq of Term.t * Term.t
   | `Le of Linear_expr.t * Q.t
   | `Has_type of Tvar.t * Type_expr.t
-  | `Type_eq of Type_expr.t * Type_expr.t
   ]
 [@@deriving sexp, compare, hash]
 
-(** For [`Eq] and [`Type_eq], orders the two sides canonically so that
-    semantically identical atoms compare equal regardless of argument order.
+(** For [`Eq], orders the two sides canonically so that semantically identical
+    atoms compare equal regardless of argument order.
 
     For [`Le (expr, c)], rewrites to the canonical primitive form (via
     [Linear_expr.primitive]) with the constant moved entirely to the right-hand

@@ -22,21 +22,6 @@ module Encoding : sig
   val sat_var_for_atom : t -> Atom.t -> int
   val find_sat_var_for_atom : t -> Atom.t -> int option
   val atom_for_sat_var : t -> int -> Atom.t option
-
-  (** Registers [atom] as an additional, independent theory atom for [sat_var],
-      alongside whatever atom [sat_var_for_atom]/[atom_for_sat_var] already
-      associate with it. Needed when a derived atom of a different shape (e.g.
-      the [Eq] atom a [Type_eq] atom translates to for the EUF theory) must
-      share a SAT variable with the atom that originally allocated it, while
-      [atom_for_sat_var] keeps resolving to the original (e.g. for unsat
-      cores). *)
-  val set_theory_atom : t -> sat_var:int -> atom:Atom.t -> unit
-
-  val theory_atom_for_sat_var : t -> int -> Atom.t option
-
-  (** Raises if [atom] was never registered via [set_theory_atom]. *)
-  val sat_var_for_theory_atom : t -> Atom.t -> int
-
   val atoms : t -> (Atom.t * int) list
   val checkpoint : t -> int
   val new_atoms_since : t -> checkpoint:int -> (Atom.t * int) list

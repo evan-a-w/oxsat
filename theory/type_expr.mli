@@ -33,5 +33,9 @@ val base_tvar : Base.t -> Tvar.t
     it as a term. *)
 val tvar_for_term : Tvar.t -> Tvar.t
 
+(** Embeds [t] as a [Term.t] for use with [Uninterpreted_functions], via
+    [base_tvar]/[tvar_for_term]. *)
+val to_term : t -> Term.t
+
 include Comparable.S with type t := t
 include Hashable.S with type t := t

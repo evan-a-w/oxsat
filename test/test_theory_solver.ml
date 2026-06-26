@@ -440,7 +440,10 @@ let int_type : Type_expr.t = Base Int
 let float_type : Type_expr.t = Base Float
 let array_ctor = Tvar.of_string "Array"
 let array_of (elem : Type_expr.t) : Type_expr.t = App (array_ctor, [ elem ])
-let type_eq te1 te2 : Formula.t = Atom (`Type_eq (te1, te2))
+
+let type_eq te1 te2 : Formula.t =
+  Atom (`Eq (Type_expr.to_term te1, Type_expr.to_term te2))
+;;
 
 let%expect_test "Has_type: basic assert and get_type" =
   let solver = Solver.create () in
@@ -568,10 +571,10 @@ let%expect_test "Type_eq: TypeEq(a, Int) and TypeEq(a, Float) conflict via \
      (core
       ((Theory_lemma
         (Or
-         ((Not (Atom (Type_eq ((Base Float) (Var a)))))
-          (Atom (Type_eq ((Base Int) (Base Float)))))))
-       (Asserted (Atom (Type_eq ((Var a) (Base Float)))))
-       (Asserted (Not (Atom (Type_eq ((Base Int) (Base Float)))))))))
+         ((Not (Atom (Eq ((Var :Float) (Var :a)))))
+          (Atom (Eq ((Var :Float) (Var :Int)))))))
+       (Asserted (Atom (Eq ((Var :a) (Var :Float)))))
+       (Asserted (Not (Atom (Eq ((Var :Float) (Var :Int)))))))))
     |}]
 ;;
 
@@ -583,11 +586,17 @@ let%expect_test "Type_eq: TypeEq(a, Int) alone is sat" =
   [%expect {| (Sat (assignments (() (false) (true)))) |}]
 ;;
 
-let%expect_test "Type_eq: normalize makes Type_eq(a, b) = Type_eq(b, a)" =
+let%expect_test "Type_eq: normalize makes Eq(a, b) = Eq(b, a) for embedded \
+                 type terms"
+  =
   let a = Tvar.of_string "a" in
   let te = Type_expr.Var a in
-  let atom1 = Atom.normalize (`Type_eq (te, int_type)) in
-  let atom2 = Atom.normalize (`Type_eq (int_type, te)) in
+  let atom1 =
+    Atom.normalize (`Eq (Type_expr.to_term te, Type_expr.to_term int_type))
+  in
+  let atom2 =
+    Atom.normalize (`Eq (Type_expr.to_term int_type, Type_expr.to_term te))
+  in
   print_s [%sexp ([%equal: Atom.t] atom1 atom2 : bool)];
   [%expect {| true |}]
 ;;
