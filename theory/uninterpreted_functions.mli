@@ -26,18 +26,28 @@ end
 
 type t
 
-(** [create ~atoms] builds the theory state for the given set of equality atoms,
-    each paired with the SAT variable that represents it. All terms appearing in
-    [atoms] are registered up front; the theory does not introduce new terms or
-    atoms afterwards. *)
-val create : atoms:(Atom.t * int) list -> t
+(** [create ~atoms] builds the theory state for the given set of equality atoms.
+    All terms appearing in [atoms] are registered up front; the theory does not
+    introduce new terms or atoms afterwards. *)
+val create : atoms:Atom.t list -> t
 
 (** Registers an additional equality atom (and its terms) into an existing
-    theory instance. Must be called before [sat_var] (or any clause referencing
-    it) is given to the SAT solver, so that [assert_literal] can recognize
-    [sat_var] as a theory atom from the start. Registration is not part of the
-    undo trail and is never undone by [undo] -- the new term and atom remain
-    known to the theory even if the solver later backtracks past this point. *)
-val add_atom : t -> atom:Atom.t -> sat_var:int -> unit
+    theory instance. Registration is not part of the undo trail and is never
+    undone by [undo] -- the new term and atom remain known to the theory even if
+    the solver later backtracks past this point. *)
+val add_atom : t -> atom:Atom.t -> unit
 
-include Feel.Theory.S with type t := t
+(** Informs the theory of the current truth value of [atom], as determined by
+    the SAT solver. Like {!Feel.Theory.S.assert_literal}, but in terms of an
+    atom rather than a SAT literal -- the caller (typically [theory/solver.ml])
+    is responsible for mapping SAT literals to atoms. *)
+val assert_atom : t -> decision_level:int -> atom:Atom.t -> value:bool -> unit
+
+(** Like {!Feel.Theory.S.maybe_get_lemma}, but the lemma is expressed as a list
+    of literals over atoms rather than SAT literals -- the caller is responsible
+    for mapping atoms to SAT variables (allocating fresh ones for atoms that
+    don't have one yet). Each [(atom, polarity)] pair is a literal:
+    [(atom, true)] is the positive literal, [(atom, false)] its negation. *)
+val maybe_get_lemma : t -> [ `Consistent | `Lemma of (Atom.t * bool) list ]
+
+val undo : t -> to_decision_level_excl:int -> unit

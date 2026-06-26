@@ -1,28 +1,68 @@
 open! Core
 open! Feel.Import
 
-(* Composite theory dispatching to value-level EUF, type-level EUF, and
-   Tvar_types. *)
+let lemma_to_clause literals ~sat_var_for_atom =
+  let clause =
+    List.map literals ~f:(fun (atom, polarity) ->
+      let sat_var = sat_var_for_atom atom in
+      if polarity then sat_var else -sat_var)
+    |> Array.of_list
+  in
+  Array.sort clause ~compare:Int.compare;
+  `Lemma { Modes.Global.global = clause }
+;;
+
 module Combined_theory = struct
   type t =
     { uf : Uninterpreted_functions.t
+    ; uf_sat_vars : Euf_sat_vars.t
     ; type_uf : Uninterpreted_functions.t
+    ; type_uf_sat_vars : Euf_sat_vars.t
     ; tt : Tvar_types.t
+    ; encoding : Formula.Encoding.t
     }
 
   let assert_literal t ~decision_level ~literal =
-    Uninterpreted_functions.assert_literal t.uf ~decision_level ~literal;
-    Uninterpreted_functions.assert_literal t.type_uf ~decision_level ~literal;
-    Tvar_types.assert_literal t.tt ~decision_level ~literal
+    let var = Int.abs literal in
+    let value = literal > 0 in
+    (match Euf_sat_vars.atom_for_sat_var t.uf_sat_vars var with
+     | None -> ()
+     | Some atom ->
+       Uninterpreted_functions.assert_atom t.uf ~decision_level ~atom ~value);
+    (match Euf_sat_vars.atom_for_sat_var t.type_uf_sat_vars var with
+     | None -> ()
+     | Some atom ->
+       Uninterpreted_functions.assert_atom
+         t.type_uf
+         ~decision_level
+         ~atom
+         ~value);
+    match Formula.Encoding.atom_for_sat_var t.encoding var with
+    | Some (`Has_type _ as atom) ->
+      Tvar_types.assert_atom t.tt ~decision_level ~atom ~value
+    | Some (#Uninterpreted_functions.Atom.t | `Le _ | `Type_eq _) | None -> ()
   ;;
 
   let maybe_get_lemma t = exclave_
     match Uninterpreted_functions.maybe_get_lemma t.uf [@nontail] with
+    | `Lemma literals ->
+      lemma_to_clause
+        literals
+        ~sat_var_for_atom:(Euf_sat_vars.sat_var_for_atom t.uf_sat_vars)
     | `Consistent ->
       (match Uninterpreted_functions.maybe_get_lemma t.type_uf [@nontail] with
-       | `Consistent -> Tvar_types.maybe_get_lemma t.tt
-       | lemma -> lemma)
-    | lemma -> lemma
+       | `Lemma literals ->
+         lemma_to_clause
+           literals
+           ~sat_var_for_atom:(Euf_sat_vars.sat_var_for_atom t.type_uf_sat_vars)
+       | `Consistent ->
+         (match Tvar_types.maybe_get_lemma t.tt [@nontail] with
+          | `Consistent -> `Consistent
+          | `Lemma literals ->
+            lemma_to_clause literals ~sat_var_for_atom:(fun atom ->
+              Formula.Encoding.sat_var_for_atom
+                t.encoding
+                (atom : Tvar_types.Atom.t :> Atom.t))))
   ;;
 
   let undo t ~to_decision_level_excl =
@@ -31,17 +71,19 @@ module Combined_theory = struct
     Tvar_types.undo t.tt ~to_decision_level_excl
   ;;
 
-  let on_new_var t ~var =
-    Uninterpreted_functions.on_new_var t.uf ~var;
-    Uninterpreted_functions.on_new_var t.type_uf ~var;
-    Tvar_types.on_new_var t.tt ~var
+  let on_new_var (_ : t) ~var:(_ : int) =
+    (* All theory atoms (and their SAT vars) are registered up front, as new
+       formulas are asserted; no theory introduces variables lazily. *)
+    ()
   ;;
 end
 
 type t =
   { solver : Feel.Solver.t
   ; uf : Uninterpreted_functions.t
+  ; uf_sat_vars : Euf_sat_vars.t
   ; type_uf : Uninterpreted_functions.t
+  ; type_uf_sat_vars : Euf_sat_vars.t
   ; tt : Tvar_types.t
   ; encoding : Formula.Encoding.t
   ; mutable scopes : int list (* activation literals, innermost first *)
@@ -50,9 +92,14 @@ type t =
 
 let create () =
   let uf = Uninterpreted_functions.create ~atoms:[] in
+  let uf_sat_vars = Euf_sat_vars.create () in
   let type_uf = Uninterpreted_functions.create ~atoms:[] in
+  let type_uf_sat_vars = Euf_sat_vars.create () in
   let tt = Tvar_types.create () in
-  let combined = { Combined_theory.uf; type_uf; tt } in
+  let encoding = Formula.Encoding.create () in
+  let combined =
+    { Combined_theory.uf; uf_sat_vars; type_uf; type_uf_sat_vars; tt; encoding }
+  in
   let solver =
     Feel.Solver.create
       ~theory:(Feel.Theory.pack (module Combined_theory) combined)
@@ -61,9 +108,11 @@ let create () =
   let t =
     { solver
     ; uf
+    ; uf_sat_vars
     ; type_uf
+    ; type_uf_sat_vars
     ; tt
-    ; encoding = Formula.Encoding.create ()
+    ; encoding
     ; scopes = []
     ; formula_by_root_lit = Int.Table.create ()
     }
@@ -87,7 +136,8 @@ let create () =
           Uninterpreted_functions.Atom.normalize
             (`Eq (`Var (Type_expr.base_tvar b1), `Var (Type_expr.base_tvar b2)))
         in
-        Uninterpreted_functions.add_atom t.type_uf ~atom:uf_atom ~sat_var;
+        Uninterpreted_functions.add_atom t.type_uf ~atom:uf_atom;
+        Euf_sat_vars.add t.type_uf_sat_vars ~atom:uf_atom ~sat_var;
         Hashtbl.set
           t.formula_by_root_lit
           ~key:(-sat_var)
@@ -135,15 +185,16 @@ let assert_formula t formula
     ~f:(fun (atom, sat_var) ->
       match atom with
       | #Uninterpreted_functions.Atom.t as atom ->
-        Uninterpreted_functions.add_atom t.uf ~atom ~sat_var
+        Uninterpreted_functions.add_atom t.uf ~atom;
+        Euf_sat_vars.add t.uf_sat_vars ~atom ~sat_var
       | `Le (_, _) -> ()
-      | `Has_type (var, type_expr) ->
-        Tvar_types.add_atom t.tt ~atom:(`Has_type (var, type_expr)) ~sat_var
+      | `Has_type (_, _) -> ()
       | `Type_eq (te1, te2) ->
         let t1 = type_expr_to_term te1 in
         let t2 = type_expr_to_term te2 in
         let uf_atom = Uninterpreted_functions.Atom.normalize (`Eq (t1, t2)) in
-        Uninterpreted_functions.add_atom t.type_uf ~atom:uf_atom ~sat_var);
+        Uninterpreted_functions.add_atom t.type_uf ~atom:uf_atom;
+        Euf_sat_vars.add t.type_uf_sat_vars ~atom:uf_atom ~sat_var);
   List.fold_until
     clauses
     ~init:`Ok

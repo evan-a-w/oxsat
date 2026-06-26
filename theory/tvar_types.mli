@@ -16,16 +16,22 @@ type t
 
 val create : unit -> t
 
-(** Register a [Has_type] atom and its SAT variable. Must be called before the
-    SAT solver sees any clause referencing [sat_var]. *)
-val add_atom : t -> atom:Atom.t -> sat_var:int -> unit
-
-(** The SAT variable for [(var, type_expr)], if that atom has been registered. *)
-val sat_var_for : t -> Tvar.t -> Type_expr.t -> int option
-
 (** The current type expression of [var] as determined by the SAT solver's most
     recent propagation. Reliable between [solve] calls for globally-asserted
     types (decision level 0); may be stale for scoped assertions. *)
 val get_type : t -> Tvar.t -> Type_expr.t option
 
-include Feel.Theory.S with type t := t
+(** Informs the theory of the current truth value of [atom], as determined by
+    the SAT solver. Like {!Feel.Theory.S.assert_literal}, but in terms of an
+    atom rather than a SAT literal -- the caller (typically [theory/solver.ml])
+    is responsible for mapping SAT literals to atoms. *)
+val assert_atom : t -> decision_level:int -> atom:Atom.t -> value:bool -> unit
+
+(** Like {!Feel.Theory.S.maybe_get_lemma}, but the lemma is expressed as a list
+    of literals over atoms rather than SAT literals -- the caller is responsible
+    for mapping atoms to SAT variables. Each [(atom, polarity)] pair is a
+    literal: [(atom, true)] is the positive literal, [(atom, false)] its
+    negation. *)
+val maybe_get_lemma : t -> [ `Consistent | `Lemma of (Atom.t * bool) list ]
+
+val undo : t -> to_decision_level_excl:int -> unit

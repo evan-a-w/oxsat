@@ -29,7 +29,6 @@ end
 module Atom_data = struct
   type t =
     { atom : Atom.t
-    ; sat_var : int
     ; mutable assignment : bool or_null [@compare.ignore]
     }
   [@@deriving hash, compare, sexp]
@@ -145,7 +144,6 @@ type t =
   { ufds_var_by_term : int Term.Table.t
   ; ufdsu : Ufdsu.t
   ; atoms : Atom_data.t Atom.Table.t
-  ; atom_by_sat_var : Atom.t Int.Table.t
   ; signature_to_canonical : Term.t Signature.Table.t
   ; parents : Term.Hash_set.t Term.Table.t
   ; explanation_forest : Explanation_forest.t
@@ -342,16 +340,14 @@ let rec register_term t ~decision_level ~(atom : Atom.t) ~(term : Term.t) =
           propagate_congruence t ~decision_level ~atom ~worklist))
 ;;
 
-(* Registers [atom] (and its terms) under [sat_var]. Used by both [create] and
-   [add_atom]. *)
-let register_atom t ~(atom : Atom.t) ~sat_var =
+(* Registers [atom] (and its terms). Used by both [create] and [add_atom]. *)
+let register_atom t ~(atom : Atom.t) =
   let atom = Atom.normalize atom in
   let (`Eq (a, b)) = atom in
   let decision_level = t.current_decision_level in
   register_term t ~decision_level ~atom ~term:a;
   register_term t ~decision_level ~atom ~term:b;
-  Hashtbl.set t.atom_by_sat_var ~key:sat_var ~data:atom;
-  Hashtbl.set t.atoms ~key:atom ~data:{ atom; sat_var; assignment = Null }
+  Hashtbl.set t.atoms ~key:atom ~data:{ atom; assignment = Null }
 ;;
 
 let create ~atoms =
@@ -359,7 +355,6 @@ let create ~atoms =
     { ufds_var_by_term = Term.Table.create ()
     ; ufdsu = Ufdsu.create ()
     ; atoms = Atom.Table.create ()
-    ; atom_by_sat_var = Int.Table.create ()
     ; parents = Term.Table.create ()
     ; explanation_forest = Explanation_forest.create ()
     ; trail = Trail_entry.Vec.create ()
@@ -368,11 +363,11 @@ let create ~atoms =
     ; current_decision_level = 0
     }
   in
-  List.iter atoms ~f:(fun (atom, sat_var) -> register_atom t ~atom ~sat_var);
+  List.iter atoms ~f:(fun atom -> register_atom t ~atom);
   t
 ;;
 
-let add_atom t ~atom ~sat_var = register_atom t ~atom ~sat_var
+let add_atom t ~atom = register_atom t ~atom
 
 let assert_true_atom t ~decision_level ~(atom : Atom.t) =
   match Hashtbl.find_or_null t.atoms atom with
@@ -476,41 +471,26 @@ let rec explain t ~term1 ~term2 ~seen ~facts =
             explain t ~term1:a ~term2:b ~seen ~facts))
 ;;
 
-let assert_literal t ~decision_level ~literal =
-  match Hashtbl.find t.atom_by_sat_var (Int.abs literal) with
-  | None -> (* not a theory variable *) ()
-  | Some atom -> assert_atom t ~decision_level ~atom ~value:(literal > 0)
-;;
-
-let on_new_var (_ : t) ~var:(_ : int) =
-  (* All theory atoms (and their sat vars) are registered up front in [create];
-     the theory doesn't introduce variables lazily. *)
-  ()
-;;
-
-(* Builds a clause that is the negation of [main_literal]'s complement together
+(* Builds a lemma that is the negation of [main_literal]'s complement together
    with every asserted fact in [facts]: [main_literal] together with, for each
-   fact, the negation of whichever literal is currently asserted (i.e.
-   [-sat_var] if the fact atom is true, [+sat_var] if false). When
-   [main_literal] is currently false, this clause is falsified (a conflict);
-   when unassigned, it is unit (a propagation). [add_clause] handles both
-   uniformly. *)
-let build_lemma t ~main_literal ~(facts : Atom.Hash_set.t) = exclave_
+   fact, the negation of whichever literal is currently asserted (i.e. the fact
+   atom negated if it's true, asserted as-is if false). When [main_literal] is
+   currently false, this lemma is falsified (a conflict); when unassigned, it is
+   unit (a propagation). [add_clause] handles both uniformly. *)
+let build_lemma t ~(main_literal : Atom.t * bool) ~(facts : Atom.Hash_set.t) =
   let other_literals =
     Hash_set.to_list facts
     |> List.map ~f:(fun fact_atom ->
       let fact_data = Hashtbl.find_exn t.atoms fact_atom in
       match fact_data.assignment with
-      | This true -> -fact_data.sat_var
-      | This false -> fact_data.sat_var
+      | This true -> fact_atom, false
+      | This false -> fact_atom, true
       | Null ->
         (* every fact in an explanation is, by construction, a currently
            asserted atom *)
         assert false)
   in
-  let clause = Array.of_list (main_literal :: other_literals) in
-  Array.sort clause ~compare:Int.compare;
-  `Lemma { Modes.Global.global = clause }
+  `Lemma (main_literal :: other_literals)
 ;;
 
 (* Theory propagation/conflict detection
@@ -526,7 +506,7 @@ let build_lemma t ~main_literal ~(facts : Atom.Hash_set.t) = exclave_
      [Eq(x,y)] is false, [a] and [b] cannot merge).
 
    This is not computed incrementally. *)
-let maybe_get_lemma t = exclave_
+let maybe_get_lemma t =
   let find_conflict () =
     Hash_set.to_list t.falsehoods
     |> List.sort ~compare:Atom.compare
@@ -569,7 +549,7 @@ let maybe_get_lemma t = exclave_
     let facts = Atom.Hash_set.create () in
     let seen = Term_pair.Hash_set.create () in
     explain t ~term1:a ~term2:b ~seen ~facts;
-    build_lemma t ~main_literal:atom_data.sat_var ~facts
+    build_lemma t ~main_literal:(atom_data.atom, true) ~facts
   | None ->
     (match find_propagation () with
      | None -> `Consistent
@@ -578,7 +558,7 @@ let maybe_get_lemma t = exclave_
        let facts = Atom.Hash_set.create () in
        let seen = Term_pair.Hash_set.create () in
        explain t ~term1:a ~term2:b ~seen ~facts;
-       build_lemma t ~main_literal:atom_data.sat_var ~facts
+       build_lemma t ~main_literal:(atom_data.atom, true) ~facts
      | Some (`Propagate_false (atom_data, false_atom)) ->
        let (`Eq (a, b)) = atom_data.atom in
        let (`Eq (x, y)) = false_atom in
@@ -594,5 +574,5 @@ let maybe_get_lemma t = exclave_
         | false ->
           explain t ~term1:a ~term2:y ~seen ~facts;
           explain t ~term1:b ~term2:x ~seen ~facts);
-       build_lemma t ~main_literal:(-atom_data.sat_var) ~facts)
+       build_lemma t ~main_literal:(atom_data.atom, false) ~facts)
 ;;
