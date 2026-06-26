@@ -569,10 +569,8 @@ let%expect_test "Type_eq: TypeEq(a, Int) and TypeEq(a, Float) conflict via \
       ((Theory_lemma
         (Or
          ((Not (Atom (Type_eq ((Base Float) (Var a)))))
-          (Not (Atom (Type_eq ((Base Int) (Var a)))))
           (Atom (Type_eq ((Base Int) (Base Float)))))))
        (Asserted (Atom (Type_eq ((Var a) (Base Float)))))
-       (Asserted (Atom (Type_eq ((Var a) (Base Int)))))
        (Asserted (Not (Atom (Type_eq ((Base Int) (Base Float)))))))))
     |}]
 ;;

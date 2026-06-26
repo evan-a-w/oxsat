@@ -18,9 +18,14 @@ type t =
 [@@deriving sexp, compare, hash]
 
 let base_tvar = function
-  | Base.Int -> Tvar.of_string "__Int__"
-  | Base.Float -> Tvar.of_string "__Float__"
+  | Base.Int -> Tvar.of_string ":Int"
+  | Base.Float -> Tvar.of_string ":Float"
 ;;
+
+(* Prefixes [tvar] with [':'] so that, once embedded as a term in the (merged)
+   value-level EUF, it cannot collide with a value-level variable or function
+   symbol of the same name -- those are never prefixed with [':']. *)
+let tvar_for_term tvar = Tvar.of_string (":" ^ Tvar.to_string tvar)
 
 include functor Hashable.Make
 include functor Comparable.Make
