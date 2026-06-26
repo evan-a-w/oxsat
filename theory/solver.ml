@@ -67,7 +67,7 @@ type t =
   ; mutable scopes : int list (* activation literals, innermost first *)
   ; formula_by_root_lit : Formula.t Int.Table.t
   ; has_type_atom_to_uf_atom : Atom.t Atom.Table.t
-  ; uf_atom_to_has_type_atom : Term.t Type_expr.Table.t
+  ; uf_atom_to_has_type_atom : Atom.t Atom.Table.t
   }
 
 let create () =
