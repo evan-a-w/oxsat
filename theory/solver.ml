@@ -15,7 +15,6 @@ let lemma_to_clause literals ~sat_var_for_atom =
 module Combined_theory = struct
   type t =
     { uf : Uninterpreted_functions.t
-    ; uf_sat_vars : Sat_vars.t
     ; tt : Tvar_types.t
     ; encoding : Formula.Encoding.t
     }
@@ -23,22 +22,33 @@ module Combined_theory = struct
   let assert_literal t ~decision_level ~literal =
     let var = Int.abs literal in
     let value = literal > 0 in
-    (match Sat_vars.atom_for_sat_var t.uf_sat_vars var with
-     | None -> ()
-     | Some atom ->
-       Uninterpreted_functions.assert_atom t.uf ~decision_level ~atom ~value);
-    match Formula.Encoding.atom_for_sat_var t.encoding var with
+    let atom =
+      match Formula.Encoding.theory_atom_for_sat_var t.encoding var with
+      | Some _ as theory_atom -> theory_atom
+      | None -> Formula.Encoding.atom_for_sat_var t.encoding var
+    in
+    match atom with
+    | Some (#Uninterpreted_functions.Atom.t as atom) ->
+      Uninterpreted_functions.assert_atom t.uf ~decision_level ~atom ~value
     | Some (`Has_type _ as atom) ->
       Tvar_types.assert_atom t.tt ~decision_level ~atom ~value
-    | Some (#Uninterpreted_functions.Atom.t | `Le _ | `Type_eq _) | None -> ()
+    | Some (`Le _ | `Type_eq _) | None -> ()
+  ;;
+
+  (* A UF atom's SAT var is either the one it naturally registered (if it came
+     from a user-asserted [Eq] formula) or, if it only exists as the EUF
+     translation of a [Type_eq] atom, the one aliased via [set_theory_atom]. *)
+  let sat_var_for_uf_atom t (atom : Uninterpreted_functions.Atom.t) =
+    let atom = (atom :> Atom.t) in
+    match Formula.Encoding.find_sat_var_for_atom t.encoding atom with
+    | Some sat_var -> sat_var
+    | None -> Formula.Encoding.sat_var_for_theory_atom t.encoding atom
   ;;
 
   let maybe_get_lemma t = exclave_
     match Uninterpreted_functions.maybe_get_lemma t.uf [@nontail] with
     | `Lemma literals ->
-      lemma_to_clause
-        literals
-        ~sat_var_for_atom:(Sat_vars.sat_var_for_atom t.uf_sat_vars)
+      lemma_to_clause literals ~sat_var_for_atom:(sat_var_for_uf_atom t)
     | `Consistent ->
       (match Tvar_types.maybe_get_lemma t.tt [@nontail] with
        | `Consistent -> `Consistent
@@ -64,7 +74,6 @@ end
 type t =
   { solver : Feel.Solver.t
   ; uf : Uninterpreted_functions.t
-  ; uf_sat_vars : Sat_vars.t
   ; tt : Tvar_types.t
   ; encoding : Formula.Encoding.t
   ; mutable scopes : int list (* activation literals, innermost first *)
@@ -73,10 +82,9 @@ type t =
 
 let create () =
   let uf = Uninterpreted_functions.create ~atoms:[] in
-  let uf_sat_vars = Sat_vars.create () in
   let tt = Tvar_types.create () in
   let encoding = Formula.Encoding.create () in
-  let combined = { Combined_theory.uf; uf_sat_vars; tt; encoding } in
+  let combined = { Combined_theory.uf; tt; encoding } in
   let solver =
     Feel.Solver.create
       ~theory:(Feel.Theory.pack (module Combined_theory) combined)
@@ -85,7 +93,6 @@ let create () =
   let t =
     { solver
     ; uf
-    ; uf_sat_vars
     ; tt
     ; encoding
     ; scopes = []
@@ -112,7 +119,10 @@ let create () =
             (`Eq (`Var (Type_expr.base_tvar b1), `Var (Type_expr.base_tvar b2)))
         in
         Uninterpreted_functions.add_atom t.uf ~atom:uf_atom;
-        Sat_vars.add t.uf_sat_vars ~atom:uf_atom ~sat_var;
+        Formula.Encoding.set_theory_atom
+          t.encoding
+          ~sat_var
+          ~atom:(uf_atom :> Atom.t);
         Hashtbl.set
           t.formula_by_root_lit
           ~key:(-sat_var)
@@ -164,8 +174,7 @@ let assert_formula t formula
     ~f:(fun (atom, sat_var) ->
       match atom with
       | #Uninterpreted_functions.Atom.t as atom ->
-        Uninterpreted_functions.add_atom t.uf ~atom;
-        Sat_vars.add t.uf_sat_vars ~atom ~sat_var
+        Uninterpreted_functions.add_atom t.uf ~atom
       | `Le (_, _) -> ()
       | `Has_type (_, _) -> ()
       | `Type_eq (te1, te2) ->
@@ -173,7 +182,10 @@ let assert_formula t formula
         let t2 = type_expr_to_term te2 in
         let uf_atom = Uninterpreted_functions.Atom.normalize (`Eq (t1, t2)) in
         Uninterpreted_functions.add_atom t.uf ~atom:uf_atom;
-        Sat_vars.add t.uf_sat_vars ~atom:uf_atom ~sat_var);
+        Formula.Encoding.set_theory_atom
+          t.encoding
+          ~sat_var
+          ~atom:(uf_atom :> Atom.t));
   List.fold_until
     clauses
     ~init:`Ok

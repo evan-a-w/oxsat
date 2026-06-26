@@ -18,27 +18,27 @@ module Encoding : sig
   type t
 
   val create : unit -> t
-
-  (** Allocates and returns a fresh SAT variable not used by any atom or
-      subformula encoding. *)
   val fresh_var : t -> int
-
-  (** The SAT variable representing [atom], allocating a fresh one if [atom]
-      (after normalization) hasn't been seen before. *)
   val sat_var_for_atom : t -> Atom.t -> int
-
-  (** The atom registered for [sat_var], if [sat_var] was allocated by
-      [sat_var_for_atom] (as opposed to [fresh_var] or a Tseitin auxiliary). *)
+  val find_sat_var_for_atom : t -> Atom.t -> int option
   val atom_for_sat_var : t -> int -> Atom.t option
 
-  (** All [(atom, sat_var)] pairs registered so far, in the order in which they
-      were first encountered, with each [atom] normalized. *)
+  (** Registers [atom] as an additional, independent theory atom for [sat_var],
+      alongside whatever atom [sat_var_for_atom]/[atom_for_sat_var] already
+      associate with it. Needed when a derived atom of a different shape (e.g.
+      the [Eq] atom a [Type_eq] atom translates to for the EUF theory) must
+      share a SAT variable with the atom that originally allocated it, while
+      [atom_for_sat_var] keeps resolving to the original (e.g. for unsat
+      cores). *)
+  val set_theory_atom : t -> sat_var:int -> atom:Atom.t -> unit
+
+  val theory_atom_for_sat_var : t -> int -> Atom.t option
+
+  (** Raises if [atom] was never registered via [set_theory_atom]. *)
+  val sat_var_for_theory_atom : t -> Atom.t -> int
+
   val atoms : t -> (Atom.t * int) list
-
-  (** A position in the atom registration order, for use with [new_atoms_since]. *)
   val checkpoint : t -> int
-
-  (** [(atom, sat_var)] pairs registered since [checkpoint]. *)
   val new_atoms_since : t -> checkpoint:int -> (Atom.t * int) list
 end
 

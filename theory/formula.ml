@@ -15,6 +15,8 @@ module Encoding = struct
     { mutable next_var : int
     ; atom_to_sat_var : int Atom.Table.t
     ; sat_var_to_atom : Atom.t Int.Table.t
+    ; theory_atom_to_sat_var : int Atom.Table.t
+    ; sat_var_to_theory_atom : Atom.t Int.Table.t
     ; atoms_in_order : (Atom.t * int) Vec.Value.t
     ; mutable true_var : int or_null
     }
@@ -23,6 +25,8 @@ module Encoding = struct
     { next_var = 1
     ; atom_to_sat_var = Atom.Table.create ()
     ; sat_var_to_atom = Int.Table.create ()
+    ; theory_atom_to_sat_var = Atom.Table.create ()
+    ; sat_var_to_theory_atom = Int.Table.create ()
     ; atoms_in_order = Vec.Value.create ()
     ; true_var = Null
     }
@@ -43,7 +47,26 @@ module Encoding = struct
       sat_var)
   ;;
 
+  let find_sat_var_for_atom t atom =
+    Hashtbl.find t.atom_to_sat_var (Atom.normalize atom)
+  ;;
+
   let atom_for_sat_var t sat_var = Hashtbl.find t.sat_var_to_atom sat_var
+
+  let set_theory_atom t ~sat_var ~atom =
+    let atom = Atom.normalize atom in
+    Hashtbl.set t.theory_atom_to_sat_var ~key:atom ~data:sat_var;
+    Hashtbl.set t.sat_var_to_theory_atom ~key:sat_var ~data:atom
+  ;;
+
+  let theory_atom_for_sat_var t sat_var =
+    Hashtbl.find t.sat_var_to_theory_atom sat_var
+  ;;
+
+  let sat_var_for_theory_atom t atom =
+    Hashtbl.find_exn t.theory_atom_to_sat_var (Atom.normalize atom)
+  ;;
+
   let atoms t = Vec.Value.to_list t.atoms_in_order
   let checkpoint t = Vec.Value.length t.atoms_in_order
 
