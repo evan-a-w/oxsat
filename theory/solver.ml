@@ -66,6 +66,8 @@ type t =
   ; encoding : Formula.Encoding.t
   ; mutable scopes : int list (* activation literals, innermost first *)
   ; formula_by_root_lit : Formula.t Int.Table.t
+  ; term_to_type_expr : Type_expr.t Term.Table.t
+  ; type_expr_to_term : Term.t Type_expr.Table.t
   }
 
 let create () =

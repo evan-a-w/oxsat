@@ -11,9 +11,6 @@ type t =
   | Or of t list
 [@@deriving sexp]
 
-(** Encoding state shared across multiple [encode] calls: tracks fresh variable
-    allocation and the mapping from theory atoms to the SAT variables that
-    represent them, so that the same atom always maps to the same variable. *)
 module Encoding : sig
   type t
 

@@ -1,6 +1,10 @@
 open! Core
 open! Feel.Import
 
+module Atom = struct
+  type t = [ `Le of Linear_expr.t * Q.t ] [@@deriving sexp, compare, hash]
+end
+
 module Tvar_and_type = struct
   type t =
     { tvar : Tvar.t

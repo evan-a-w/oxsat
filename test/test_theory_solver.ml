@@ -600,3 +600,6 @@ let%expect_test "Type_eq: normalize makes Eq(a, b) = Eq(b, a) for embedded \
   print_s [%sexp ([%equal: Atom.t] atom1 atom2 : bool)];
   [%expect {| true |}]
 ;;
+
+(* TODO: test that shows type theory congruence closure doesn't work, then fix
+   it. *)
