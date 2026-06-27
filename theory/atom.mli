@@ -14,12 +14,6 @@ type t =
   ]
 [@@deriving sexp, compare, hash]
 
-(** For [`Eq], orders the two sides canonically so that semantically identical
-    atoms compare equal regardless of argument order.
-
-    For [`Le (expr, c)], rewrites to the canonical primitive form (via
-    [Linear_expr.primitive]) with the constant moved entirely to the right-hand
-    side, so that e.g. [2x+2y<=4] and [x+y<=2] normalize to the same atom. *)
 val normalize : t -> t
 
 include Comparable.S with type t := t
