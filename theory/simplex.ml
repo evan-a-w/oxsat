@@ -12,13 +12,6 @@ module Op = struct
   [@@deriving sexp, compare, hash]
 end
 
-(* Represents [value + (eps_coeff * delta)], where [delta] is a fixed but
-   symbolic infinitesimal. This is the standard trick (Dutertre & de Moura) for
-   handling strict inequalities in a Simplex tableau that otherwise only
-   supports non-strict bounds: [x < c] becomes the bound [x <= c - delta], and
-   [x > c] becomes [x >= c + delta]. Ordering is lexicographic on
-   [(value, eps_coeff)], which is correct for any sufficiently small
-   [delta > 0]. *)
 module Q_eps = struct
   type t =
     { value : Q.t
