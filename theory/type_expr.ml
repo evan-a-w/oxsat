@@ -14,25 +14,9 @@ end
 type t =
   | Base of Base.t
   | Var of Tvar.t
+  | Type_of of Tvar.t
   | App of Tvar.t * t list
 [@@deriving sexp, compare, hash]
-
-let base_tvar = function
-  | Base.Int -> Tvar.of_string ":Int"
-  | Base.Float -> Tvar.of_string ":Float"
-;;
-
-(* Prefixes [tvar] with [':'] so that, once embedded as a term in the (merged)
-   value-level EUF, it cannot collide with a value-level variable or function
-   symbol of the same name -- those are never prefixed with [':']. *)
-let tvar_for_term tvar = Tvar.of_string (":" ^ Tvar.to_string tvar)
-
-let rec to_term : t -> Term.t = function
-  | Base b -> `Var (base_tvar b)
-  | Var v -> `Var (tvar_for_term v)
-  | App (ctor, args) ->
-    `App (~function_:(tvar_for_term ctor), ~args:(List.map args ~f:to_term))
-;;
 
 include functor Hashable.Make
 include functor Comparable.Make
