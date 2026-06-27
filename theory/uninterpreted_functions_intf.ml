@@ -37,5 +37,5 @@ module type S = sig
 end
 
 module type Uninterpreted_functions = sig
-  module Make (Term : Term) : S with module Term := Term
+  module Make (Term : Term) : S with module Term = Term
 end

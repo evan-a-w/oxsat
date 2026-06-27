@@ -3,6 +3,8 @@ open! Feel.Import
 include Uninterpreted_functions_intf
 
 module Make (Term : Term) = struct
+  module Term = Term
+
   module Atom = struct
     type t = [ `Eq of Term.t * Term.t ] [@@deriving sexp, compare, hash]
 
@@ -275,7 +277,9 @@ module Make (Term : Term) = struct
                      signatures, i.e. [f(args1) ~ f(args2)] with [args1]/[args2]
                      pairwise congruent (already in the same class). *)
                   let justification =
-                    match Term.split_function term, Term.split_function canonical with
+                    match
+                      Term.split_function term, Term.split_function canonical
+                    with
                     | Some (function_, args1), Some (_, args2) ->
                       Justification.Congruence { function_; args1; args2 }
                     | None, _ | _, None ->
