@@ -41,7 +41,7 @@ let refresh_non_integral t ~tvar =
     let marked_nonintegral = Hash_queue.mem t.non_integral_ints tvar in
     let should_be_nonintegral =
       Hash_set.mem t.integral_tvars tvar
-      && not (Q.is_integral (Simplex.assignment t.simplex ~var))
+      && not (Simplex.Q_eps.is_integral (Simplex.assignment t.simplex ~var))
     in
     (match should_be_nonintegral with
      | true ->
@@ -107,9 +107,10 @@ let simplex_solve t =
           | false -> ()
           | true ->
             let marked_nonintegral = Hash_queue.mem t.non_integral_ints tvar in
-            if marked_nonintegral && Q.is_integral q
+            if marked_nonintegral && Simplex.Q_eps.is_integral q
             then Hash_queue.remove_exn t.non_integral_ints tvar
-            else if (not marked_nonintegral) && not (Q.is_integral q)
+            else if (not marked_nonintegral)
+                    && not (Simplex.Q_eps.is_integral q)
             then Hash_queue.enqueue_front_exn t.non_integral_ints tvar ()));
       go ()
   in
@@ -140,7 +141,7 @@ let rec solve t =
      | None -> `Sat
      | Some (nonintegral, ()) ->
        let var = Hashtbl.find_exn t.simplex_var_by_tvar nonintegral in
-       let assignment = Simplex.assignment t.simplex ~var in
+       let assignment = (Simplex.assignment t.simplex ~var).value in
        (match try_with var `Le (Q.floor assignment) with
         | `Sat -> `Sat
         | `Unsat -> try_with var `Ge (Q.ceil assignment)))

@@ -19,6 +19,11 @@ module Q_eps : sig
   [@@deriving sexp, compare, hash]
 
   val of_q : Q.t -> t
+
+  (** True iff this is exactly an integer, i.e. has no symbolic-infinitesimal
+      offset and an integral [value]. A value like [3 + delta] (from a strict
+      bound [x > 3]) is not integral, even though its [value] is. *)
+  val is_integral : t -> bool
 end
 
 module Bound : sig
@@ -59,8 +64,8 @@ val snapshot_assignments : t -> Snapshot.t
     number of times) *)
 val restore_assignments : t -> Snapshot.t -> unit
 
-val assignment : t -> var:int -> Q.t
-val new_assignments : t -> Q.t Int.Hash_queue.t
+val assignment : t -> var:int -> Q_eps.t
+val new_assignments : t -> Q_eps.t Int.Hash_queue.t
 
 val fold_conflict_row
   :  t

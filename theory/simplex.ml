@@ -43,6 +43,7 @@ module Q_eps = struct
 
   let max a b = if compare a b >= 0 then a else b
   let min a b = if compare a b <= 0 then a else b
+  let is_integral a = Q.is_zero a.eps_coeff && Q.is_integral a.value
 end
 
 module Maybe_bound = struct
@@ -168,13 +169,13 @@ type t =
   ; basic_vars : Var.t Vec.Value.t
   ; nonbasic_vars : Var.t Vec.Value.t
   ; vars : Var.t Vec.Value.t
-  ; new_assignments : Q.t Int.Hash_queue.t
+  ; new_assignments : Q_eps.t Int.Hash_queue.t
   }
 [@@deriving sexp_of, fields]
 
 let assign t ~(var : Var.t) ~q =
   var.assignment <- q;
-  Hash_queue.replace_or_enqueue_front t.new_assignments var.id q.Q_eps.value
+  Hash_queue.replace_or_enqueue_front t.new_assignments var.id q
 ;;
 
 type constraint_ = int [@@deriving sexp, compare, equal, hash]
@@ -422,7 +423,9 @@ let%expect_test "pivot example" =
         (bound ((le Unbounded) (ge Unbounded))) (id 3) (where (Basic 0)))
        ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
         (bound ((le Unbounded) (ge Unbounded))) (id 4) (where (Nonbasic 1)))))
-     (new_assignments ((2 ((num 0) (den 1))) (1 ((num 0) (den 1))))))
+     (new_assignments
+      ((2 ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+       (1 ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))))
     |}]
 ;;
 
@@ -613,8 +616,11 @@ let%expect_test "example simplex" =
            (Bounded ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1))))))))
         (id 4) (where (Nonbasic 1)))))
      (new_assignments
-      ((1 ((num 1) (den 1))) (4 ((num 1) (den 1))) (3 ((num 1) (den 1)))
-       (2 ((num 2) (den 1))) (0 ((num 1) (den 1))))))
+      ((1 ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1)))))
+       (4 ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1)))))
+       (3 ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1)))))
+       (2 ((value ((num 2) (den 1))) (eps_coeff ((num 0) (den 1)))))
+       (0 ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1))))))))
     |}]
 ;;
 
@@ -641,7 +647,7 @@ let create () =
 ;;
 
 let add_var t = (add_nonbasic t).id
-let assignment t ~var = (Vec.Value.get t.vars var).assignment.value
+let assignment t ~var = (Vec.Value.get t.vars var).assignment
 
 let fold_conflict_row t ~f =
   let failing =
@@ -699,11 +705,14 @@ let%expect_test "strict inequalities (`Lt / `Gt)" =
   let diff_gt_1 = add_constraint t ([ Q.one, x; Q.neg Q.one, y ], `Gt, Q.one) in
   print_s [%sexp (solve t : [ `Sat | `Unsat ])];
   [%expect {| Sat |}];
-  print_s [%message (assignment t ~var:x : Q.t) (assignment t ~var:y : Q.t)];
+  print_s
+    [%message (assignment t ~var:x : Q_eps.t) (assignment t ~var:y : Q_eps.t)];
   [%expect
     {|
-    (("assignment t ~var:x" ((num 3) (den 1)))
-     ("assignment t ~var:y" ((num 2) (den 1))))
+    (("assignment t ~var:x"
+      ((value ((num 3) (den 1))) (eps_coeff ((num 2) (den 1)))))
+     ("assignment t ~var:y"
+      ((value ((num 2) (den 1))) (eps_coeff ((num 1) (den 1))))))
     |}];
   ignore (sum : constraint_);
   ignore (x_gt_3 : constraint_);
