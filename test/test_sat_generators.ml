@@ -25,7 +25,7 @@ let solve_clauses clauses =
       | `Ok -> ()
       | `Unsat core -> early_unsat := Some core));
   match !early_unsat with
-  | Some core -> Sat_result.Unsat { unsat_core = core }
+  | Some core -> Sat_result.Unsat { core }
   | None -> Solver.solve solver
 ;;
 
@@ -237,7 +237,8 @@ let%test_unit "solver solutions are valid for uniform random 3-SAT" =
         let assignments_array = assignments_to_int_array assignments in
         assert (verify_solution ~clauses ~assignments:assignments_array)
       | Unsat _ ->
-        (* If solver claims UNSAT, we can't easily verify, but at least it terminated *)
+        (* If solver claims UNSAT, we can't easily verify, but at least it
+           terminated *)
         ())
 ;;
 

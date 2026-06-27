@@ -1,8 +1,6 @@
 open! Core
 open! Feel.Import
 
-(** General terms shared across theories: applications of an uninterpreted
-    function symbol to arguments, or a variable. *)
 type t =
   [ `App of function_:Tvar.t * args:t list
   | `Var of Tvar.t
@@ -11,3 +9,10 @@ type t =
 
 include Comparable.S with type t := t
 include Hashable.S with type t := t
+
+val split_function : t -> (Tvar.t * t list) option
+
+(** for vec *)
+val garbage_for_vec : t
+
+module Uf : Uninterpreted_functions_intf.S with type Term.t := t

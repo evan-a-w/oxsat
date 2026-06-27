@@ -26,3 +26,8 @@ Eagerly remove dead code, unless you think it has a good chance of being useful
 in future, and it doesn't add complexity / performance losses / prevent optimisations.
 
 For common modules in Core, like [Table], [Set] etc., you should refer the re-exported/functor applied modules, like [Int.Table.t]. [Int.Table] (and equivalent fo [Set], [Map], etc.) have functions specific to the [Int] table, like [create], [of_list], etc., but not the functions that are the same for all tables (eg. find, where instead you need [Hashtbl.find], [Map.find] etc.). This applies everywhere these generic [Core] modules exist, and you should use them this way, rather than doing stuff like [Hashtbl.create (module Int)] or referring to the type as [(int, int) Hashtbl.t].
+
+Types should typically be in a module like [Type] and be [Type.t], rather than [type type_].
+
+Only write comments for things that are truly hard to understand without them.
+Don't just restate things that can be intuited based on context, names, etc.

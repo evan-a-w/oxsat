@@ -547,7 +547,8 @@ struct
               t
               node_ptr
               #{ node with key = successor.#key; data = successor.#data };
-            (* Now directly delete the successor node (which has at most one child) *)
+            (* Now directly delete the successor node (which has at most one
+               child) *)
             delete_node_with_one_child successor_ptr)))
     in
     find_and_remove t.root

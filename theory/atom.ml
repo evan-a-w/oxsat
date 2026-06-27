@@ -1,13 +1,25 @@
 open! Core
 open! Feel.Import
 
-type t = [ `Eq of Term.t * Term.t ] [@@deriving sexp, compare, hash]
+type t =
+  [ `Eq of Uf_term.t * Uf_term.t
+  | `Le of Linear_expr.t * Q.t
+  | `Type_eq of Type_expr.t * Type_expr.t
+  ]
+[@@deriving sexp, compare, hash]
 
 let normalize = function
   | `Eq (a, b) as x ->
-    (match Ordering.of_int ([%compare: Term.t] a b) with
+    (match Ordering.of_int ([%compare: Uf_term.t] a b) with
      | Equal | Less -> x
      | Greater -> `Eq (b, a))
+  | `Le (expr, c) ->
+    let full, _factor = Linear_expr.(primitive (expr - const c)) in
+    `Le ({ full with const = Q.zero }, Q.neg full.const)
+  | `Type_eq (a, b) as x ->
+    (match Ordering.of_int ([%compare: Type_expr.t] a b) with
+     | Equal | Less -> x
+     | Greater -> `Type_eq (b, a))
 ;;
 
 include functor Comparable.Make
