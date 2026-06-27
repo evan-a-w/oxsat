@@ -1,19 +1,14 @@
 open! Core
 open! Feel.Import
 
-(** General atomic formulas shared across theories: equality between [Term.t]s
-    (the atom kind used by the theory of uninterpreted functions), and
-    non-strict linear inequalities [expr <= c] (used by [Simplex]). The other
-    inequality directions and strict inequalities are expressed via
-    [Formula.Not] and by negating the linear expression:
-
+(** Le can express all the things we care about when in formulas.
     - [x <= c] is [`Le (Linear_expr.var x, c)]
     - [x >= c] is [`Le (Linear_expr.neg (Linear_expr.var x), Q.neg c)]
     - [x > c] is [Not (Atom (`Le (Linear_expr.var x, c)))]
     - [x < c] is
       [Not (Atom (`Le (Linear_expr.neg (Linear_expr.var x), Q.neg c)))] *)
 type t =
-  [ `Eq of Term.t * Term.t
+  [ `Eq of Uf_term.t * Uf_term.t
   | `Le of Linear_expr.t * Q.t
   | `Type_eq of Type_expr.t * Type_expr.t
   ]

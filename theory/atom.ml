@@ -2,7 +2,7 @@ open! Core
 open! Feel.Import
 
 type t =
-  [ `Eq of Term.t * Term.t
+  [ `Eq of Uf_term.t * Uf_term.t
   | `Le of Linear_expr.t * Q.t
   | `Type_eq of Type_expr.t * Type_expr.t
   ]
@@ -10,7 +10,7 @@ type t =
 
 let normalize = function
   | `Eq (a, b) as x ->
-    (match Ordering.of_int ([%compare: Term.t] a b) with
+    (match Ordering.of_int ([%compare: Uf_term.t] a b) with
      | Equal | Less -> x
      | Greater -> `Eq (b, a))
   | `Le (expr, c) ->
