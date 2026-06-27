@@ -163,6 +163,13 @@ let simplex_solve t =
   res
 ;;
 
+(* let maybe_get_lemma t = *)
+(* match simplex_solve t with *)
+(* | `Unsat -> Simplex.fold_conflict_row t.simplex ~f:(fun ~var_id ~bound_side
+   -> *)
+
+(* ) *)
+
 let rec solve t =
   let[@inline always] try_with var op const =
     let constraint_ =

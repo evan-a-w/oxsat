@@ -56,7 +56,7 @@ val create : unit -> t
 val add_var : t -> int
 val add_constraint : t -> (Q.t * int) list * Op.t * Q.t -> constraint_
 val remove_constraint : t -> constraint_:constraint_ -> unit
-val solve : t -> [ `Sat | `Unsat ]
+val solve : t -> [ `Sat | `Unsat of constraint_ list ]
 val snapshot_assignments : t -> Snapshot.t
 
 (** if [solve] returned [`Unsat], may restore to a snapshot before calling
@@ -66,8 +66,3 @@ val restore_assignments : t -> Snapshot.t -> unit
 
 val assignment : t -> var:int -> Q_eps.t
 val new_assignments : t -> Q_eps.t Int.Hash_queue.t
-
-val fold_conflict_row
-  :  t
-  -> f:(var_id:int -> bound_side:[ `Le | `Ge ] -> unit)
-  -> unit option
