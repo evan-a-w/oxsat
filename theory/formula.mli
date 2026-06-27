@@ -11,6 +11,12 @@ type t =
   | Or of t list
 [@@deriving sexp]
 
+val fold_map_atoms
+  :  t
+  -> init:'a
+  -> f:('a -> Atom.t -> 'a * Atom.t) @ local
+  -> 'a * t
+
 module Encoding : sig
   type t
 

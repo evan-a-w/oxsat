@@ -10,6 +10,27 @@ type t =
   | Or of t list
 [@@deriving sexp]
 
+let rec fold_map_atoms t ~init ~(f : _ @ local) =
+  match t with
+  | True | False -> init, t
+  | Not t ->
+    let a, t = fold_map_atoms t ~init ~f in
+    a, Not t
+  | And ts ->
+    let a, ts =
+      List.fold_map ts ~init ~f:(fun acc x -> fold_map_atoms x ~init:acc ~f)
+    in
+    a, And ts
+  | Or ts ->
+    let a, ts =
+      List.fold_map ts ~init ~f:(fun acc x -> fold_map_atoms x ~init:acc ~f)
+    in
+    a, Or ts
+  | Atom a ->
+    let a, atom = f init a in
+    a, Atom atom
+;;
+
 module Encoding = struct
   type t =
     { mutable next_var : int

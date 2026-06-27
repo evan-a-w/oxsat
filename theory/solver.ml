@@ -87,6 +87,8 @@ let create () =
     ; encoding
     ; scopes = []
     ; formula_by_root_lit = Int.Table.create ()
+    ; has_type_atom_to_uf_atom = Atom.Table.create ()
+    ; uf_atom_to_has_type_atom = Atom.Table.create ()
     }
   in
   (* Pre-register pairwise disequalities between distinct base types. This makes
@@ -119,6 +121,29 @@ let create () =
    vacuously satisfied (by [-activation]) unless [activation] is asserted. *)
 let guard_clauses ~activation clauses =
   List.map clauses ~f:(fun clause -> Array.append [| -activation |] clause)
+;;
+
+let map_has_type_atom_to_uf_atom t (atom : Atom.t) ~(on_register : _ @ local) =
+  match atom with
+  | `Eq _ | `Le _ -> atom
+  | `Has_type (var, type_expr) ->
+    Hashtbl.find_or_add t.has_type_atom_to_uf_atom atom ~default:(fun () ->
+      let uf_atom =
+        `Eq (`Var (Type_expr.tvar_for_term var), Type_expr.to_term type_expr)
+      in
+      Hashtbl.set t.uf_atom_to_has_type_atom ~key:uf_atom ~data:atom;
+      on_register ~has_type_atom:atom ~uf_atom;
+      uf_atom)
+    [@nontail]
+;;
+
+let map_uf_atom_to_has_type_atom t (atom : Atom.t) =
+  match atom with
+  | `Has_type _ | `Le _ -> atom
+  | `Eq (_, _) ->
+    (match Hashtbl.find t.uf_atom_to_has_type_atom atom with
+     | None -> atom
+     | Some res -> res)
 ;;
 
 let assert_formula t formula
