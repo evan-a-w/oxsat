@@ -2,7 +2,11 @@ open! Core
 open! Feel.Import
 
 module Atom = struct
-  type t = [ `Le of Linear_expr.t * Q.t ] [@@deriving sexp, compare, hash]
+  type t =
+    [ `Le of Linear_expr.t * Q.t
+    | `Type_eq of Type_expr.t * Type_expr.t
+    ]
+  [@@deriving sexp, compare, hash]
 end
 
 module Trail_entry = struct
@@ -91,6 +95,47 @@ let set_integral t ~decision_level ~tvar ~integral =
      | true -> Hash_set.add t.integral_tvars tvar
      | false -> Hash_set.remove t.integral_tvars tvar);
     refresh_non_integral t ~tvar)
+;;
+
+let simplex_var_for_tvar t ~tvar =
+  Hashtbl.find_or_add t.simplex_var_by_tvar tvar ~default:(fun () ->
+    let simplex_var = Simplex.add_var t.simplex in
+    Hashtbl.set t.tvar_by_simplex_var ~key:simplex_var ~data:tvar;
+    simplex_var)
+;;
+
+let add_constraint
+  t
+  ~decision_level
+  ~(op : Simplex.Op.t)
+  ~le:({ coeffs; const } : Linear_expr.t)
+  ~c
+  =
+  let c = Q.(c - const) in
+  let coeffs : (Q.t * int) list =
+    Map.to_alist coeffs
+    |> List.map ~f:(fun (tvar, q) -> q, simplex_var_for_tvar t ~tvar)
+  in
+  let constraint_ = Simplex.add_constraint t.simplex (coeffs, op, c) in
+  push_trail t ~decision_level ~kind:(Add_constraint constraint_)
+;;
+
+let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
+  match value, atom with
+  | true, `Type_eq (Type_expr.Var tvar, Base Int)
+  | true, `Type_eq (Base Int, Type_expr.Var tvar) ->
+    set_integral t ~decision_level ~tvar ~integral:true
+  | true, `Type_eq (Type_expr.Var _, Base Float)
+  | true, `Type_eq (Base Float, Type_expr.Var _) -> ()
+  | true, `Type_eq (_, _) | false, `Type_eq _ -> ()
+  | true, `Le (le, c) -> add_constraint t ~op:`Le ~le ~c ~decision_level
+  | false, `Le (le, c) ->
+    add_constraint
+      t
+      ~op:`Ge
+      ~le:(Linear_expr.scale Q.(neg one) le)
+      ~c:(Q.neg c)
+      ~decision_level
 ;;
 
 let simplex_solve t =
