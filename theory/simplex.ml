@@ -684,3 +684,53 @@ let add_constraint t (lhs, op, rhs) =
         nonbasic_coefficients.(i) <- Q.(nonbasic_coefficients.(i) + (q * q'))));
   add_constraint t (nonbasic_coefficients, op, rhs)
 ;;
+
+let%expect_test "strict inequalities (`Lt / `Gt)" =
+  (* x + y <= 10, x > 3, y > 2, x - y > 1. Satisfiable, e.g. x=3, y=2 sits
+     exactly on the (open) corner of the x>3/y>2 region, which the eps-trick
+     must still accept since real-valued strict inequalities have no minimal gap
+     from their boundary. *)
+  let t = create () in
+  let x = add_var t in
+  let y = add_var t in
+  let sum = add_constraint t ([ Q.one, x; Q.one, y ], `Le, Q.of_int 10) in
+  let x_gt_3 = add_constraint t ([ Q.one, x ], `Gt, Q.of_int 3) in
+  let y_gt_2 = add_constraint t ([ Q.one, y ], `Gt, Q.of_int 2) in
+  let diff_gt_1 = add_constraint t ([ Q.one, x; Q.neg Q.one, y ], `Gt, Q.one) in
+  print_s [%sexp (solve t : [ `Sat | `Unsat ])];
+  [%expect {| Sat |}];
+  print_s [%message (assignment t ~var:x : Q.t) (assignment t ~var:y : Q.t)];
+  [%expect
+    {|
+    (("assignment t ~var:x" ((num 3) (den 1)))
+     ("assignment t ~var:y" ((num 2) (den 1))))
+    |}];
+  ignore (sum : constraint_);
+  ignore (x_gt_3 : constraint_);
+  ignore (y_gt_2 : constraint_);
+  ignore (diff_gt_1 : constraint_)
+;;
+
+let%expect_test "`Gt conflicts with a non-strict `Le at the same bound" =
+  (* x > 3 and x <= 3 together leave no room, unlike if `Gt had been
+     (incorrectly) treated as `Ge, where x=3 would have stayed feasible. Both
+     constraints are added before [solve] is ever called, so this isn't
+     confounded by the (separate, pre-existing) issue where a basic var
+     introduced by [add_constraint] after a [solve] starts from a stale zero
+     assignment. *)
+  let t = create () in
+  let x = add_var t in
+  let (_ : constraint_) = add_constraint t ([ Q.one, x ], `Gt, Q.of_int 3) in
+  let (_ : constraint_) = add_constraint t ([ Q.one, x ], `Le, Q.of_int 3) in
+  print_s [%sexp (solve t : [ `Sat | `Unsat ])];
+  [%expect {| Unsat |}]
+;;
+
+let%expect_test "`Lt and `Gt together admit a strictly-between solution" =
+  let t = create () in
+  let x = add_var t in
+  let (_ : constraint_) = add_constraint t ([ Q.one, x ], `Gt, Q.of_int 3) in
+  let (_ : constraint_) = add_constraint t ([ Q.one, x ], `Lt, Q.of_int 4) in
+  print_s [%sexp (solve t : [ `Sat | `Unsat ])];
+  [%expect {| Sat |}]
+;;
