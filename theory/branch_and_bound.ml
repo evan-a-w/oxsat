@@ -129,6 +129,25 @@ let simplex_var_for_tvar t ~tvar =
     simplex_var)
 ;;
 
+let rec update_state_for_new_assignments t =
+  let new_assignments = Simplex.new_assignments t.simplex in
+  match Hash_queue.dequeue_front_with_key new_assignments with
+  | None -> ()
+  | Some (var, q) ->
+    (match Hashtbl.find t.tvar_by_simplex_var var with
+     | None -> ()
+     | Some tvar ->
+       (match Hash_set.mem t.integral_tvars tvar with
+        | false -> ()
+        | true ->
+          let marked_nonintegral = Hash_queue.mem t.non_integral_ints tvar in
+          if marked_nonintegral && Simplex.Q_eps.is_integral q
+          then Hash_queue.remove_exn t.non_integral_ints tvar
+          else if (not marked_nonintegral) && not (Simplex.Q_eps.is_integral q)
+          then Hash_queue.enqueue_front_exn t.non_integral_ints tvar ()));
+    update_state_for_new_assignments t
+;;
+
 let add_constraint
   t
   ~decision_level
@@ -145,7 +164,8 @@ let add_constraint
   in
   let constraint_ = Simplex.add_constraint t.simplex (coeffs, op, c) in
   Hashtbl.set t.atom_for_constraint ~key:constraint_ ~data:(atom, value);
-  push_trail t ~decision_level ~kind:(Add_constraint constraint_)
+  push_trail t ~decision_level ~kind:(Add_constraint constraint_);
+  update_state_for_new_assignments t
 ;;
 
 let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
@@ -165,26 +185,7 @@ let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
 
 let simplex_solve t =
   let res = Simplex.solve t.simplex in
-  let new_assignments = Simplex.new_assignments t.simplex in
-  let rec go () =
-    match Hash_queue.dequeue_front_with_key new_assignments with
-    | None -> ()
-    | Some (var, q) ->
-      (match Hashtbl.find t.tvar_by_simplex_var var with
-       | None -> ()
-       | Some tvar ->
-         (match Hash_set.mem t.integral_tvars tvar with
-          | false -> ()
-          | true ->
-            let marked_nonintegral = Hash_queue.mem t.non_integral_ints tvar in
-            if marked_nonintegral && Simplex.Q_eps.is_integral q
-            then Hash_queue.remove_exn t.non_integral_ints tvar
-            else if (not marked_nonintegral)
-                    && not (Simplex.Q_eps.is_integral q)
-            then Hash_queue.enqueue_front_exn t.non_integral_ints tvar ()));
-      go ()
-  in
-  go ();
+  update_state_for_new_assignments t;
   res
 ;;
 
@@ -209,6 +210,10 @@ let maybe_get_lemma t =
          (Simplex.assignment t.simplex ~var:(simplex_var_for_tvar t ~tvar))
            .value
        in
+       (* this is NOT a unit clause, and doesn't depend on the current
+          assignments / constraints etc. However, this is always true for
+          integers. We do need to depend on the type of the var being an
+          integer, because it's not always true for floats *)
        `Lemma
          [ integral_atom, not integral_value
          ; ( `Le
