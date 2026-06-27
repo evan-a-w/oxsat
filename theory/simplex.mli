@@ -49,14 +49,19 @@ module Snapshot : sig
   type t
 end
 
+module Constraint : sig
+  type t [@@deriving sexp, compare, equal, hash]
+
+  include Hashable.S with type t := t
+end
+
 type t [@@deriving sexp_of]
-type constraint_ [@@deriving sexp, compare, equal, hash]
 
 val create : unit -> t
 val add_var : t -> int
-val add_constraint : t -> (Q.t * int) list * Op.t * Q.t -> constraint_
-val remove_constraint : t -> constraint_:constraint_ -> unit
-val solve : t -> [ `Sat | `Unsat of constraint_ list ]
+val add_constraint : t -> (Q.t * int) list * Op.t * Q.t -> Constraint.t
+val remove_constraint : t -> constraint_:Constraint.t -> unit
+val solve : t -> [ `Sat | `Unsat of Constraint.t list ]
 val snapshot_assignments : t -> Snapshot.t
 
 (** if [solve] returned [`Unsat], may restore to a snapshot before calling

@@ -171,7 +171,11 @@ let assign t ~(var : Var.t) ~q =
   Hash_queue.replace_or_enqueue_front t.new_assignments var.id q
 ;;
 
-type constraint_ = int [@@deriving sexp, compare, equal, hash]
+module Constraint = struct
+  type t = int [@@deriving sexp, compare, equal, hash]
+
+  include functor Hashable.Make
+end
 
 let add_nonbasic t : Var.t =
   let var : Var.t =
@@ -203,7 +207,7 @@ let add_processed_constraint t ~nonbasic_coefficients ~bound =
   var.id
 ;;
 
-let add_constraint t ((lhs, op, rhs) : Q.t array * Op.t * Q.t) : constraint_ =
+let add_constraint t ((lhs, op, rhs) : Q.t array * Op.t * Q.t) : Constraint.t =
   let bound : Bound.t =
     match op with
     | `Le -> { le = Bounded (Q_eps.of_q rhs); ge = Unbounded }
@@ -422,6 +426,15 @@ let%expect_test "pivot example" =
     |}]
 ;;
 
+let get_conflicting_constraints t ~row ~basic_var =
+  let conflicting = ref [ basic_var.Var.id ] in
+  Vec.Value.iteri t.nonbasic_vars ~f:(fun col nonbasic_var ->
+    let coeff = get_tableau t ~row ~col in
+    if not (Q.is_zero coeff)
+    then conflicting := nonbasic_var.Var.id :: !conflicting);
+  !conflicting
+;;
+
 let rec solve t =
   let failing_basic =
     Vec.Value.findi t.basic_vars ~f:(fun row var ->
@@ -444,7 +457,7 @@ let rec solve t =
            | true -> Some (col, nonbasic_var, need_apply)))
     in
     (match candidate_nonbasic with
-     | None -> `Unsat
+     | None -> `Unsat (get_conflicting_constraints t ~row ~basic_var)
      | Some (col, nonbasic_var, need_apply) ->
        assign
          t
@@ -552,7 +565,7 @@ let%expect_test "example simplex" =
     |}];
   (match solve t with
    | `Sat -> print_endline "sat"
-   | `Unsat -> print_endline "unsat");
+   | `Unsat _ -> print_endline "unsat");
   print_s [%sexp (t : t)];
   [%expect
     {|
@@ -642,33 +655,6 @@ let create () =
 let add_var t = (add_nonbasic t).id
 let assignment t ~var = (Vec.Value.get t.vars var).assignment
 
-let fold_conflict_row t ~f =
-  let failing =
-    Vec.Value.findi t.basic_vars ~f:(fun (row : int) (var : Var.t) ->
-      match Var.diff_to_become_in_bounds var with
-      | None -> None
-      | Some (diff : Q_eps.t) -> Some (row, var, diff))
-  in
-  match failing with
-  | None -> None
-  | Some (row, basic_var, diff) ->
-    let needs_increase = Q_eps.compare diff Q_eps.zero > 0 in
-    f ~var_id:basic_var.id ~bound_side:(if needs_increase then `Ge else `Le);
-    Vec.Value.iteri t.nonbasic_vars ~f:(fun col nonbasic_var ->
-      let coeff = get_tableau t ~row ~col in
-      if not (Q.is_zero coeff)
-      then (
-        let need_le_witness =
-          match needs_increase, Q.compare coeff Q.zero > 0 with
-          | true, true | false, false -> true
-          | true, false | false, true -> false
-        in
-        f
-          ~var_id:nonbasic_var.id
-          ~bound_side:(if need_le_witness then `Le else `Ge)));
-    Some ()
-;;
-
 let add_constraint t (lhs, op, rhs) =
   let nonbasic_coefficients =
     Array.init (Vec.Value.length t.nonbasic_vars) ~f:(Fn.const Q.zero)
@@ -696,7 +682,7 @@ let%expect_test "strict inequalities (`Lt / `Gt)" =
   let x_gt_3 = add_constraint t ([ Q.one, x ], `Gt, Q.of_int 3) in
   let y_gt_2 = add_constraint t ([ Q.one, y ], `Gt, Q.of_int 2) in
   let diff_gt_1 = add_constraint t ([ Q.one, x; Q.neg Q.one, y ], `Gt, Q.one) in
-  print_s [%sexp (solve t : [ `Sat | `Unsat ])];
+  print_s [%sexp (solve t : [ `Sat | `Unsat of int list ])];
   [%expect {| Sat |}];
   print_s
     [%message (assignment t ~var:x : Q_eps.t) (assignment t ~var:y : Q_eps.t)];
@@ -707,10 +693,10 @@ let%expect_test "strict inequalities (`Lt / `Gt)" =
      ("assignment t ~var:y"
       ((value ((num 2) (den 1))) (eps_coeff ((num 1) (den 1))))))
     |}];
-  ignore (sum : constraint_);
-  ignore (x_gt_3 : constraint_);
-  ignore (y_gt_2 : constraint_);
-  ignore (diff_gt_1 : constraint_)
+  ignore (sum : int);
+  ignore (x_gt_3 : int);
+  ignore (y_gt_2 : int);
+  ignore (diff_gt_1 : int)
 ;;
 
 let%expect_test "`Gt conflicts with a non-strict `Le at the same bound" =
@@ -722,17 +708,17 @@ let%expect_test "`Gt conflicts with a non-strict `Le at the same bound" =
      assignment. *)
   let t = create () in
   let x = add_var t in
-  let (_ : constraint_) = add_constraint t ([ Q.one, x ], `Gt, Q.of_int 3) in
-  let (_ : constraint_) = add_constraint t ([ Q.one, x ], `Le, Q.of_int 3) in
-  print_s [%sexp (solve t : [ `Sat | `Unsat ])];
-  [%expect {| Unsat |}]
+  let (_ : int) = add_constraint t ([ Q.one, x ], `Gt, Q.of_int 3) in
+  let (_ : int) = add_constraint t ([ Q.one, x ], `Le, Q.of_int 3) in
+  print_s [%sexp (solve t : [ `Sat | `Unsat of int list ])];
+  [%expect {| (Unsat (1 2)) |}]
 ;;
 
 let%expect_test "`Lt and `Gt together admit a strictly-between solution" =
   let t = create () in
   let x = add_var t in
-  let (_ : constraint_) = add_constraint t ([ Q.one, x ], `Gt, Q.of_int 3) in
-  let (_ : constraint_) = add_constraint t ([ Q.one, x ], `Lt, Q.of_int 4) in
-  print_s [%sexp (solve t : [ `Sat | `Unsat ])];
+  let (_ : int) = add_constraint t ([ Q.one, x ], `Gt, Q.of_int 3) in
+  let (_ : int) = add_constraint t ([ Q.one, x ], `Lt, Q.of_int 4) in
+  print_s [%sexp (solve t : [ `Sat | `Unsat of int list ])];
   [%expect {| Sat |}]
 ;;

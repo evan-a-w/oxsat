@@ -12,7 +12,7 @@ end
 module Trail_entry = struct
   module Kind = struct
     type t =
-      | Add_constraint of Simplex.constraint_
+      | Add_constraint of Simplex.Constraint.t
       | Set_integral of
           { tvar : Tvar.t
           ; previous : bool
@@ -33,6 +33,7 @@ type t =
   ; simplex : Simplex.t
   ; trail : Trail_entry.t Vec.Value.t
   ; mutable current_decision_level : int
+  ; atom_for_constraint : (Atom.t * bool) Simplex.Constraint.Table.t
   }
 
 (* Brings [non_integral_ints] membership for [tvar] in line with whether it's
@@ -58,7 +59,8 @@ let refresh_non_integral t ~tvar =
 let undo_entry t ({ kind; _ } : Trail_entry.t) =
   match kind with
   | Add_constraint constraint_ ->
-    Simplex.remove_constraint t.simplex ~constraint_
+    Simplex.remove_constraint t.simplex ~constraint_;
+    Hashtbl.remove t.atom_for_constraint constraint_
   | Set_integral { tvar; previous } ->
     (match previous with
      | true -> Hash_set.add t.integral_tvars tvar
@@ -110,6 +112,8 @@ let add_constraint
   ~(op : Simplex.Op.t)
   ~le:({ coeffs; const } : Linear_expr.t)
   ~c
+  ~atom
+  ~value
   =
   let c = Q.(c - const) in
   let coeffs : (Q.t * int) list =
@@ -117,6 +121,7 @@ let add_constraint
     |> List.map ~f:(fun (tvar, q) -> q, simplex_var_for_tvar t ~tvar)
   in
   let constraint_ = Simplex.add_constraint t.simplex (coeffs, op, c) in
+  Hashtbl.set t.atom_for_constraint ~key:constraint_ ~data:(atom, value);
   push_trail t ~decision_level ~kind:(Add_constraint constraint_)
 ;;
 
@@ -128,7 +133,8 @@ let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
   | true, `Type_eq (Type_expr.Var _, Base Float)
   | true, `Type_eq (Base Float, Type_expr.Var _) -> ()
   | true, `Type_eq (_, _) | false, `Type_eq _ -> ()
-  | true, `Le (le, c) -> add_constraint t ~op:`Le ~le ~c ~decision_level
+  | true, `Le (le, c) ->
+    add_constraint t ~op:`Le ~le ~c ~decision_level ~atom ~value
   | false, `Le (le, c) ->
     add_constraint
       t
@@ -136,6 +142,8 @@ let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
       ~le:(Linear_expr.scale Q.(neg one) le)
       ~c:(Q.neg c)
       ~decision_level
+      ~atom
+      ~value
 ;;
 
 let simplex_solve t =
@@ -163,38 +171,37 @@ let simplex_solve t =
   res
 ;;
 
-(* let maybe_get_lemma t = *)
-(* match simplex_solve t with *)
-(* | `Unsat -> Simplex.fold_conflict_row t.simplex ~f:(fun ~var_id ~bound_side
-   -> *)
-
-(* ) *)
-
-let rec solve t =
-  let[@inline always] try_with var op const =
-    let constraint_ =
-      Simplex.add_constraint t.simplex ([ Q.one, var ], op, const)
-    in
-    push_trail
-      t
-      ~decision_level:t.current_decision_level
-      ~kind:(Add_constraint constraint_);
-    let res = solve t in
-    (match res with
-     | `Unsat -> undo_entry t (Vec.Value.pop_exn t.trail)
-     | `Sat -> ());
-    res
-  in
+let maybe_get_lemma t =
   match simplex_solve t with
-  | `Unsat -> `Unsat
+  | `Unsat conflicting_constraints ->
+    `Lemma
+      (List.map conflicting_constraints ~f:(fun constraint_ ->
+         let atom, value = Hashtbl.find_exn t.atom_for_constraint constraint_ in
+         atom, not value))
   | `Sat ->
-    (* relaxed problem is feasible *)
     (match Hash_queue.first_with_key t.non_integral_ints with
-     | None -> `Sat
-     | Some (nonintegral, ()) ->
-       let var = Hashtbl.find_exn t.simplex_var_by_tvar nonintegral in
-       let assignment = (Simplex.assignment t.simplex ~var).value in
-       (match try_with var `Le (Q.floor assignment) with
-        | `Sat -> `Sat
-        | `Unsat -> try_with var `Ge (Q.ceil assignment)))
+     | None -> (* TODO: infer equalities *) `Consistent
+     | Some (tvar, ()) ->
+       (* either <= floor value or >= ceil value *)
+       let assignment =
+         (Simplex.assignment t.simplex ~var:(simplex_var_for_tvar t ~tvar))
+           .value
+       in
+       `Lemma
+         [ ( `Le
+               ( ({ const = Q.zero
+                  ; coeffs = Tvar.Map.of_alist_exn [ tvar, Q.one ]
+                  }
+                  : Linear_expr.t)
+               , Q.floor assignment )
+           , true )
+         ; ( `Le
+               ( Linear_expr.neg
+                   ({ const = Q.zero
+                    ; coeffs = Tvar.Map.of_alist_exn [ tvar, Q.one ]
+                    }
+                    : Linear_expr.t)
+               , Q.(ceil assignment |> neg) )
+           , true )
+         ])
 ;;
