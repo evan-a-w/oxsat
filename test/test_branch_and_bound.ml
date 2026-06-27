@@ -75,7 +75,8 @@ let%expect_test "integral var with non-integral relaxed solution yields a \
   [%expect
     {|
     (Lemma
-     (((Le
+     (((Type_eq ((Var x) (Base Int))) false)
+      ((Le
         (((coeffs ((x ((num 1) (den 1))))) (const ((num 0) (den 1))))
          ((num 1) (den 1))))
        true)
@@ -104,6 +105,53 @@ let%expect_test "integral var with non-integral relaxed solution yields a \
          ((num 1) (den 1))))
        false)))
     |}]
+;;
+
+let%expect_test "case-split lemma is guarded on integrality, not just asserted \
+                 unconditionally"
+  =
+  (* If the case-split lemma [x <= 1 \/ x >= 2] were emitted without a
+     [Not (Type_eq (x, Int))] guard, it would still be true (and could still get
+     learned and kept) even after integrality is retracted -- wrongly
+     constraining x to integers in a branch of the search where x was never
+     asserted integral. *)
+  let t = Branch_and_bound.create () in
+  Branch_and_bound.assert_atom t ~decision_level:0 ~atom:(is_int x) ~value:true;
+  Branch_and_bound.assert_atom
+    t
+    ~decision_level:0
+    ~atom:(`Le (Linear_expr.scale (Q.of_int 2) (Linear_expr.var x), Q.of_int 3))
+    ~value:true;
+  Branch_and_bound.assert_atom
+    t
+    ~decision_level:0
+    ~atom:
+      (`Le
+        ( Linear_expr.neg (Linear_expr.scale (Q.of_int 2) (Linear_expr.var x))
+        , Q.of_int (-3) ))
+    ~value:true;
+  print_lemma t;
+  [%expect
+    {|
+    (Lemma
+     (((Type_eq ((Var x) (Base Int))) false)
+      ((Le
+        (((coeffs ((x ((num 1) (den 1))))) (const ((num 0) (den 1))))
+         ((num 1) (den 1))))
+       true)
+      ((Le
+        (((coeffs ((x ((num -1) (den 1))))) (const ((num 0) (den 1))))
+         ((num -2) (den 1))))
+       true)))
+    |}];
+  (* Retract integrality (the [Type_eq] was asserted at decision level 0). x
+     remains pinned at 1.5 by the still-live [2x = 3] constraints, but since x
+     is no longer required to be an integer, that's a perfectly fine
+     (non-integral) solution: the theory should report [`Consistent], not
+     re-derive the case split. *)
+  Branch_and_bound.undo t ~to_decision_level_excl:(-1);
+  print_lemma t;
+  [%expect {| Consistent |}]
 ;;
 
 let%expect_test "undo retracts a constraint and restores consistency" =
@@ -235,7 +283,9 @@ let%expect_test "solver: integral var branches on a non-integral relaxed \
           (Atom
            (Le
             (((coeffs ((x ((num -1) (den 1))))) (const ((num 0) (den 1))))
-             ((num -2) (den 1))))))))
+             ((num -2) (den 1)))))
+          (Not (Atom (Type_eq ((Var x) (Base Int))))))))
+       (Asserted (Atom (Type_eq ((Var x) (Base Int)))))
        (Asserted
         (Atom
          (Le

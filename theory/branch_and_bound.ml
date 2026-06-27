@@ -15,7 +15,7 @@ module Trail_entry = struct
       | Add_constraint of Simplex.Constraint.t
       | Set_integral of
           { tvar : Tvar.t
-          ; previous : bool
+          ; previous : (Atom.t * bool) option
           }
   end
 
@@ -29,6 +29,9 @@ type t =
   { simplex_var_by_tvar : int Tvar.Table.t
   ; tvar_by_simplex_var : Tvar.t Int.Table.t
   ; integral_tvars : Tvar.Hash_set.t
+  ; (* The [`Type_eq] atom (and its value) that most recently made a tvar
+       integral, so a case-split lemma for that tvar can be guarded on it. *)
+    integral_atom_by_tvar : (Atom.t * bool) Tvar.Table.t
   ; non_integral_ints : unit Tvar.Hash_queue.t
   ; simplex : Simplex.t
   ; trail : Trail_entry.t Vec.Value.t
@@ -39,6 +42,7 @@ let create () : t =
   { simplex_var_by_tvar = Tvar.Table.create ()
   ; tvar_by_simplex_var = Int.Table.create ()
   ; integral_tvars = Tvar.Hash_set.create ()
+  ; integral_atom_by_tvar = Tvar.Table.create ()
   ; non_integral_ints = Tvar.Hash_queue.create ()
   ; simplex = Simplex.create ()
   ; trail = Vec.Value.create ()
@@ -73,8 +77,12 @@ let undo_entry t ({ kind; _ } : Trail_entry.t) =
     Hashtbl.remove t.atom_for_constraint constraint_
   | Set_integral { tvar; previous } ->
     (match previous with
-     | true -> Hash_set.add t.integral_tvars tvar
-     | false -> Hash_set.remove t.integral_tvars tvar);
+     | Some atom_and_value ->
+       Hash_set.add t.integral_tvars tvar;
+       Hashtbl.set t.integral_atom_by_tvar ~key:tvar ~data:atom_and_value
+     | None ->
+       Hash_set.remove t.integral_tvars tvar;
+       Hashtbl.remove t.integral_atom_by_tvar tvar);
     refresh_non_integral t ~tvar
 ;;
 
@@ -98,14 +106,19 @@ let push_trail t ~decision_level ~kind =
 (* Called when [tvar]'s type becomes known (or is retracted) elsewhere, so that
    [non_integral_ints] -- and hence whether [solve] branches on [tvar] -- stays
    in sync with its current simplex assignment. *)
-let set_integral t ~decision_level ~tvar ~integral =
-  let previous = Hash_set.mem t.integral_tvars tvar in
-  if Bool.( <> ) previous integral
+let set_integral t ~decision_level ~tvar ~integral ~(atom : Atom.t) ~value =
+  let was_integral = Hash_set.mem t.integral_tvars tvar in
+  if Bool.( <> ) was_integral integral
   then (
+    let previous = Hashtbl.find t.integral_atom_by_tvar tvar in
     push_trail t ~decision_level ~kind:(Set_integral { tvar; previous });
     (match integral with
-     | true -> Hash_set.add t.integral_tvars tvar
-     | false -> Hash_set.remove t.integral_tvars tvar);
+     | true ->
+       Hash_set.add t.integral_tvars tvar;
+       Hashtbl.set t.integral_atom_by_tvar ~key:tvar ~data:(atom, value)
+     | false ->
+       Hash_set.remove t.integral_tvars tvar;
+       Hashtbl.remove t.integral_atom_by_tvar tvar);
     refresh_non_integral t ~tvar)
 ;;
 
@@ -139,7 +152,7 @@ let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
   match value, atom with
   | true, `Type_eq (Type_expr.Var tvar, Base Int)
   | true, `Type_eq (Base Int, Type_expr.Var tvar) ->
-    set_integral t ~decision_level ~tvar ~integral:true
+    set_integral t ~decision_level ~tvar ~integral:true ~atom ~value
   | true, `Type_eq (Type_expr.Var _, Base Float)
   | true, `Type_eq (Base Float, Type_expr.Var _) -> ()
   | true, `Type_eq (_, _) | false, `Type_eq _ -> ()
@@ -186,13 +199,19 @@ let maybe_get_lemma t =
     (match Hash_queue.first_with_key t.non_integral_ints with
      | None -> (* TODO: infer equalities *) `Consistent
      | Some (tvar, ()) ->
-       (* either <= floor value or >= ceil value *)
+       (* either <= floor value or >= ceil value, but only while [tvar] is
+          actually integral -- guard on the negation of the atom that asserted
+          that, so the clause doesn't outlive it being retracted. *)
+       let integral_atom, integral_value =
+         Hashtbl.find_exn t.integral_atom_by_tvar tvar
+       in
        let assignment =
          (Simplex.assignment t.simplex ~var:(simplex_var_for_tvar t ~tvar))
            .value
        in
        `Lemma
-         [ ( `Le
+         [ integral_atom, not integral_value
+         ; ( `Le
                ( ({ const = Q.zero
                   ; coeffs = Tvar.Map.of_alist_exn [ tvar, Q.one ]
                   }
