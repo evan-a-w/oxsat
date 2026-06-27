@@ -440,7 +440,6 @@ let int_type : Type_expr.t = Base Int
 let float_type : Type_expr.t = Base Float
 let array_ctor = Tvar.of_string "Array"
 let array_of (elem : Type_expr.t) : Type_expr.t = App (array_ctor, [ elem ])
-
 let type_eq te1 te2 : Formula.t = Atom (`Type_eq (te1, te2))
 
 let%expect_test "Has_type: basic assert and get_type" =
@@ -466,10 +465,12 @@ let%expect_test "Has_type: conflicting ground types are unsat" =
      (core
       ((Theory_lemma
         (Or
-         ((Not (Atom (Has_type (x (Base Float)))))
-          (Not (Atom (Has_type (x (Base Int))))))))
-       (Asserted (Atom (Has_type (x (Base Float)))))
-       (Asserted (Atom (Has_type (x (Base Int))))))))
+         ((Not (Atom (Type_eq ((Var x) (Base Float)))))
+          (Not (Atom (Type_eq ((Var x) (Base Int)))))
+          (Atom (Type_eq ((Base Int) (Base Float)))))))
+       (Asserted (Atom (Type_eq ((Var x) (Base Float)))))
+       (Asserted (Atom (Type_eq ((Var x) (Base Int)))))
+       (Asserted (Not (Atom (Type_eq ((Base Int) (Base Float)))))))))
     |}]
 ;;
 
@@ -493,10 +494,10 @@ let%expect_test "Has_type: structural conflict (Array vs Int)" =
      (core
       ((Theory_lemma
         (Or
-         ((Not (Atom (Has_type (x (Base Int)))))
-          (Not (Atom (Has_type (x (App Array ((Var a))))))))))
-       (Asserted (Atom (Has_type (x (Base Int)))))
-       (Asserted (Atom (Has_type (x (App Array ((Var a))))))))))
+         ((Not (Atom (Type_eq ((Var x) (Base Int)))))
+          (Not (Atom (Type_eq ((Var x) (App Array ((Var a))))))))))
+       (Asserted (Atom (Type_eq ((Var x) (Base Int)))))
+       (Asserted (Atom (Type_eq ((Var x) (App Array ((Var a))))))))))
     |}]
 ;;
 
@@ -527,10 +528,12 @@ let%expect_test "Has_type: push/pop retracts type conflict" =
      (core
       ((Theory_lemma
         (Or
-         ((Not (Atom (Has_type (x (Base Float)))))
-          (Not (Atom (Has_type (x (Base Int))))))))
-       (Asserted (Atom (Has_type (x (Base Float)))))
-       (Asserted (Atom (Has_type (x (Base Int))))))))
+         ((Not (Atom (Type_eq ((Var x) (Base Float)))))
+          (Not (Atom (Type_eq ((Var x) (Base Int)))))
+          (Atom (Type_eq ((Base Int) (Base Float)))))))
+       (Asserted (Atom (Type_eq ((Var x) (Base Float)))))
+       (Asserted (Atom (Type_eq ((Var x) (Base Int)))))
+       (Asserted (Not (Atom (Type_eq ((Base Int) (Base Float)))))))))
     |}];
   Solver.pop solver;
   print_result (Solver.solve solver);
@@ -569,10 +572,12 @@ let%expect_test "Type_eq: TypeEq(a, Int) and TypeEq(a, Float) conflict via \
      (core
       ((Theory_lemma
         (Or
-         ((Not (Atom (Eq ((Var :Float) (Var :a)))))
-          (Atom (Eq ((Var :Float) (Var :Int)))))))
-       (Asserted (Atom (Eq ((Var :a) (Var :Float)))))
-       (Asserted (Not (Atom (Eq ((Var :Float) (Var :Int)))))))))
+         ((Not (Atom (Type_eq ((Var a) (Base Float)))))
+          (Not (Atom (Type_eq ((Var a) (Base Int)))))
+          (Atom (Type_eq ((Base Int) (Base Float)))))))
+       (Asserted (Atom (Type_eq ((Var a) (Base Float)))))
+       (Asserted (Atom (Type_eq ((Var a) (Base Int)))))
+       (Asserted (Not (Atom (Type_eq ((Base Int) (Base Float)))))))))
     |}]
 ;;
 

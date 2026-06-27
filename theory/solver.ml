@@ -36,12 +36,16 @@ module Combined_theory = struct
     match Uf_term.Uf.maybe_get_lemma t.uf [@nontail] with
     | `Lemma literals ->
       lemma_to_clause literals ~sat_var_for_atom:(fun atom ->
-        Formula.Encoding.sat_var_for_atom t.encoding (atom : Uf_term.Uf.Atom.t :> Atom.t))
+        Formula.Encoding.sat_var_for_atom
+          t.encoding
+          (atom : Uf_term.Uf.Atom.t :> Atom.t))
     | `Consistent ->
       (match Type_expr.Uf.maybe_get_lemma t.tuf [@nontail] with
        | `Lemma literals ->
-         lemma_to_clause literals ~sat_var_for_atom:(fun (`Eq (a, b) : Type_expr.Uf.Atom.t) ->
-           Formula.Encoding.sat_var_for_atom t.encoding (`Type_eq (a, b)))
+         lemma_to_clause
+           literals
+           ~sat_var_for_atom:(fun (`Eq (a, b) : Type_expr.Uf.Atom.t) ->
+             Formula.Encoding.sat_var_for_atom t.encoding (`Type_eq (a, b)))
        | `Consistent ->
          (match Tvar_types.maybe_get_lemma t.tt [@nontail] with
           | `Consistent -> `Consistent
@@ -105,7 +109,8 @@ let create () =
       if [%compare: Type_expr.Base.t] b1 b2 < 0
       then (
         let (`Eq (a, b) as tuf_atom) =
-          Type_expr.Uf.Atom.normalize (`Eq (Type_expr.Base b1, Type_expr.Base b2))
+          Type_expr.Uf.Atom.normalize
+            (`Eq (Type_expr.Base b1, Type_expr.Base b2))
         in
         let atom : Atom.t = `Type_eq (a, b) in
         let sat_var = Formula.Encoding.sat_var_for_atom t.encoding atom in
@@ -215,7 +220,9 @@ let stats t = Feel.Solver.stats t.solver
 
 let assert_type t var type_expr =
   ignore
-    (assert_formula t (Formula.Atom (Tvar_types.has_type var type_expr :> Atom.t))
+    (assert_formula
+       t
+       (Formula.Atom (Tvar_types.has_type var type_expr :> Atom.t))
      : [ `Ok | `Unsat of _ ])
 ;;
 
