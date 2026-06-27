@@ -146,14 +146,8 @@ let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
   | true, `Le (le, c) ->
     add_constraint t ~op:`Le ~le ~c ~decision_level ~atom ~value
   | false, `Le (le, c) ->
-    add_constraint
-      t
-      ~op:`Ge
-      ~le:(Linear_expr.scale Q.(neg one) le)
-      ~c:(Q.neg c)
-      ~decision_level
-      ~atom
-      ~value
+    (* [Not (`Le (le, c))] is [le > c]. *)
+    add_constraint t ~op:`Gt ~le ~c ~decision_level ~atom ~value
 ;;
 
 let simplex_solve t =

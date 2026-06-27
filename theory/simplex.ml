@@ -192,8 +192,17 @@ let add_nonbasic t : Var.t =
 ;;
 
 let add_processed_constraint t ~nonbasic_coefficients ~bound =
+  (* The new basic var's row expresses it in terms of the current nonbasic vars,
+     so its initial assignment must be computed from their current assignments
+     (not [Q_eps.zero]) -- otherwise [solve] would see a stale assignment that
+     ignores constraints added since the last [solve]. *)
+  let assignment =
+    Array.foldi nonbasic_coefficients ~init:Q_eps.zero ~f:(fun col acc coeff ->
+      Q_eps.(
+        acc + scale (Vec.Value.get t.nonbasic_vars col).assignment ~by:coeff))
+  in
   let var : Var.t =
-    { assignment = Q_eps.zero
+    { assignment
     ; bound
     ; id = Vec.Value.length t.vars
     ; where = `Basic (Vec.Value.length t.basic_vars)
@@ -701,11 +710,7 @@ let%expect_test "strict inequalities (`Lt / `Gt)" =
 
 let%expect_test "`Gt conflicts with a non-strict `Le at the same bound" =
   (* x > 3 and x <= 3 together leave no room, unlike if `Gt had been
-     (incorrectly) treated as `Ge, where x=3 would have stayed feasible. Both
-     constraints are added before [solve] is ever called, so this isn't
-     confounded by the (separate, pre-existing) issue where a basic var
-     introduced by [add_constraint] after a [solve] starts from a stale zero
-     assignment. *)
+     (incorrectly) treated as `Ge, where x=3 would have stayed feasible. *)
   let t = create () in
   let x = add_var t in
   let (_ : int) = add_constraint t ([ Q.one, x ], `Gt, Q.of_int 3) in
@@ -721,4 +726,21 @@ let%expect_test "`Lt and `Gt together admit a strictly-between solution" =
   let (_ : int) = add_constraint t ([ Q.one, x ], `Lt, Q.of_int 4) in
   print_s [%sexp (solve t : [ `Sat | `Unsat of int list ])];
   [%expect {| Sat |}]
+;;
+
+let%expect_test "a constraint added after [solve] starts from the current \
+                 assignment, not a stale zero"
+  =
+  (* 2x = 3 forces x = 1.5 once solved; adding x <= 1 afterwards must be seen as
+     already-violated, not as a fresh basic var starting at an assignment of 0
+     (which would wrongly look satisfied). *)
+  let t = create () in
+  let x = add_var t in
+  let (_ : int) = add_constraint t ([ Q.of_int 2, x ], `Le, Q.of_int 3) in
+  let (_ : int) = add_constraint t ([ Q.of_int (-2), x ], `Le, Q.of_int (-3)) in
+  print_s [%sexp (solve t : [ `Sat | `Unsat of int list ])];
+  [%expect {| Sat |}];
+  let (_ : int) = add_constraint t ([ Q.one, x ], `Le, Q.one) in
+  print_s [%sexp (solve t : [ `Sat | `Unsat of int list ])];
+  [%expect {| (Unsat (2 3)) |}]
 ;;

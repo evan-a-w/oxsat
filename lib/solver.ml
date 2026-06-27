@@ -521,13 +521,22 @@ let propagate_theory t = exclave_
     (match Theory.maybe_get_lemma theory with
      | `Consistent -> `Consistent
      | `Lemma { global = clause } ->
+       let trail_length_before = Trail_entry.Vec.length t.trail in
        (match
           add_clause
             t
             ~literals:(Vec.Value.of_array_taking_ownership clause)
             ~origin:Theory
         with
-        | `Ok -> `Continue
+        | `Ok ->
+          (* A lemma clause with more than one unassigned literal (e.g. a
+             branch-and-bound case split) doesn't propagate anything, so
+             [Theory.maybe_get_lemma] would just re-derive the same lemma
+             forever. Once the clause is registered, fall through to
+             [make_decision] instead of polling the theory again. *)
+          if Trail_entry.Vec.length t.trail > trail_length_before
+          then `Continue
+          else `Consistent
         | `Conflict _ as res -> res))
 ;;
 
