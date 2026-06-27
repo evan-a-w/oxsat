@@ -185,6 +185,7 @@ let add_nonbasic t : Var.t =
     ; where = `Nonbasic (Vec.Value.length t.nonbasic_vars)
     }
   in
+  Hash_queue.enqueue_back_exn t.new_assignments var.id Q_eps.zero;
   Vec.Value.push t.vars var;
   Vec.Value.push t.nonbasic_vars var;
   Vec.Value.iter t.tableau ~f:(fun v -> Vec.Value.push v Q.zero);
@@ -208,6 +209,7 @@ let add_processed_constraint t ~nonbasic_coefficients ~bound =
     ; where = `Basic (Vec.Value.length t.basic_vars)
     }
   in
+  Hash_queue.enqueue_back_exn t.new_assignments var.id assignment;
   Vec.Value.push t.vars var;
   Vec.Value.push t.basic_vars var;
   Vec.Value.push
