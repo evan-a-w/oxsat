@@ -32,9 +32,19 @@ type t =
   ; non_integral_ints : unit Tvar.Hash_queue.t
   ; simplex : Simplex.t
   ; trail : Trail_entry.t Vec.Value.t
-  ; mutable current_decision_level : int
   ; atom_for_constraint : (Atom.t * bool) Simplex.Constraint.Table.t
   }
+
+let create () : t =
+  { simplex_var_by_tvar = Tvar.Table.create ()
+  ; tvar_by_simplex_var = Int.Table.create ()
+  ; integral_tvars = Tvar.Hash_set.create ()
+  ; non_integral_ints = Tvar.Hash_queue.create ()
+  ; simplex = Simplex.create ()
+  ; trail = Vec.Value.create ()
+  ; atom_for_constraint = Simplex.Constraint.Table.create ()
+  }
+;;
 
 (* Brings [non_integral_ints] membership for [tvar] in line with whether it's
    currently in [integral_tvars] and, if so, whether its simplex assignment is
@@ -74,7 +84,7 @@ let rec undo t ~to_decision_level_excl =
   | len ->
     let trail_entry = Vec.Value.get t.trail (len - 1) in
     (match trail_entry.decision_level > to_decision_level_excl with
-     | false -> t.current_decision_level <- trail_entry.decision_level
+     | false -> ()
      | true ->
        ignore (Vec.Value.pop_exn t.trail : Trail_entry.t);
        undo_entry t trail_entry;

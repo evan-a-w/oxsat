@@ -17,6 +17,7 @@ module Combined_theory = struct
     { uf : Uf_term.Uf.t
     ; tuf : Type_expr.Uf.t
     ; tt : Tvar_types.t
+    ; bb : Branch_and_bound.t
     ; encoding : Formula.Encoding.t
     }
 
@@ -28,8 +29,15 @@ module Combined_theory = struct
       Uf_term.Uf.assert_atom t.uf ~decision_level ~atom ~value
     | Some (`Type_eq (a, b)) ->
       Type_expr.Uf.assert_atom t.tuf ~decision_level ~atom:(`Eq (a, b)) ~value;
-      Tvar_types.assert_atom t.tt ~decision_level ~atom:(`Type_eq (a, b)) ~value
-    | Some (`Le _) | None -> ()
+      Tvar_types.assert_atom t.tt ~decision_level ~atom:(`Type_eq (a, b)) ~value;
+      Branch_and_bound.assert_atom
+        t.bb
+        ~decision_level
+        ~atom:(`Type_eq (a, b))
+        ~value
+    | Some (`Le _ as atom) ->
+      Branch_and_bound.assert_atom t.bb ~decision_level ~atom ~value
+    | None -> ()
   ;;
 
   let maybe_get_lemma t = exclave_
@@ -48,18 +56,26 @@ module Combined_theory = struct
              Formula.Encoding.sat_var_for_atom t.encoding (`Type_eq (a, b)))
        | `Consistent ->
          (match Tvar_types.maybe_get_lemma t.tt [@nontail] with
-          | `Consistent -> `Consistent
           | `Lemma literals ->
             lemma_to_clause
               literals
               ~sat_var_for_atom:(fun (`Type_eq (a, b) : Tvar_types.Atom.t) ->
-                Formula.Encoding.sat_var_for_atom t.encoding (`Type_eq (a, b)))))
+                Formula.Encoding.sat_var_for_atom t.encoding (`Type_eq (a, b)))
+          | `Consistent ->
+            (match Branch_and_bound.maybe_get_lemma t.bb [@nontail] with
+             | `Consistent -> `Consistent
+             | `Lemma literals ->
+               lemma_to_clause
+                 literals
+                 ~sat_var_for_atom:(fun (atom : Branch_and_bound.Atom.t) ->
+                   Formula.Encoding.sat_var_for_atom t.encoding (atom :> Atom.t)))))
   ;;
 
   let undo t ~to_decision_level_excl =
     Uf_term.Uf.undo t.uf ~to_decision_level_excl;
     Type_expr.Uf.undo t.tuf ~to_decision_level_excl;
-    Tvar_types.undo t.tt ~to_decision_level_excl
+    Tvar_types.undo t.tt ~to_decision_level_excl;
+    Branch_and_bound.undo t.bb ~to_decision_level_excl
   ;;
 
   let on_new_var (_ : t) ~var:(_ : int) =
@@ -83,8 +99,9 @@ let create () =
   let uf = Uf_term.Uf.create ~atoms:[] in
   let tuf = Type_expr.Uf.create ~atoms:[] in
   let tt = Tvar_types.create () in
+  let bb = Branch_and_bound.create () in
   let encoding = Formula.Encoding.create () in
-  let combined = { Combined_theory.uf; tuf; tt; encoding } in
+  let combined = { Combined_theory.uf; tuf; tt; bb; encoding } in
   let solver =
     Feel.Solver.create
       ~theory:(Feel.Theory.pack (module Combined_theory) combined)
