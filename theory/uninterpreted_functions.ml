@@ -275,13 +275,13 @@ module Make (Term : Term) = struct
                      signatures, i.e. [f(args1) ~ f(args2)] with [args1]/[args2]
                      pairwise congruent (already in the same class). *)
                   let justification =
-                    match (term : Term.t), (canonical : Term.t) with
-                    | ( `App (~function_, ~args:args1)
-                      , `App (~function_:_, ~args:args2) ) ->
+                    match Term.split_function term, Term.split_function canonical with
+                    | Some (function_, args1), Some (_, args2) ->
                       Justification.Congruence { function_; args1; args2 }
-                    | `Var _, _ | _, `Var _ ->
+                    | None, _ | _, None ->
                       (* [canonical_signature_term] only ever returns [This _]
-                         for terms with non-null signatures, i.e. [`App _]. *)
+                         for terms with non-null signatures, i.e. terms for
+                         which [split_function] returns [Some _]. *)
                       assert false
                   in
                   Vec.Value.push worklist ((term, canonical), justification)));
@@ -301,16 +301,16 @@ module Make (Term : Term) = struct
     match Hashtbl.find t.ufds_var_by_term term with
     | Some _ -> ()
     | None ->
-      (match term with
-       | `Var _ -> ()
-       | `App (~function_:_, ~args) ->
+      (match Term.split_function term with
+       | None -> ()
+       | Some (_function_, args) ->
          List.iter args ~f:(fun arg ->
            register_term t ~decision_level ~atom ~term:arg));
       let ufds_var = Ufdsu.add t.ufdsu in
       Hashtbl.set t.ufds_var_by_term ~key:term ~data:ufds_var;
-      (match term with
-       | `Var _ -> ()
-       | `App (~function_, ~args) ->
+      (match Term.split_function term with
+       | None -> ()
+       | Some (function_, args) ->
          List.iter args ~f:(fun arg ->
            let parents =
              Hashtbl.find_or_add t.parents arg ~default:Term.Hash_set.create
@@ -321,12 +321,13 @@ module Make (Term : Term) = struct
           | This canonical when [%equal: Term.t] canonical term -> ()
           | This canonical ->
             let justification =
-              match (canonical : Term.t) with
-              | `App (~function_:_, ~args:args2) ->
+              match Term.split_function canonical with
+              | Some (_function_, args2) ->
                 Justification.Congruence { function_; args1 = args; args2 }
-              | `Var _ ->
+              | None ->
                 (* [canonical_signature_term] only ever returns [This _] for
-                   terms with non-null signatures, i.e. [`App _]. *)
+                   terms with non-null signatures, i.e. terms for which
+                   [split_function] returns [Some _]. *)
                 assert false
             in
             let worklist = Vec.Value.create () in

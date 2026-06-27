@@ -40,7 +40,10 @@ let are_structurally_incompatible t1 t2 =
   | Type_expr.Base _, Type_expr.App _ | Type_expr.App _, Type_expr.Base _ ->
     true
   | Type_expr.App (c1, _), Type_expr.App (c2, _) -> not (Tvar.equal c1 c2)
-  | Type_expr.Var _, _ | _, Type_expr.Var _ -> false
+  | Type_expr.Var _, _
+  | _, Type_expr.Var _
+  | Type_expr.Type_of _, _
+  | _, Type_expr.Type_of _ -> false
 ;;
 
 let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
