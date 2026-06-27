@@ -5,7 +5,7 @@ open! Theory
 let x = `Var (Tvar.of_string "x")
 let y = `Var (Tvar.of_string "y")
 let z = `Var (Tvar.of_string "z")
-let f arg : Term.t = `App (~function_:(Tvar.of_string "f"), ~args:[ arg ])
+let f arg : Uf_term.t = `App (~function_:(Tvar.of_string "f"), ~args:[ arg ])
 let eq a b : Formula.t = Atom (`Eq (a, b))
 let neq a b : Formula.t = Not (eq a b)
 
@@ -25,9 +25,9 @@ let assert_ok solver formula =
 
 (* ----- Term/Atom basics ----- *)
 
-(* Renders a [Term.t] using variable/function names instead of raw interned
+(* Renders a [Uf_term.t] using variable/function names instead of raw interned
    ints, for readable expect-test output. *)
-let rec sexp_of_term (term : Term.t) : Sexp.t =
+let rec sexp_of_term (term : Uf_term.t) : Sexp.t =
   match term with
   | `Var v -> List [ Atom "Var"; Atom (Tvar.to_string v) ]
   | `App (~function_, ~args) ->
@@ -52,7 +52,7 @@ let%expect_test "Atom.normalize orders Eq sides canonically" =
 ;;
 
 let%expect_test "Term/Atom sexp round trip" =
-  let term : Term.t = f x in
+  let term : Uf_term.t = f x in
   print_s [%sexp (sexp_of_term term : Sexp.t)];
   [%expect {| (App f ((Var x))) |}]
 ;;
@@ -441,9 +441,7 @@ let float_type : Type_expr.t = Base Float
 let array_ctor = Tvar.of_string "Array"
 let array_of (elem : Type_expr.t) : Type_expr.t = App (array_ctor, [ elem ])
 
-let type_eq te1 te2 : Formula.t =
-  Atom (`Eq (Type_expr.to_term te1, Type_expr.to_term te2))
-;;
+let type_eq te1 te2 : Formula.t = Atom (`Type_eq (te1, te2))
 
 let%expect_test "Has_type: basic assert and get_type" =
   let solver = Solver.create () in
@@ -591,12 +589,8 @@ let%expect_test "Type_eq: normalize makes Eq(a, b) = Eq(b, a) for embedded \
   =
   let a = Tvar.of_string "a" in
   let te = Type_expr.Var a in
-  let atom1 =
-    Atom.normalize (`Eq (Type_expr.to_term te, Type_expr.to_term int_type))
-  in
-  let atom2 =
-    Atom.normalize (`Eq (Type_expr.to_term int_type, Type_expr.to_term te))
-  in
+  let atom1 = Atom.normalize (`Type_eq (te, int_type)) in
+  let atom2 = Atom.normalize (`Type_eq (int_type, te)) in
   print_s [%sexp ([%equal: Atom.t] atom1 atom2 : bool)];
   [%expect {| true |}]
 ;;

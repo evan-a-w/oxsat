@@ -3,7 +3,7 @@ open! Feel.Import
 module Type = Type_expr.Base
 
 module Atom = struct
-  type t = [ `Has_type of Tvar.t * Type_expr.t ]
+  type t = [ `Type_eq of Type_expr.t * Type_expr.t ]
   [@@deriving sexp, compare, hash]
 
   let normalize x = x
@@ -11,6 +11,8 @@ module Atom = struct
   include functor Comparable.Make
   include functor Hashable.Make
 end
+
+let has_type var type_expr : Atom.t = `Type_eq (Type_expr.Var var, type_expr)
 
 type trail_entry =
   { decision_level : int
@@ -48,21 +50,22 @@ let are_structurally_incompatible t1 t2 =
 
 let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
   match value, atom with
-  | true, `Has_type (var, type_expr) ->
+  | true, `Type_eq (Type_expr.Var var, type_expr)
+  | true, `Type_eq (type_expr, Type_expr.Var var) ->
     let old_type = Hashtbl.find t.types var in
     let caused_conflict =
       match old_type with
       | Some old when not ([%compare.equal: Type_expr.t] old type_expr) ->
         if are_structurally_incompatible old type_expr
         then (
-          t.conflict <- Some (atom, `Has_type (var, old));
+          t.conflict <- Some (atom, has_type var old);
           true)
         else false
       | _ -> false
     in
     Vec.Value.push t.trail { decision_level; var; old_type; caused_conflict };
     Hashtbl.set t.types ~key:var ~data:type_expr
-  | false, `Has_type _ -> ()
+  | true, `Type_eq (_, _) | false, `Type_eq _ -> ()
 ;;
 
 let maybe_get_lemma t =

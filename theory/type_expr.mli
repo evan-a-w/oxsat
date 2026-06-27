@@ -13,8 +13,8 @@ module Base : sig
 end
 
 type t =
-  | Base of Base.t
   | Var of Tvar.t
+  | Base of Base.t
   | Type_of of Tvar.t
   | App of Tvar.t * t list
 [@@deriving sexp, compare, hash]
