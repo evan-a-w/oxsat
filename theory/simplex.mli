@@ -8,10 +8,23 @@ module Maybe_bound : sig
   [@@deriving sexp, compare, hash]
 end
 
+(** [{ value; eps_coeff }] represents [value + (eps_coeff * delta)], for a fixed
+    but symbolic infinitesimal [delta]. Used to encode strict bounds
+    ([`Lt]/[`Gt]) without native strict-inequality support in the tableau. *)
+module Q_eps : sig
+  type t =
+    { value : Q.t
+    ; eps_coeff : Q.t
+    }
+  [@@deriving sexp, compare, hash]
+
+  val of_q : Q.t -> t
+end
+
 module Bound : sig
   type t =
-    { le : Q.t Maybe_bound.t
-    ; ge : Q.t Maybe_bound.t
+    { le : Q_eps.t Maybe_bound.t
+    ; ge : Q_eps.t Maybe_bound.t
     }
   [@@deriving sexp]
 end
@@ -21,6 +34,8 @@ module Op : sig
     [ `Eq
     | `Le
     | `Ge
+    | `Lt
+    | `Gt
     ]
   [@@deriving sexp, compare, hash]
 end

@@ -6,8 +6,43 @@ module Op = struct
     [ `Eq
     | `Le
     | `Ge
+    | `Lt
+    | `Gt
     ]
   [@@deriving sexp, compare, hash]
+end
+
+(* Represents [value + (eps_coeff * delta)], where [delta] is a fixed but
+   symbolic infinitesimal. This is the standard trick (Dutertre & de Moura) for
+   handling strict inequalities in a Simplex tableau that otherwise only
+   supports non-strict bounds: [x < c] becomes the bound [x <= c - delta], and
+   [x > c] becomes [x >= c + delta]. Ordering is lexicographic on
+   [(value, eps_coeff)], which is correct for any sufficiently small
+   [delta > 0]. *)
+module Q_eps = struct
+  type t =
+    { value : Q.t
+    ; eps_coeff : Q.t
+    }
+  [@@deriving sexp, compare, hash]
+
+  let of_q value = { value; eps_coeff = Q.zero }
+  let zero = of_q Q.zero
+
+  let ( + ) a b =
+    { value = Q.(a.value + b.value); eps_coeff = Q.(a.eps_coeff + b.eps_coeff) }
+  ;;
+
+  let ( - ) a b =
+    { value = Q.(a.value - b.value); eps_coeff = Q.(a.eps_coeff - b.eps_coeff) }
+  ;;
+
+  let scale a ~by =
+    { value = Q.(a.value * by); eps_coeff = Q.(a.eps_coeff * by) }
+  ;;
+
+  let max a b = if compare a b >= 0 then a else b
+  let min a b = if compare a b <= 0 then a else b
 end
 
 module Maybe_bound = struct
@@ -25,8 +60,8 @@ end
 
 module Bound = struct
   type t =
-    { le : Q.t Maybe_bound.t
-    ; ge : Q.t Maybe_bound.t
+    { le : Q_eps.t Maybe_bound.t
+    ; ge : Q_eps.t Maybe_bound.t
     }
   [@@deriving sexp]
 
@@ -34,13 +69,13 @@ module Bound = struct
 
   let check_bounds t with_q =
     let diff_with_bound bound =
-      Maybe_bound.map bound ~f:(fun q -> Q.(q - with_q))
+      Maybe_bound.map bound ~f:(fun q -> Q_eps.(q - with_q))
     in
     match diff_with_bound t.le with
-    | Bounded q when Q.compare q Q.zero < 0 -> `Diff q
+    | Bounded q when Q_eps.compare q Q_eps.zero < 0 -> `Diff q
     | Unbounded | Bounded _ ->
       (match diff_with_bound t.ge with
-       | Bounded q when Q.compare q Q.zero > 0 -> `Diff q
+       | Bounded q when Q_eps.compare q Q_eps.zero > 0 -> `Diff q
        | Unbounded | Bounded _ -> `In_bounds)
   ;;
 
@@ -53,7 +88,7 @@ end
 
 module Var = struct
   type t =
-    { mutable assignment : Q.t
+    { mutable assignment : Q_eps.t
     ; mutable bound : Bound.t
     ; id : int
     ; mutable where : [ `Basic of int | `Nonbasic of int ]
@@ -68,49 +103,62 @@ module Var = struct
 
   let allowed_to_shift t : Bound.t =
     let diff_with_bound bound =
-      Maybe_bound.map bound ~f:(fun q -> Q.(q - t.assignment))
+      Maybe_bound.map bound ~f:(fun q -> Q_eps.(q - t.assignment))
     in
-    { le = diff_with_bound t.bound.le |> Maybe_bound.map ~f:(Q.max Q.zero)
-    ; ge = diff_with_bound t.bound.ge |> Maybe_bound.map ~f:(Q.min Q.zero)
+    { le =
+        diff_with_bound t.bound.le |> Maybe_bound.map ~f:(Q_eps.max Q_eps.zero)
+    ; ge =
+        diff_with_bound t.bound.ge |> Maybe_bound.map ~f:(Q_eps.min Q_eps.zero)
     }
   ;;
 
   let%expect_test "eg" =
     let t =
-      { assignment = Q.zero
-      ; bound = { le = Bounded (Q.of_int 10); ge = Bounded (Q.of_int 10) }
+      { assignment = Q_eps.zero
+      ; bound =
+          { le = Bounded (Q_eps.of_q (Q.of_int 10))
+          ; ge = Bounded (Q_eps.of_q (Q.of_int 10))
+          }
       ; id = 0
       ; where = `Nonbasic 0
       }
     in
     print_s
       [%message
-        (diff_to_become_in_bounds t : Q.t option) (allowed_to_shift t : Bound.t)];
+        (diff_to_become_in_bounds t : Q_eps.t option)
+          (allowed_to_shift t : Bound.t)];
     [%expect
       {|
-      (("diff_to_become_in_bounds t" (((num 10) (den 1))))
+      (("diff_to_become_in_bounds t"
+        (((value ((num 10) (den 1))) (eps_coeff ((num 0) (den 1))))))
        ("allowed_to_shift t"
-        ((le (Bounded ((num 10) (den 1)))) (ge (Bounded ((num 0) (den 1)))))))
+        ((le (Bounded ((value ((num 10) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (ge (Bounded ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))))))
       |}];
-    t.assignment <- Q.of_int 10;
+    t.assignment <- Q_eps.of_q (Q.of_int 10);
     print_s
       [%message
-        (diff_to_become_in_bounds t : Q.t option) (allowed_to_shift t : Bound.t)];
+        (diff_to_become_in_bounds t : Q_eps.t option)
+          (allowed_to_shift t : Bound.t)];
     [%expect
       {|
       (("diff_to_become_in_bounds t" ())
        ("allowed_to_shift t"
-        ((le (Bounded ((num 0) (den 1)))) (ge (Bounded ((num 0) (den 1)))))))
+        ((le (Bounded ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (ge (Bounded ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))))))
       |}];
-    t.assignment <- Q.of_int 20;
+    t.assignment <- Q_eps.of_q (Q.of_int 20);
     print_s
       [%message
-        (diff_to_become_in_bounds t : Q.t option) (allowed_to_shift t : Bound.t)];
+        (diff_to_become_in_bounds t : Q_eps.t option)
+          (allowed_to_shift t : Bound.t)];
     [%expect
       {|
-      (("diff_to_become_in_bounds t" (((num -10) (den 1))))
+      (("diff_to_become_in_bounds t"
+        (((value ((num -10) (den 1))) (eps_coeff ((num 0) (den 1))))))
        ("allowed_to_shift t"
-        ((le (Bounded ((num 0) (den 1)))) (ge (Bounded ((num -10) (den 1)))))))
+        ((le (Bounded ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (ge (Bounded ((value ((num -10) (den 1))) (eps_coeff ((num 0) (den 1)))))))))
       |}]
   ;;
 end
@@ -126,14 +174,14 @@ type t =
 
 let assign t ~(var : Var.t) ~q =
   var.assignment <- q;
-  Hash_queue.replace_or_enqueue_front t.new_assignments var.id q
+  Hash_queue.replace_or_enqueue_front t.new_assignments var.id q.Q_eps.value
 ;;
 
 type constraint_ = int [@@deriving sexp, compare, equal, hash]
 
 let add_nonbasic t : Var.t =
   let var : Var.t =
-    { assignment = Q.zero
+    { assignment = Q_eps.zero
     ; bound = { le = Unbounded; ge = Unbounded }
     ; id = Vec.Value.length t.vars
     ; where = `Nonbasic (Vec.Value.length t.nonbasic_vars)
@@ -147,7 +195,7 @@ let add_nonbasic t : Var.t =
 
 let add_processed_constraint t ~nonbasic_coefficients ~bound =
   let var : Var.t =
-    { assignment = Q.zero
+    { assignment = Q_eps.zero
     ; bound
     ; id = Vec.Value.length t.vars
     ; where = `Basic (Vec.Value.length t.basic_vars)
@@ -164,9 +212,12 @@ let add_processed_constraint t ~nonbasic_coefficients ~bound =
 let add_constraint t ((lhs, op, rhs) : Q.t array * Op.t * Q.t) : constraint_ =
   let bound : Bound.t =
     match op with
-    | `Le -> { le = Bounded rhs; ge = Unbounded }
-    | `Ge -> { le = Unbounded; ge = Bounded rhs }
-    | `Eq -> { le = Bounded rhs; ge = Bounded rhs }
+    | `Le -> { le = Bounded (Q_eps.of_q rhs); ge = Unbounded }
+    | `Ge -> { le = Unbounded; ge = Bounded (Q_eps.of_q rhs) }
+    | `Eq -> { le = Bounded (Q_eps.of_q rhs); ge = Bounded (Q_eps.of_q rhs) }
+    | `Lt ->
+      { le = Bounded { value = rhs; eps_coeff = Q.neg Q.one }; ge = Unbounded }
+    | `Gt -> { le = Unbounded; ge = Bounded { value = rhs; eps_coeff = Q.one } }
   in
   add_processed_constraint t ~nonbasic_coefficients:lhs ~bound
 ;;
@@ -198,7 +249,10 @@ let pivot t ~row ~col ~diff_to_col =
       let mult = Vec.Value.get row' col in
       let basic_var = Vec.Value.get t.basic_vars i in
       (* here we apply the diff to the var as well *)
-      assign t ~var:basic_var ~q:Q.((diff_to_col * mult) + basic_var.assignment);
+      assign
+        t
+        ~var:basic_var
+        ~q:Q_eps.(scale diff_to_col ~by:mult + basic_var.assignment);
       for j = 0 to Vec.Value.length row' - 1 do
         if j = col
         then Vec.Value.set row' j (Q.( * ) (get_tableau t ~row ~col) mult)
@@ -219,24 +273,30 @@ let pivot t ~row ~col ~diff_to_col =
 ;;
 
 let%expect_test "pivot example" =
-  let bound0 : Bound.t = { le = Unbounded; ge = Bounded (Q.of_int 0) } in
-  let bound1 : Bound.t = { le = Unbounded; ge = Bounded (Q.of_int 1) } in
-  let bound2 : Bound.t = { le = Unbounded; ge = Bounded (Q.of_int 2) } in
+  let bound0 : Bound.t =
+    { le = Unbounded; ge = Bounded (Q_eps.of_q (Q.of_int 0)) }
+  in
+  let bound1 : Bound.t =
+    { le = Unbounded; ge = Bounded (Q_eps.of_q (Q.of_int 1)) }
+  in
+  let bound2 : Bound.t =
+    { le = Unbounded; ge = Bounded (Q_eps.of_q (Q.of_int 2)) }
+  in
   let unbounded : Bound.t = { le = Unbounded; ge = Unbounded } in
   let b0 : Var.t =
-    { assignment = Q.zero; bound = bound0; id = 0; where = `Basic 0 }
+    { assignment = Q_eps.zero; bound = bound0; id = 0; where = `Basic 0 }
   in
   let b1 : Var.t =
-    { assignment = Q.zero; bound = bound1; id = 1; where = `Basic 1 }
+    { assignment = Q_eps.zero; bound = bound1; id = 1; where = `Basic 1 }
   in
   let b2 : Var.t =
-    { assignment = Q.zero; bound = bound2; id = 2; where = `Basic 2 }
+    { assignment = Q_eps.zero; bound = bound2; id = 2; where = `Basic 2 }
   in
   let nb0 : Var.t =
-    { assignment = Q.zero; bound = unbounded; id = 3; where = `Nonbasic 0 }
+    { assignment = Q_eps.zero; bound = unbounded; id = 3; where = `Nonbasic 0 }
   in
   let nb1 : Var.t =
-    { assignment = Q.zero; bound = unbounded; id = 4; where = `Nonbasic 1 }
+    { assignment = Q_eps.zero; bound = unbounded; id = 4; where = `Nonbasic 1 }
   in
   let t =
     { new_assignments = Int.Hash_queue.create ()
@@ -259,37 +319,55 @@ let%expect_test "pivot example" =
        (((num 2) (den 1)) ((num -1) (den 1)))
        (((num -1) (den 1)) ((num 2) (den 1)))))
      (basic_vars
-      (((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 0)
-        (where (Basic 0)))
-       ((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 1)
-        (where (Basic 1)))
-       ((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2)
-        (where (Basic 2)))))
+      (((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 0) (where (Basic 0)))
+       ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 1) (where (Basic 1)))
+       ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 2) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 2) (where (Basic 2)))))
      (nonbasic_vars
-      (((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
-        (id 3) (where (Nonbasic 0)))
-       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
-        (id 4) (where (Nonbasic 1)))))
+      (((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound ((le Unbounded) (ge Unbounded))) (id 3) (where (Nonbasic 0)))
+       ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound ((le Unbounded) (ge Unbounded))) (id 4) (where (Nonbasic 1)))))
      (vars
-      (((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 0)
-        (where (Basic 0)))
-       ((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 1)
-        (where (Basic 1)))
-       ((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2)
-        (where (Basic 2)))
-       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
-        (id 3) (where (Nonbasic 0)))
-       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
-        (id 4) (where (Nonbasic 1)))))
+      (((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 0) (where (Basic 0)))
+       ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 1) (where (Basic 1)))
+       ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 2) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 2) (where (Basic 2)))
+       ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound ((le Unbounded) (ge Unbounded))) (id 3) (where (Nonbasic 0)))
+       ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound ((le Unbounded) (ge Unbounded))) (id 4) (where (Nonbasic 1)))))
      (new_assignments ()))
     |}];
-  pivot t ~row:0 ~col:0 ~diff_to_col:Q.zero;
+  pivot t ~row:0 ~col:0 ~diff_to_col:Q_eps.zero;
   print_s [%sexp (t : t)];
   [%expect
     {|
@@ -298,34 +376,52 @@ let%expect_test "pivot example" =
        (((num 2) (den 1)) ((num -3) (den 1)))
        (((num -1) (den 1)) ((num 3) (den 1)))))
      (basic_vars
-      (((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
-        (id 3) (where (Basic 0)))
-       ((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 1)
-        (where (Basic 1)))
-       ((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2)
-        (where (Basic 2)))))
+      (((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound ((le Unbounded) (ge Unbounded))) (id 3) (where (Basic 0)))
+       ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 1) (where (Basic 1)))
+       ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 2) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 2) (where (Basic 2)))))
      (nonbasic_vars
-      (((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 0)
-        (where (Nonbasic 0)))
-       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
-        (id 4) (where (Nonbasic 1)))))
+      (((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 0) (where (Nonbasic 0)))
+       ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound ((le Unbounded) (ge Unbounded))) (id 4) (where (Nonbasic 1)))))
      (vars
-      (((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 0)
-        (where (Nonbasic 0)))
-       ((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 1)
-        (where (Basic 1)))
-       ((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2)
-        (where (Basic 2)))
-       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
-        (id 3) (where (Basic 0)))
-       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
-        (id 4) (where (Nonbasic 1)))))
+      (((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 0) (where (Nonbasic 0)))
+       ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 1) (where (Basic 1)))
+       ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 2) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 2) (where (Basic 2)))
+       ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound ((le Unbounded) (ge Unbounded))) (id 3) (where (Basic 0)))
+       ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound ((le Unbounded) (ge Unbounded))) (id 4) (where (Nonbasic 1)))))
      (new_assignments ((2 ((num 0) (den 1))) (1 ((num 0) (den 1))))))
     |}]
 ;;
@@ -344,7 +440,7 @@ let rec solve t =
         match Q.is_zero q with
         | true -> None
         | false ->
-          let need_apply = Q.(diff / q) in
+          let need_apply = Q_eps.scale diff ~by:(Q.( / ) Q.one q) in
           (match
              Bound.in_bounds (Var.allowed_to_shift nonbasic_var) need_apply
            with
@@ -354,31 +450,40 @@ let rec solve t =
     (match candidate_nonbasic with
      | None -> `Unsat
      | Some (col, nonbasic_var, need_apply) ->
-       assign t ~var:nonbasic_var ~q:Q.(nonbasic_var.assignment + need_apply);
-       assign t ~var:basic_var ~q:Q.(basic_var.assignment + diff);
+       assign
+         t
+         ~var:nonbasic_var
+         ~q:Q_eps.(nonbasic_var.assignment + need_apply);
+       assign t ~var:basic_var ~q:Q_eps.(basic_var.assignment + diff);
        pivot t ~row ~col ~diff_to_col:need_apply;
        solve t)
 ;;
 
 let%expect_test "example simplex" =
-  let bound0 : Bound.t = { le = Unbounded; ge = Bounded (Q.of_int 2) } in
-  let bound1 : Bound.t = { le = Unbounded; ge = Bounded (Q.of_int 0) } in
-  let bound2 : Bound.t = { le = Unbounded; ge = Bounded (Q.of_int 1) } in
+  let bound0 : Bound.t =
+    { le = Unbounded; ge = Bounded (Q_eps.of_q (Q.of_int 2)) }
+  in
+  let bound1 : Bound.t =
+    { le = Unbounded; ge = Bounded (Q_eps.of_q (Q.of_int 0)) }
+  in
+  let bound2 : Bound.t =
+    { le = Unbounded; ge = Bounded (Q_eps.of_q (Q.of_int 1)) }
+  in
   let unbounded : Bound.t = { le = Unbounded; ge = Unbounded } in
   let b0 : Var.t =
-    { assignment = Q.zero; bound = bound0; id = 2; where = `Basic 0 }
+    { assignment = Q_eps.zero; bound = bound0; id = 2; where = `Basic 0 }
   in
   let b1 : Var.t =
-    { assignment = Q.zero; bound = bound1; id = 3; where = `Basic 1 }
+    { assignment = Q_eps.zero; bound = bound1; id = 3; where = `Basic 1 }
   in
   let b2 : Var.t =
-    { assignment = Q.zero; bound = bound2; id = 4; where = `Basic 2 }
+    { assignment = Q_eps.zero; bound = bound2; id = 4; where = `Basic 2 }
   in
   let nb0 : Var.t =
-    { assignment = Q.zero; bound = unbounded; id = 0; where = `Nonbasic 0 }
+    { assignment = Q_eps.zero; bound = unbounded; id = 0; where = `Nonbasic 0 }
   in
   let nb1 : Var.t =
-    { assignment = Q.zero; bound = unbounded; id = 1; where = `Nonbasic 1 }
+    { assignment = Q_eps.zero; bound = unbounded; id = 1; where = `Nonbasic 1 }
   in
   let t =
     { new_assignments = Int.Hash_queue.create ()
@@ -401,34 +506,52 @@ let%expect_test "example simplex" =
        (((num 2) (den 1)) ((num -1) (den 1)))
        (((num -1) (den 1)) ((num 2) (den 1)))))
      (basic_vars
-      (((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2)
-        (where (Basic 0)))
-       ((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 3)
-        (where (Basic 1)))
-       ((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 4)
-        (where (Basic 2)))))
+      (((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 2) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 2) (where (Basic 0)))
+       ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 3) (where (Basic 1)))
+       ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 4) (where (Basic 2)))))
      (nonbasic_vars
-      (((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
-        (id 0) (where (Nonbasic 0)))
-       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
-        (id 1) (where (Nonbasic 1)))))
+      (((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound ((le Unbounded) (ge Unbounded))) (id 0) (where (Nonbasic 0)))
+       ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound ((le Unbounded) (ge Unbounded))) (id 1) (where (Nonbasic 1)))))
      (vars
-      (((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
-        (id 0) (where (Nonbasic 0)))
-       ((assignment ((num 0) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
-        (id 1) (where (Nonbasic 1)))
-       ((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2)
-        (where (Basic 0)))
-       ((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 3)
-        (where (Basic 1)))
-       ((assignment ((num 0) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 4)
-        (where (Basic 2)))))
+      (((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound ((le Unbounded) (ge Unbounded))) (id 0) (where (Nonbasic 0)))
+       ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound ((le Unbounded) (ge Unbounded))) (id 1) (where (Nonbasic 1)))
+       ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 2) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 2) (where (Basic 0)))
+       ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 3) (where (Basic 1)))
+       ((assignment ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 4) (where (Basic 2)))))
      (new_assignments ()))
     |}];
   (match solve t with
@@ -443,34 +566,52 @@ let%expect_test "example simplex" =
        (((num 1) (den 1)) ((num -1) (den 1)))
        (((num 1) (den 3)) ((num 1) (den 3)))))
      (basic_vars
-      (((assignment ((num 1) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
-        (id 0) (where (Basic 0)))
-       ((assignment ((num 1) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 3)
-        (where (Basic 1)))
-       ((assignment ((num 1) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
-        (id 1) (where (Basic 2)))))
+      (((assignment ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound ((le Unbounded) (ge Unbounded))) (id 0) (where (Basic 0)))
+       ((assignment ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 3) (where (Basic 1)))
+       ((assignment ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound ((le Unbounded) (ge Unbounded))) (id 1) (where (Basic 2)))))
      (nonbasic_vars
-      (((assignment ((num 2) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2)
-        (where (Nonbasic 0)))
-       ((assignment ((num 1) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 4)
-        (where (Nonbasic 1)))))
+      (((assignment ((value ((num 2) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 2) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 2) (where (Nonbasic 0)))
+       ((assignment ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 4) (where (Nonbasic 1)))))
      (vars
-      (((assignment ((num 1) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
-        (id 0) (where (Basic 0)))
-       ((assignment ((num 1) (den 1))) (bound ((le Unbounded) (ge Unbounded)))
-        (id 1) (where (Basic 2)))
-       ((assignment ((num 2) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 2) (den 1)))))) (id 2)
-        (where (Nonbasic 0)))
-       ((assignment ((num 1) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 0) (den 1)))))) (id 3)
-        (where (Basic 1)))
-       ((assignment ((num 1) (den 1)))
-        (bound ((le Unbounded) (ge (Bounded ((num 1) (den 1)))))) (id 4)
-        (where (Nonbasic 1)))))
+      (((assignment ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound ((le Unbounded) (ge Unbounded))) (id 0) (where (Basic 0)))
+       ((assignment ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound ((le Unbounded) (ge Unbounded))) (id 1) (where (Basic 2)))
+       ((assignment ((value ((num 2) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 2) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 2) (where (Nonbasic 0)))
+       ((assignment ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 3) (where (Basic 1)))
+       ((assignment ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1)))))
+        (bound
+         ((le Unbounded)
+          (ge
+           (Bounded ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1))))))))
+        (id 4) (where (Nonbasic 1)))))
      (new_assignments
       ((1 ((num 1) (den 1))) (4 ((num 1) (den 1))) (3 ((num 1) (den 1)))
        (2 ((num 2) (den 1))) (0 ((num 1) (den 1))))))
@@ -478,7 +619,7 @@ let%expect_test "example simplex" =
 ;;
 
 module Snapshot = struct
-  type t = Q.t array
+  type t = Q_eps.t array
 end
 
 let snapshot_assignments t : Snapshot.t =
@@ -500,19 +641,19 @@ let create () =
 ;;
 
 let add_var t = (add_nonbasic t).id
-let assignment t ~var = (Vec.Value.get t.vars var).assignment
+let assignment t ~var = (Vec.Value.get t.vars var).assignment.value
 
 let fold_conflict_row t ~f =
   let failing =
     Vec.Value.findi t.basic_vars ~f:(fun (row : int) (var : Var.t) ->
       match Var.diff_to_become_in_bounds var with
       | None -> None
-      | Some (diff : Q.t) -> Some (row, var, diff))
+      | Some (diff : Q_eps.t) -> Some (row, var, diff))
   in
   match failing with
   | None -> None
   | Some (row, basic_var, diff) ->
-    let needs_increase = Q.compare diff Q.zero > 0 in
+    let needs_increase = Q_eps.compare diff Q_eps.zero > 0 in
     f ~var_id:basic_var.id ~bound_side:(if needs_increase then `Ge else `Le);
     Vec.Value.iteri t.nonbasic_vars ~f:(fun col nonbasic_var ->
       let coeff = get_tableau t ~row ~col in
