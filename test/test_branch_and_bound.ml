@@ -188,8 +188,42 @@ let solver_is_int tvar : Formula.t =
   Atom (`Type_eq (Type_expr.Var tvar, Base Int))
 ;;
 
+(* Renders a [Uf_term.t] using variable/function names instead of raw interned
+   ints, for readable expect-test output. *)
+let rec sexp_of_term (term : Uf_term.t) : Sexp.t =
+  match term with
+  | `Var v -> List [ Atom "Var"; Atom (Tvar.to_string v) ]
+  | `App (~function_, ~args) ->
+    List
+      [ Atom "App"
+      ; Atom (Tvar.to_string function_)
+      ; List (List.map args ~f:sexp_of_term)
+      ]
+;;
+
+(* See [test_theory_solver.ml] for why [Tvar.t]'s default sexp (via
+   [Tvar.Map.t]) shows raw interned ints instead of names. *)
+let sexp_of_tvar_assignment ({ type_; numeric; euf_repr } : Tvar_assignment.t)
+  : Sexp.t
+  =
+  [%message
+    ""
+      (type_ : Type_expr.t option)
+      (numeric : Simplex.Q_eps.t option)
+      ~euf_repr:(Option.map euf_repr ~f:sexp_of_term : Sexp.t option)]
+;;
+
 let print_result (result : Solver_result.t) =
-  print_s [%sexp (result : Solver_result.t)]
+  match result with
+  | Unsat _ -> print_s [%sexp (result : Solver_result.t)]
+  | Sat { tvar_assignments } ->
+    let alist =
+      Map.to_alist tvar_assignments
+      |> List.map ~f:(fun (tvar, assignment) ->
+        Sexp.List
+          [ Atom (Tvar.to_string tvar); sexp_of_tvar_assignment assignment ])
+    in
+    print_s [%message "Sat" ~tvar_assignments:(alist : Sexp.t list)]
 ;;
 
 let assert_ok solver formula =
@@ -204,7 +238,19 @@ let%expect_test "solver: satisfiable linear system" =
   assert_ok solver (solver_ge x 0);
   assert_ok solver (solver_le y 5);
   print_result (Solver.solve solver);
-  [%expect {| (Sat (assignments (() (false) (true) (true) (true)))) |}]
+  [%expect
+    {|
+    (Sat
+     (tvar_assignments
+      ((x
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ())))
+       (y
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ()))))))
+    |}]
 ;;
 
 let%expect_test "solver: x <= 3 and x >= 5 is unsat via the simplex theory" =
@@ -298,7 +344,15 @@ let%expect_test "solver: push/pop retracts a simplex conflict" =
   let solver = Solver.create () in
   assert_ok solver (solver_le x 3);
   print_result (Solver.solve solver);
-  [%expect {| (Sat (assignments (() (false) (true)))) |}];
+  [%expect
+    {|
+    (Sat
+     (tvar_assignments
+      ((x
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ()))))))
+    |}];
   Solver.push solver;
   assert_ok solver (solver_ge x 5);
   print_result (Solver.solve solver);
@@ -331,5 +385,13 @@ let%expect_test "solver: push/pop retracts a simplex conflict" =
     |}];
   Solver.pop solver;
   print_result (Solver.solve solver);
-  [%expect {| (Sat (assignments (() (false) (true) (false) (false)))) |}]
+  [%expect
+    {|
+    (Sat
+     (tvar_assignments
+      ((x
+        ((type_ ())
+         (numeric (((value ((num 3) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ()))))))
+    |}]
 ;;

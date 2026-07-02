@@ -233,3 +233,10 @@ let maybe_get_lemma t =
            , true )
          ])
 ;;
+
+let assignment t ~tvar =
+  Hashtbl.find t.simplex_var_by_tvar tvar
+  |> Option.map ~f:(fun var -> Simplex.assignment t.simplex ~var)
+;;
+
+let all_numeric_vars t = Hashtbl.keys t.simplex_var_by_tvar

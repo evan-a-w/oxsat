@@ -19,6 +19,7 @@ type t
 
 val create : unit -> t
 val get_type : t -> Tvar.t -> Type_expr.t option
+val all_typed_vars : t -> Tvar.t list
 val assert_atom : t -> decision_level:int -> atom:Atom.t -> value:bool -> unit
 val maybe_get_lemma : t -> [ `Consistent | `Lemma of (Atom.t * bool) list ]
 val undo : t -> to_decision_level_excl:int -> unit
