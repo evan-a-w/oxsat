@@ -2,7 +2,7 @@ Only have one dune process running at a time, because otherwise it hangs. Eg. if
 you are running tests, don't also dune exec.
 
 You may need to run eval $(opam env) before dune commands, eg.
-[eval $(opam env) && dune build].
+[eval $(opam env) && dune build]. You can try a single normal [dune build] initially, and if it fails with no explanation (eg. no diffs and I didn't say build was broken) that's probably the reason.
 
 You should prefer defining types as a [type t] inside a module with the name of
 the type. Eg. [type undo_entry = ...] should be [module Undo_entry = struct type
