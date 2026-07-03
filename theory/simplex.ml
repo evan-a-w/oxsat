@@ -275,21 +275,23 @@ let pivot t ~row ~col ~diff_to_col =
     | true -> ()
     | false ->
       let mult = Vec.Value.get row' col in
-      let basic_var = Vec.Value.get t.basic_vars i in
-      (* here we apply the diff to the var as well *)
-      assign
-        t
-        ~var:basic_var
-        ~q:Q_eps.(scale diff_to_col ~by:mult + basic_var.assignment);
-      for j = 0 to Vec.Value.length row' - 1 do
-        if j = col
-        then Vec.Value.set row' j (Q.( * ) (get_tableau t ~row ~col) mult)
-        else
-          Vec.Value.set
-            row'
-            j
-            Q.(Vec.Value.get row' j + (get_tableau t ~row ~col:j * mult))
-      done
+      if not (Q.is_zero mult)
+      then (
+        let basic_var = Vec.Value.get t.basic_vars i in
+        (* here we apply the diff to the var as well *)
+        assign
+          t
+          ~var:basic_var
+          ~q:Q_eps.(scale diff_to_col ~by:mult + basic_var.assignment);
+        for j = 0 to Vec.Value.length row' - 1 do
+          if j = col
+          then Vec.Value.set row' j (Q.( * ) (get_tableau t ~row ~col) mult)
+          else
+            Vec.Value.set
+              row'
+              j
+              Q.(Vec.Value.get row' j + (get_tableau t ~row ~col:j * mult))
+        done)
   done;
   let old_nonbasic = Vec.Value.get t.nonbasic_vars col in
   let old_basic = Vec.Value.get t.basic_vars row in
@@ -730,7 +732,9 @@ let lhs_to_nonbasic_coefficients t lhs =
       nonbasic_coefficients.(x) <- Q.(nonbasic_coefficients.(x) + q)
     | `Basic x ->
       Vec.Value.iteri (Vec.Value.get t.tableau x) ~f:(fun i q' ->
-        nonbasic_coefficients.(i) <- Q.(nonbasic_coefficients.(i) + (q * q'))));
+        if not (Q.is_zero q')
+        then
+          nonbasic_coefficients.(i) <- Q.(nonbasic_coefficients.(i) + (q * q'))));
   nonbasic_coefficients
 ;;
 

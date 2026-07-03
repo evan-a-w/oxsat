@@ -1,3 +1,20 @@
+skip zero-mult rows in simplex pivot (sparse pivot optimization)
+
+Bin packing (10/3): 6.6ms -> 1.96ms (3.4x), (15/4): 113ms -> 19.7ms (5.7x), (20/4): 108ms -> 41ms (2.6x)
+LP tight OR: 102/176/278us -> 78/113/158us (1.3-1.8x). LP feasible unchanged (dense tableaux).
+
+$ dune exec --profile=release bench/feel_bench.exe -- -bench smt
+LP feasible (n=10, m=30): Mean: 80.52 μs
+LP feasible (n=20, m=60): Mean: 205.99 μs
+LP feasible (n=50, m=150): Mean: 769.41 μs
+LP tight OR (n=5): Mean: 78.51 μs
+LP tight OR (n=7): Mean: 112.95 μs
+LP tight OR (n=9): Mean: 158.03 μs
+Bin packing (items=10, bins=3): Mean: 1.96 ms
+Bin packing (items=15, bins=4): Mean: 19.68 ms
+Bin packing (items=20, bins=4): Mean: 41.06 ms
+
+
 remove unused literal_set stuff
 
 $ time dune exec --profile=release bench/feel_bench.exe -- -bench dimacs -min-iterations 1 -max-iterations 1 -sample-runs 1  && time dune exec --profile=release bench/feel_bench.exe -- -bench sat -sat-max-n 80
