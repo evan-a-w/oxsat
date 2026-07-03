@@ -716,6 +716,8 @@ let add_var t =
 ;;
 
 let assignment t ~var = (Vec.Value.get t.vars var).assignment
+let n_tombstoned t = t.n_tombstoned
+let n_live_constraints t = Hashtbl.length t.live_constraints
 
 let lhs_to_nonbasic_coefficients t lhs =
   let nonbasic_coefficients =

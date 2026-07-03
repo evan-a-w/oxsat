@@ -71,6 +71,8 @@ val restore_assignments : t -> Snapshot.t -> unit
 
 val assignment : t -> var:int -> Q_eps.t
 val new_assignments : t -> Q_eps.t Int.Hash_queue.t
+val n_tombstoned : t -> int
+val n_live_constraints : t -> int
 
 (** If enough constraints have been tombstoned by [remove_constraint], rebuild
     the tableau from scratch to reclaim space. For each decision var whose
