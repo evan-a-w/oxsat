@@ -178,11 +178,23 @@ type t =
       (* Decision var ids in order of creation, for [maybe_rebuild]. *)
   ; decision_var_ids : int Vec.Value.t
   ; mutable n_tombstoned : int
+      (* Number of basic vars whose assignment currently violates their bounds.
+         When zero, [solve] can return [Sat] immediately without scanning. *)
+  ; mutable n_infeasible : int
   }
 [@@deriving sexp_of, fields]
 
 let assign t ~(var : Var.t) ~q =
-  var.assignment <- q;
+  (match var.where with
+   | `Basic _ ->
+     let was_infeasible = Option.is_some (Var.diff_to_become_in_bounds var) in
+     var.assignment <- q;
+     let is_infeasible = Option.is_some (Var.diff_to_become_in_bounds var) in
+     (match was_infeasible, is_infeasible with
+      | true, false -> t.n_infeasible <- t.n_infeasible - 1
+      | false, true -> t.n_infeasible <- t.n_infeasible + 1
+      | _ -> ())
+   | `Nonbasic _ -> var.assignment <- q);
   Hash_queue.replace_or_enqueue_front t.new_assignments var.id q
 ;;
 
@@ -224,6 +236,9 @@ let add_processed_constraint t ~nonbasic_coefficients ~bound =
     ; where = `Basic (Vec.Value.length t.basic_vars)
     }
   in
+  (match Bound.check_bounds bound assignment with
+   | `Diff _ -> t.n_infeasible <- t.n_infeasible + 1
+   | `In_bounds -> ());
   Hash_queue.enqueue_back_exn t.new_assignments var.id assignment;
   Vec.Value.push t.vars var;
   Vec.Value.push t.basic_vars var;
@@ -247,7 +262,11 @@ let remove_constraint t ~constraint_ =
   match Hashtbl.find t.var_for_constraint constraint_ with
   | None -> ()
   | Some var_id ->
-    (Vec.Value.get t.vars var_id).bound <- Bound.unbounded;
+    let var = Vec.Value.get t.vars var_id in
+    (match Var.diff_to_become_in_bounds var with
+     | Some _ -> t.n_infeasible <- t.n_infeasible - 1
+     | None -> ());
+    var.bound <- Bound.unbounded;
     Hashtbl.remove t.var_for_constraint constraint_;
     Hashtbl.remove t.constraint_for_var var_id;
     Hashtbl.remove t.live_constraints constraint_;
@@ -345,6 +364,7 @@ let%expect_test "pivot example" =
     ; constraint_for_var = Int.Table.create ()
     ; decision_var_ids = Vec.Value.create ()
     ; n_tombstoned = 0
+    ; n_infeasible = 2
     }
   in
   print_s [%sexp (t : t)];
@@ -403,7 +423,7 @@ let%expect_test "pivot example" =
         (bound ((le Unbounded) (ge Unbounded))) (id 4) (where (Nonbasic 1)))))
      (new_assignments ()) (next_constraint_id 0) (live_constraints ())
      (var_for_constraint ()) (constraint_for_var ()) (decision_var_ids ())
-     (n_tombstoned 0))
+     (n_tombstoned 0) (n_infeasible 2))
     |}];
   pivot t ~row:0 ~col:0 ~diff_to_col:Q_eps.zero;
   print_s [%sexp (t : t)];
@@ -464,7 +484,8 @@ let%expect_test "pivot example" =
       ((2 ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))
        (1 ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))))
      (next_constraint_id 0) (live_constraints ()) (var_for_constraint ())
-     (constraint_for_var ()) (decision_var_ids ()) (n_tombstoned 0))
+     (constraint_for_var ()) (decision_var_ids ()) (n_tombstoned 0)
+     (n_infeasible 2))
     |}]
 ;;
 
@@ -479,36 +500,40 @@ let get_conflicting_constraints t ~row ~basic_var =
 ;;
 
 let rec solve t =
-  let failing_basic =
-    Vec.Value.findi t.basic_vars ~f:(fun row var ->
-      Var.diff_to_become_in_bounds var |> Option.map ~f:(Tuple3.create row var))
-  in
-  match failing_basic with
-  | None -> `Sat
-  | Some (row, basic_var, diff) ->
-    let candidate_nonbasic =
-      Vec.Value.findi t.nonbasic_vars ~f:(fun col nonbasic_var ->
-        let q = get_tableau t ~row ~col in
-        match Q.is_zero q with
-        | true -> None
-        | false ->
-          let need_apply = Q_eps.scale diff ~by:(Q.( / ) Q.one q) in
-          (match
-             Bound.in_bounds (Var.allowed_to_shift nonbasic_var) need_apply
-           with
-           | false -> None
-           | true -> Some (col, nonbasic_var, need_apply)))
+  if t.n_infeasible = 0
+  then `Sat
+  else (
+    let failing_basic =
+      Vec.Value.findi t.basic_vars ~f:(fun row var ->
+        Var.diff_to_become_in_bounds var
+        |> Option.map ~f:(Tuple3.create row var))
     in
-    (match candidate_nonbasic with
-     | None -> `Unsat (get_conflicting_constraints t ~row ~basic_var)
-     | Some (col, nonbasic_var, need_apply) ->
-       assign
-         t
-         ~var:nonbasic_var
-         ~q:Q_eps.(nonbasic_var.assignment + need_apply);
-       assign t ~var:basic_var ~q:Q_eps.(basic_var.assignment + diff);
-       pivot t ~row ~col ~diff_to_col:need_apply;
-       solve t)
+    match failing_basic with
+    | None -> `Sat
+    | Some (row, basic_var, diff) ->
+      let candidate_nonbasic =
+        Vec.Value.findi t.nonbasic_vars ~f:(fun col nonbasic_var ->
+          let q = get_tableau t ~row ~col in
+          match Q.is_zero q with
+          | true -> None
+          | false ->
+            let need_apply = Q_eps.scale diff ~by:(Q.( / ) Q.one q) in
+            (match
+               Bound.in_bounds (Var.allowed_to_shift nonbasic_var) need_apply
+             with
+             | false -> None
+             | true -> Some (col, nonbasic_var, need_apply)))
+      in
+      (match candidate_nonbasic with
+       | None -> `Unsat (get_conflicting_constraints t ~row ~basic_var)
+       | Some (col, nonbasic_var, need_apply) ->
+         assign
+           t
+           ~var:nonbasic_var
+           ~q:Q_eps.(nonbasic_var.assignment + need_apply);
+         assign t ~var:basic_var ~q:Q_eps.(basic_var.assignment + diff);
+         pivot t ~row ~col ~diff_to_col:need_apply;
+         solve t))
 ;;
 
 let%expect_test "example simplex" =
@@ -554,6 +579,7 @@ let%expect_test "example simplex" =
     ; constraint_for_var = Int.Table.create ()
     ; decision_var_ids = Vec.Value.create ()
     ; n_tombstoned = 0
+    ; n_infeasible = 2
     }
   in
   print_s [%sexp (t : t)];
@@ -612,7 +638,7 @@ let%expect_test "example simplex" =
         (id 4) (where (Basic 2)))))
      (new_assignments ()) (next_constraint_id 0) (live_constraints ())
      (var_for_constraint ()) (constraint_for_var ()) (decision_var_ids ())
-     (n_tombstoned 0))
+     (n_tombstoned 0) (n_infeasible 2))
     |}];
   (match solve t with
    | `Sat -> print_endline "sat"
@@ -679,7 +705,8 @@ let%expect_test "example simplex" =
        (2 ((value ((num 2) (den 1))) (eps_coeff ((num 0) (den 1)))))
        (0 ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1)))))))
      (next_constraint_id 0) (live_constraints ()) (var_for_constraint ())
-     (constraint_for_var ()) (decision_var_ids ()) (n_tombstoned 0))
+     (constraint_for_var ()) (decision_var_ids ()) (n_tombstoned 0)
+     (n_infeasible 0))
     |}]
 ;;
 
@@ -693,7 +720,12 @@ let snapshot_assignments t : Snapshot.t =
 ;;
 
 let restore_assignments t (snapshot : Snapshot.t) =
-  Array.iteri snapshot ~f:(fun i q -> (Vec.Value.get t.vars i).assignment <- q)
+  Array.iteri snapshot ~f:(fun i q -> (Vec.Value.get t.vars i).assignment <- q);
+  t.n_infeasible
+  <- Vec.Value.fold t.basic_vars ~init:0 ~f:(fun acc var ->
+       if Option.is_some (Var.diff_to_become_in_bounds var)
+       then acc + 1
+       else acc)
 ;;
 
 let create () =
@@ -708,6 +740,7 @@ let create () =
   ; constraint_for_var = Int.Table.create ()
   ; decision_var_ids = Vec.Value.create ()
   ; n_tombstoned = 0
+  ; n_infeasible = 0
   }
 ;;
 
@@ -778,6 +811,7 @@ let maybe_rebuild t ~update =
     Hash_queue.clear t.new_assignments;
     Vec.Value.clear t.decision_var_ids;
     Hashtbl.clear t.constraint_for_var;
+    t.n_infeasible <- 0;
     Array.iteri old_decision_var_ids ~f:(fun new_id old_id ->
       let var = add_nonbasic t in
       Hashtbl.set old_to_new ~key:old_id ~data:new_id;

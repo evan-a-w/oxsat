@@ -1,3 +1,45 @@
+n_infeasible counter for O(1) sat-check in solve (no measurable impact: branch constraints usually violated on add, and findi scan is negligible vs pivot work)
+
+Bin packing unchanged. LP unchanged.
+
+$ time dune exec --profile=release bench/feel_bench.exe -- -bench smt
+SMT solver benchmarks (LP, MILP, EUF): 
+LP feasible (n=10, m=30): Mean: 86.03 μs  StdDev: 4.15 μs  p50: 84.39 μs  p75: 91.73 μs  p90: 91.73 μs  p95: 91.73 μs  p99: 91.73 μs  (n=3)
+LP feasible (n=20, m=60): Mean: 207.60 μs  StdDev: 1.50 μs  p50: 208.15 μs  p75: 209.10 μs  p90: 209.10 μs  p95: 209.10 μs  p99: 209.10 μs  (n=3)
+LP feasible (n=50, m=150): Mean: 787.15 μs  StdDev: 17.81 μs  p50: 775.15 μs  p75: 812.33 μs  p90: 812.33 μs  p95: 812.33 μs  p99: 812.33 μs  (n=3)
+LP tight OR (n=5): Mean: 75.74 μs  StdDev: 105.16 ns  p50: 75.67 μs  p75: 75.89 μs  p90: 75.89 μs  p95: 75.89 μs  p99: 75.89 μs  (n=3)
+LP tight OR (n=7): Mean: 109.92 μs  StdDev: 4.58 μs  p50: 107.15 μs  p75: 116.38 μs  p90: 116.38 μs  p95: 116.38 μs  p99: 116.38 μs  (n=3)
+LP tight OR (n=9): Mean: 147.19 μs  StdDev: 345.43 ns  p50: 146.95 μs  p75: 147.68 μs  p90: 147.68 μs  p95: 147.68 μs  p99: 147.68 μs  (n=3)
+Bin packing (items=10, bins=3): Mean: 1.96 ms  StdDev: 876.74 ns  p50: 1.96 ms  p75: 1.96 ms  p90: 1.96 ms  p95: 1.96 ms  p99: 1.96 ms  (n=3)
+Bin packing (items=15, bins=4): Mean: 18.73 ms  StdDev: 23.80 μs  p50: 18.73 ms  p75: 18.76 ms  p90: 18.76 ms  p95: 18.76 ms  p99: 18.76 ms  (n=3)
+Bin packing (items=20, bins=4): Mean: 41.64 ms  StdDev: 236.42 μs  p50: 41.51 ms  p75: 41.98 ms  p90: 41.98 ms  p95: 41.98 ms  p99: 41.98 ms  (n=3)
+EUF chain UNSAT (n=50): Mean: 75.01 μs  StdDev: 1.62 μs  p50: 73.89 μs  p75: 77.31 μs  p90: 77.31 μs  p95: 77.31 μs  p99: 77.31 μs  (n=3)
+EUF chain UNSAT (n=200): Mean: 314.60 μs  StdDev: 474.34 ns  p50: 314.74 μs  p75: 315.10 μs  p90: 315.10 μs  p95: 315.10 μs  p99: 315.10 μs  (n=3)
+EUF chain UNSAT (n=1000): Mean: 2.46 ms  StdDev: 20.53 μs  p50: 2.45 ms  p75: 2.49 ms  p90: 2.49 ms  p95: 2.49 ms  p99: 2.49 ms  (n=3)
+EUF two-group SAT (n=50): Mean: 89.94 μs  StdDev: 69.47 ns  p50: 89.90 μs  p75: 90.03 μs  p90: 90.03 μs  p95: 90.03 μs  p99: 90.03 μs  (n=3)
+EUF two-group SAT (n=200): Mean: 418.54 μs  StdDev: 118.71 ns  p50: 418.49 μs  p75: 418.70 μs  p90: 418.70 μs  p95: 418.70 μs  p99: 418.70 μs  (n=3)
+EUF web (n=20, f=3): Mean: 71.50 μs  StdDev: 120.95 ns  p50: 71.43 μs  p75: 71.67 μs  p90: 71.67 μs  p95: 71.67 μs  p99: 71.67 μs  (n=3)
+EUF web (n=50, f=5): Mean: 206.23 μs  StdDev: 531.79 ns  p50: 206.59 μs  p75: 206.62 μs  p90: 206.62 μs  p95: 206.62 μs  p99: 206.62 μs  (n=3)
+dune exec --profile=release bench/feel_bench.exe -- -bench smt  95.67s user 0.78s system 78% cpu 2:02.59 total
+
+
+skip zero-mult rows in simplex pivot (sparse pivot optimization)
+
+Bin packing (10/3): 6.6ms -> 1.96ms (3.4x), (15/4): 113ms -> 19.7ms (5.7x), (20/4): 108ms -> 41ms (2.6x)
+LP tight OR: 102/176/278us -> 78/113/158us (1.3-1.8x). LP feasible unchanged (dense tableaux).
+
+$ dune exec --profile=release bench/feel_bench.exe -- -bench smt
+LP feasible (n=10, m=30): Mean: 80.52 μs
+LP feasible (n=20, m=60): Mean: 205.99 μs
+LP feasible (n=50, m=150): Mean: 769.41 μs
+LP tight OR (n=5): Mean: 78.51 μs
+LP tight OR (n=7): Mean: 112.95 μs
+LP tight OR (n=9): Mean: 158.03 μs
+Bin packing (items=10, bins=3): Mean: 1.96 ms
+Bin packing (items=15, bins=4): Mean: 19.68 ms
+Bin packing (items=20, bins=4): Mean: 41.06 ms
+
+
 Rebuild when enough constraints killed
 
 First
