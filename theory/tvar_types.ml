@@ -32,6 +32,7 @@ let create () =
 ;;
 
 let get_type t var = Hashtbl.find t.types var
+let all_typed_vars t = Hashtbl.keys t.types
 
 (* True if [t1] and [t2] have incompatible heads — they cannot be unified. Type
    variables ([Var _]) are never incompatible since they can unify with

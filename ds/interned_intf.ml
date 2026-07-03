@@ -1,7 +1,7 @@
 open! Core
 
 module type Arg = sig
-  type t
+  type t [@@deriving sexp]
 
   include Hashable.S with type t := t
 end

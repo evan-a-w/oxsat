@@ -137,6 +137,7 @@ module Make (Term : Term) = struct
 
   type t =
     { ufds_var_by_term : int Term.Table.t
+    ; term_by_ufds_var : Term.t Int.Table.t
     ; ufdsu : Ufdsu.t
     ; atoms : Atom_data.t Atom.Table.t
     ; signature_to_canonical : Term.t Signature.Table.t
@@ -312,6 +313,7 @@ module Make (Term : Term) = struct
            register_term t ~decision_level ~atom ~term:arg));
       let ufds_var = Ufdsu.add t.ufdsu in
       Hashtbl.set t.ufds_var_by_term ~key:term ~data:ufds_var;
+      Hashtbl.set t.term_by_ufds_var ~key:ufds_var ~data:term;
       (match Term.split_function term with
        | None -> ()
        | Some (function_, args) ->
@@ -352,6 +354,7 @@ module Make (Term : Term) = struct
   let create ~atoms =
     let t =
       { ufds_var_by_term = Term.Table.create ()
+      ; term_by_ufds_var = Int.Table.create ()
       ; ufdsu = Ufdsu.create ()
       ; atoms = Atom.Table.create ()
       ; parents = Term.Table.create ()
@@ -367,6 +370,12 @@ module Make (Term : Term) = struct
   ;;
 
   let add_atom t ~atom = register_atom t ~atom
+
+  let canonical_term t ~term =
+    Hashtbl.find_exn t.term_by_ufds_var (canonical_ufds_var t ~term)
+  ;;
+
+  let registered_terms t = Hashtbl.keys t.ufds_var_by_term
 
   let assert_true_atom t ~decision_level ~(atom : Atom.t) =
     match Hashtbl.find_or_null t.atoms atom with

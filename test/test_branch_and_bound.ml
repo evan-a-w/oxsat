@@ -189,7 +189,10 @@ let solver_is_int tvar : Formula.t =
 ;;
 
 let print_result (result : Solver_result.t) =
-  print_s [%sexp (result : Solver_result.t)]
+  match result with
+  | Unsat _ -> print_s [%sexp (result : Solver_result.t)]
+  | Sat { tvar_assignments } ->
+    print_s [%message "Sat" (tvar_assignments : Tvar_assignment.t Tvar.Map.t)]
 ;;
 
 let assert_ok solver formula =
@@ -204,7 +207,19 @@ let%expect_test "solver: satisfiable linear system" =
   assert_ok solver (solver_ge x 0);
   assert_ok solver (solver_le y 5);
   print_result (Solver.solve solver);
-  [%expect {| (Sat (assignments (() (false) (true) (true) (true)))) |}]
+  [%expect
+    {|
+    (Sat
+     (tvar_assignments
+      ((x
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ())))
+       (y
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ()))))))
+    |}]
 ;;
 
 let%expect_test "solver: x <= 3 and x >= 5 is unsat via the simplex theory" =
@@ -298,7 +313,15 @@ let%expect_test "solver: push/pop retracts a simplex conflict" =
   let solver = Solver.create () in
   assert_ok solver (solver_le x 3);
   print_result (Solver.solve solver);
-  [%expect {| (Sat (assignments (() (false) (true)))) |}];
+  [%expect
+    {|
+    (Sat
+     (tvar_assignments
+      ((x
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ()))))))
+    |}];
   Solver.push solver;
   assert_ok solver (solver_ge x 5);
   print_result (Solver.solve solver);
@@ -331,5 +354,13 @@ let%expect_test "solver: push/pop retracts a simplex conflict" =
     |}];
   Solver.pop solver;
   print_result (Solver.solve solver);
-  [%expect {| (Sat (assignments (() (false) (true) (false) (false)))) |}]
+  [%expect
+    {|
+    (Sat
+     (tvar_assignments
+      ((x
+        ((type_ ())
+         (numeric (((value ((num 3) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ()))))))
+    |}]
 ;;

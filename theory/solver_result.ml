@@ -9,6 +9,6 @@ module Core_step = struct
 end
 
 type t =
-  | Sat of { assignments : bool option array }
+  | Sat of { tvar_assignments : Tvar_assignment.t Tvar.Map.t }
   | Unsat of { core : Core_step.t list }
 [@@deriving sexp]

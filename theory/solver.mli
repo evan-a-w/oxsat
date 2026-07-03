@@ -40,10 +40,12 @@ val pop : t -> unit
 val stats : t -> Feel.Stats.t
 
 (** Checks satisfiability of all formulas asserted in currently active scopes.
-    [assumptions] are additional unit assumptions for this call only. On
-    [Unsat], [reason] is a [Formula.And] of the conflicting formulas, with
-    Tseitin auxiliary variables resolved back to the original [Formula.t] that
-    introduced them. *)
+    [assumptions] are additional unit assumptions for this call only. On [Sat],
+    [tvar_assignments] gives, for each [Tvar.t] known to some theory, whatever
+    that theory determined about it in this model (type, numeric value, and/or
+    EUF equivalence-class representative). On [Unsat], [reason] is a
+    [Formula.And] of the conflicting formulas, with Tseitin auxiliary variables
+    resolved back to the original [Formula.t] that introduced them. *)
 val solve
   :  ?time_bound:Feel.Solver.time_bound
   -> ?assumptions:int array

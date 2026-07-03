@@ -23,3 +23,10 @@ val undo : t -> to_decision_level_excl:int -> unit
     them is inconsistent, i.e. the SAT solver may learn the clause that at least
     one [(atom, not value)] must hold. *)
 val maybe_get_lemma : t -> [ `Consistent | `Lemma of (Atom.t * bool) list ]
+
+(** The solved simplex assignment for [tvar], if it has been registered (i.e.
+    appears in some asserted [`Le] atom). Only meaningful after
+    [maybe_get_lemma] has returned [`Consistent]. *)
+val assignment : t -> tvar:Tvar.t -> Simplex.Q_eps.t option
+
+val all_numeric_vars : t -> Tvar.t list

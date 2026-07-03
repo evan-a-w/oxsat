@@ -90,6 +90,7 @@ type t =
   ; uf : Uf_term.Uf.t
   ; tuf : Type_expr.Uf.t
   ; tt : Tvar_types.t
+  ; bb : Branch_and_bound.t
   ; encoding : Formula.Encoding.t
   ; mutable scopes : int list (* activation literals, innermost first *)
   ; formula_by_root_lit : Formula.t Int.Table.t
@@ -112,6 +113,7 @@ let create () =
     ; uf
     ; tuf
     ; tt
+    ; bb
     ; encoding
     ; scopes = []
     ; formula_by_root_lit = Int.Table.create ()
@@ -225,11 +227,46 @@ let make_unsat_core t (core_clauses : Feel.Sat_result.Core_clause.t list)
         |> Option.map ~f:(fun f -> Solver_result.Core_step.Asserted f)))
 ;;
 
+let euf_repr t ~(euf_terms : Uf_term.Set.t) tvar : Uf_term.t option =
+  let term : Uf_term.t = `Var tvar in
+  if not (Set.mem euf_terms term)
+  then None
+  else (
+    match Uf_term.Uf.canonical_term t.uf ~term with
+    | `Var v when Tvar.equal v tvar -> None
+    | repr -> Some repr)
+;;
+
+let tvar_assignments t : Tvar_assignment.t Tvar.Map.t =
+  let euf_terms = Uf_term.Uf.registered_terms t.uf |> Uf_term.Set.of_list in
+  let euf_tvars =
+    Set.to_list euf_terms
+    |> List.filter_map ~f:(function
+      | `Var tvar -> Some tvar
+      | `App _ -> None)
+  in
+  let all_tvars =
+    List.concat
+      [ Tvar_types.all_typed_vars t.tt
+      ; Branch_and_bound.all_numeric_vars t.bb
+      ; euf_tvars
+      ]
+    |> List.dedup_and_sort ~compare:[%compare: Tvar.t]
+  in
+  List.map all_tvars ~f:(fun tvar ->
+    ( tvar
+    , { Tvar_assignment.type_ = Tvar_types.get_type t.tt tvar
+      ; numeric = Branch_and_bound.assignment t.bb ~tvar
+      ; euf_repr = euf_repr t ~euf_terms tvar
+      } ))
+  |> Tvar.Map.of_alist_exn
+;;
+
 let solve ?time_bound ?(assumptions = [||]) t : Solver_result.t =
   let scope_assumptions = Array.of_list t.scopes in
   let assumptions = Array.append scope_assumptions assumptions in
   match Feel.Solver.solve ?time_bound ~assumptions t.solver with
-  | Sat { assignments } -> Sat { assignments }
+  | Sat { assignments = _ } -> Sat { tvar_assignments = tvar_assignments t }
   | Unsat { core } -> Unsat { core = make_unsat_core t core }
 ;;
 
