@@ -183,7 +183,19 @@ let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
     add_constraint t ~op:`Gt ~le ~c ~decision_level ~atom ~value
 ;;
 
+let maybe_rebuild_simplex t =
+  Simplex.maybe_rebuild t.simplex ~update:(fun ~old_var ~new_var ->
+    match Hashtbl.find t.tvar_by_simplex_var old_var with
+    | None -> ()
+    | Some tvar ->
+      Hashtbl.remove t.tvar_by_simplex_var old_var;
+      Hashtbl.set t.tvar_by_simplex_var ~key:new_var ~data:tvar;
+      Hashtbl.set t.simplex_var_by_tvar ~key:tvar ~data:new_var)
+;;
+
 let simplex_solve t =
+  maybe_rebuild_simplex t;
+  update_state_for_new_assignments t;
   let res = Simplex.solve t.simplex in
   update_state_for_new_assignments t;
   res
