@@ -1,3 +1,6 @@
+Rebuild when enough constraints killed
+
+First
 $ time dune exec --profile=release bench/feel_bench.exe -- -bench smt
 SMT solver benchmarks (LP, MILP, EUF): 
 LP feasible (n=10, m=30): Mean: 75.07 μs  StdDev: 938.80 ns  p50: 74.43 μs  p75: 76.39 μs  p90: 76.39 μs  p95: 76.39 μs  p99: 76.39 μs  (n=3)

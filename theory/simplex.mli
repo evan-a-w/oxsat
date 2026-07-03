@@ -71,3 +71,9 @@ val restore_assignments : t -> Snapshot.t -> unit
 
 val assignment : t -> var:int -> Q_eps.t
 val new_assignments : t -> Q_eps.t Int.Hash_queue.t
+
+(** If enough constraints have been tombstoned by [remove_constraint], rebuild
+    the tableau from scratch to reclaim space. For each decision var whose
+    internal id changed, calls [~update ~old_var ~new_var] so callers can update
+    any tables keyed on those ids. No-op when below the threshold. *)
+val maybe_rebuild : t -> update:(old_var:int -> new_var:int -> unit) -> unit
