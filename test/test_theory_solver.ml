@@ -9,46 +9,11 @@ let f arg : Uf_term.t = `App (~function_:(Tvar.of_string "f"), ~args:[ arg ])
 let eq a b : Formula.t = Atom (`Eq (a, b))
 let neq a b : Formula.t = Not (eq a b)
 
-(* Renders a [Uf_term.t] using variable/function names instead of raw interned
-   ints, for readable expect-test output. *)
-let rec sexp_of_term (term : Uf_term.t) : Sexp.t =
-  match term with
-  | `Var v -> List [ Atom "Var"; Atom (Tvar.to_string v) ]
-  | `App (~function_, ~args) ->
-    List
-      [ Atom "App"
-      ; Atom (Tvar.to_string function_)
-      ; List (List.map args ~f:sexp_of_term)
-      ]
-;;
-
-let sexp_of_atom = [%sexp_of: Atom.t]
-
-(* [Tvar.t]'s [Comparable.S]/[Hashable.S] machinery is derived from the
-   underlying interned int before [Tvar.sexp_of_t] overrides it to print the
-   string name, so [Tvar.Map.t]'s sexp shows raw ints. Render tvar keys (and any
-   embedded [Uf_term.t]s) with names instead, for readable expect output. *)
-let sexp_of_tvar_assignment ({ type_; numeric; euf_repr } : Tvar_assignment.t)
-  : Sexp.t
-  =
-  [%message
-    ""
-      (type_ : Type_expr.t option)
-      (numeric : Simplex.Q_eps.t option)
-      ~euf_repr:(Option.map euf_repr ~f:sexp_of_term : Sexp.t option)]
-;;
-
 let print_result (result : Solver_result.t) =
   match result with
   | Unsat _ -> print_s [%sexp (result : Solver_result.t)]
   | Sat { tvar_assignments } ->
-    let alist =
-      Map.to_alist tvar_assignments
-      |> List.map ~f:(fun (tvar, assignment) ->
-        Sexp.List
-          [ Atom (Tvar.to_string tvar); sexp_of_tvar_assignment assignment ])
-    in
-    print_s [%message "Sat" ~tvar_assignments:(alist : Sexp.t list)]
+    print_s [%message "Sat" (tvar_assignments : Tvar_assignment.t Tvar.Map.t)]
 ;;
 
 let print_feel_result (result : Feel.Sat_result.t) =
@@ -66,8 +31,8 @@ let assert_ok solver formula =
 let%expect_test "Atom.normalize orders Eq sides canonically" =
   let a = `Eq (x, y) in
   let b = `Eq (y, x) in
-  print_s [%sexp (sexp_of_atom (Atom.normalize a) : Sexp.t)];
-  print_s [%sexp (sexp_of_atom (Atom.normalize b) : Sexp.t)];
+  print_s [%sexp (Atom.normalize a : Atom.t)];
+  print_s [%sexp (Atom.normalize b : Atom.t)];
   [%expect {|
     (Eq ((Var x) (Var y)))
     (Eq ((Var x) (Var y)))
@@ -76,8 +41,8 @@ let%expect_test "Atom.normalize orders Eq sides canonically" =
 
 let%expect_test "Term/Atom sexp round trip" =
   let term : Uf_term.t = f x in
-  print_s [%sexp (sexp_of_term term : Sexp.t)];
-  [%expect {| (App f ((Var x))) |}]
+  print_s [%sexp (term : Uf_term.t)];
+  [%expect {| (App ((~function_ f) (~args ((Var x))))) |}]
 ;;
 
 (* ----- Formula / Tseitin correctness ----- *)
