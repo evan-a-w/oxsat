@@ -33,7 +33,6 @@ module Pool = struct
   let outstanding t = raw_pool_outstanding (raw t)
 end
 
-type 'a pool = 'a Pool.t
 type 'a t = int
 
 let create_pool = Pool.create
