@@ -9,6 +9,7 @@ include struct
   module Pool = Pool
   module Pool_intf = Pool_intf
   module Poolable = Poolable
+  module Ext = Ext
   module Local_ref = Local_ref
   module Ptr = Ptr
   module Rb = Rb

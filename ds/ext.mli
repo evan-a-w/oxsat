@@ -8,12 +8,16 @@ module Pool : sig
   val chunk_size : _ t -> int
   val outstanding : _ t -> int
   val create : ?chunk_size:int -> 'a Typerep.t -> default:'a -> 'a t
+  val create_unchecked : ?chunk_size:int -> default:'a -> unit -> 'a t
 end
 
+type 'a pool = 'a Pool.t
 type 'a t
 
-val alloc : 'a Pool.t -> 'a t
-val alloc_set : 'a Pool.t -> 'a @ local -> 'a t
+val create_pool : ?chunk_size:int -> 'a Typerep.t -> default:'a -> 'a pool
+val create_pool_unchecked : ?chunk_size:int -> default:'a -> unit -> 'a pool
+val alloc : 'a pool -> 'a t
+val alloc_set : 'a pool -> 'a @ local -> 'a t
 val free : 'a t -> unit
 val set : 'a t -> 'a @ local -> unit
 val get : 'a t -> 'a

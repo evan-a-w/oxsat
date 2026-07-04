@@ -100,15 +100,15 @@ static ext_slot *slot_of_value(value v)
 static void register_roots(value block, mlsize_t scannable_wosize)
 {
   for (mlsize_t i = 0; i < scannable_wosize; i++) {
-    caml_register_global_root((value *)&Field(block, i));
+    caml_register_generational_global_root((value *)&Field(block, i));
   }
 }
 
 static void remove_roots(value block, mlsize_t scannable_wosize)
 {
   for (mlsize_t i = 0; i < scannable_wosize; i++) {
-    Field(block, i) = Val_unit;
-    caml_remove_global_root((value *)&Field(block, i));
+    caml_modify_generational_global_root((value *)&Field(block, i), Val_unit);
+    caml_remove_generational_global_root((value *)&Field(block, i));
   }
 }
 
@@ -168,8 +168,15 @@ static void copy_value_to_slot(ext_pool *pool, ext_slot *slot, value source)
     return;
   }
 
-  memcpy(Op_val(slot->value), Op_val(source),
-         Bsize_wsize(pool->allocated_wosize));
+  for (mlsize_t i = 0; i < pool->scannable_wosize; i++) {
+    caml_modify_generational_global_root((value *)&Field(slot->value, i),
+                                         Field(source, i));
+  }
+  if (pool->allocated_wosize > pool->scannable_wosize) {
+    memcpy(Op_val(slot->value) + pool->scannable_wosize,
+           Op_val(source) + pool->scannable_wosize,
+           Bsize_wsize(pool->allocated_wosize - pool->scannable_wosize));
+  }
 }
 
 static void allocate_chunk(ext_pool *pool)
@@ -333,7 +340,8 @@ CAMLprim value oxsat_ext_free(value v_slot)
 
   if (!pool->is_immediate) {
     for (mlsize_t i = 0; i < pool->scannable_wosize; i++) {
-      Field(slot->value, i) = Val_unit;
+      caml_modify_generational_global_root((value *)&Field(slot->value, i),
+                                           Val_unit);
     }
   }
   slot->allocated = 0;

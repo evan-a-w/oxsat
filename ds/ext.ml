@@ -22,6 +22,10 @@ module Pool = struct
     { raw = raw_create_pool chunk_size default; typerep; chunk_size }
   ;;
 
+  let create_unchecked ?chunk_size ~default () =
+    create ?chunk_size (Obj.magic Typerep.Unit) ~default
+  ;;
+
   let raw t =
     if Nativeint.equal t.raw Nativeint.zero
     then failwith "Ext.Pool: pool has been destroyed";
@@ -33,9 +37,11 @@ module Pool = struct
   let outstanding t = raw_pool_outstanding (raw t)
 end
 
+type 'a pool = 'a Pool.t
 type 'a t = int
 
 let create_pool = Pool.create
+let create_pool_unchecked = Pool.create_unchecked
 let alloc pool = raw_alloc (Pool.raw pool)
 
 let alloc_set pool (local_ value) =
@@ -91,4 +97,27 @@ let%expect_test "external block can be mutated and roots values" =
   print_s [%sexp (value.i : int), (String.length value.s : int)];
   [%expect {|
     (1 1000) |}]
+;;
+
+let%expect_test "stress alloc free gc" =
+  let pool =
+    create_pool
+      ~chunk_size:16
+      [%typerep_of: Test_record.t]
+      ~default:{ Test_record.i = 0; s = "default" }
+  in
+  for i = 0 to 10_000 do
+    let ext =
+      alloc_set
+        pool
+        (stack_ { Test_record.i; s = Int.to_string i } : Test_record.t)
+    in
+    let value : Test_record.t = get ext in
+    value.i <- value.i + 1;
+    if i % 3 = 0 then Gc.minor ();
+    free ext
+  done;
+  Gc.full_major ();
+  print_s [%sexp (Pool.outstanding pool : int)];
+  [%expect {| 0 |}]
 ;;
