@@ -27,6 +27,7 @@ end
 
 type t =
   { simplex_var_by_tvar : int Tvar.Table.t
+  ; tvars_to_check_for_equality : Tvar.t Vec.Value.t
   ; tvar_by_simplex_var : Tvar.t Int.Table.t
   ; integral_tvars : Tvar.Hash_set.t
   ; (* The [`Type_eq] atom (and its value) that most recently made a tvar
@@ -47,7 +48,12 @@ let create () : t =
   ; simplex = Simplex.create ()
   ; trail = Vec.Value.create ()
   ; atom_for_constraint = Simplex.Constraint.Table.create ()
+  ; tvars_to_check_for_equality = Vec.Value.create ()
   }
+;;
+
+let add_tvar_to_check_for_equality t ~tvar =
+  Vec.Value.push t.tvars_to_check_for_equality tvar
 ;;
 
 (* Brings [non_integral_ints] membership for [tvar] in line with whether it's

@@ -29,4 +29,6 @@ val maybe_get_lemma : t -> [ `Consistent | `Lemma of (Atom.t * bool) list ]
     [maybe_get_lemma] has returned [`Consistent]. *)
 val assignment : t -> tvar:Tvar.t -> Simplex.Q_eps.t option
 
+(* we will try to propagate equalities for such variables *)
+val add_tvar_to_check_for_equality : t -> tvar:Tvar.t -> unit
 val all_numeric_vars : t -> Tvar.t list
