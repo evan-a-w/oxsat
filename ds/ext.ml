@@ -37,11 +37,8 @@ module Pool = struct
   let outstanding t = raw_pool_outstanding (raw t)
 end
 
-type 'a pool = 'a Pool.t
 type 'a t = int
 
-let create_pool = Pool.create
-let create_pool_unchecked = Pool.create_unchecked
 let alloc pool = raw_alloc (Pool.raw pool)
 
 let alloc_set pool (local_ value) =
@@ -56,7 +53,7 @@ let get = raw_get
 let is_freed = raw_is_freed
 
 let%expect_test "alloc get set free" =
-  let pool = create_pool ~chunk_size:2 [%typerep_of: int] ~default:0 in
+  let pool = Pool.create ~chunk_size:2 [%typerep_of: int] ~default:0 in
   let a = alloc_set pool 1 in
   let b = alloc pool in
   set b 2;
@@ -83,7 +80,7 @@ end
 
 let%expect_test "external block can be mutated and roots values" =
   let pool =
-    create_pool
+    Pool.create
       ~chunk_size:1
       [%typerep_of: Test_record.t]
       ~default:{ Test_record.i = 0; s = "default" }
@@ -101,7 +98,7 @@ let%expect_test "external block can be mutated and roots values" =
 
 let%expect_test "stress alloc free gc" =
   let pool =
-    create_pool
+    Pool.create
       ~chunk_size:16
       [%typerep_of: Test_record.t]
       ~default:{ Test_record.i = 0; s = "default" }

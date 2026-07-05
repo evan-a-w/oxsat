@@ -34,14 +34,14 @@ end
 type t =
   { types : Type_expr.t Tvar.Table.t
   ; trail : Trail_entry.t Ext.t Vec.Value.t
-  ; trail_entry_pool : Trail_entry.t Ext.pool
+  ; trail_entry_pool : Trail_entry.t Ext.Pool.t
   ; mutable conflict : (Atom.t * Atom.t) option
   }
 
 let create () =
   { types = Tvar.Table.create ()
   ; trail = Vec.Value.create ()
-  ; trail_entry_pool = Ext.create_pool_unchecked ~default:Trail_entry.default ()
+  ; trail_entry_pool = Ext.Pool.create_unchecked ~default:Trail_entry.default ()
   ; conflict = None
   }
 ;;
