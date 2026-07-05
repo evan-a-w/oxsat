@@ -4,6 +4,9 @@
  (preprocess
   (pps ppx_jane))
  (inline_tests)
- (libraries core core_unix unboxed)
+ (libraries core core_unix typerep unboxed)
+ (foreign_stubs
+  (language c)
+  (names ext_stubs))
  (flags
   (:standard -extension-universe beta)))

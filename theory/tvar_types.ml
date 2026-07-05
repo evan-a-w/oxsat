@@ -14,21 +14,36 @@ end
 
 let has_type var type_expr : Atom.t = `Type_eq (Type_expr.Var var, type_expr)
 
-type trail_entry =
-  { decision_level : int
-  ; var : Tvar.t
-  ; old_type : Type_expr.t option
-  ; caused_conflict : bool
-  }
+module Trail_entry = struct
+  type t =
+    { decision_level : int
+    ; var : Tvar.t
+    ; old_type : Type_expr.t option
+    ; caused_conflict : bool
+    }
+
+  let default =
+    { decision_level = 0
+    ; var = Tvar.of_string ""
+    ; old_type = None
+    ; caused_conflict = false
+    }
+  ;;
+end
 
 type t =
   { types : Type_expr.t Tvar.Table.t
-  ; trail : trail_entry Vec.Value.t
+  ; trail : Trail_entry.t Ext.t Vec.Value.t
+  ; trail_entry_pool : Trail_entry.t Ext.Pool.t
   ; mutable conflict : (Atom.t * Atom.t) option
   }
 
 let create () =
-  { types = Tvar.Table.create (); trail = Vec.Value.create (); conflict = None }
+  { types = Tvar.Table.create ()
+  ; trail = Vec.Value.create ()
+  ; trail_entry_pool = Ext.Pool.create_unchecked ~default:Trail_entry.default ()
+  ; conflict = None
+  }
 ;;
 
 let get_type t var = Hashtbl.find t.types var
@@ -64,7 +79,12 @@ let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
         else false
       | _ -> false
     in
-    Vec.Value.push t.trail { decision_level; var; old_type; caused_conflict };
+    Vec.Value.push
+      t.trail
+      (Ext.alloc_set
+         t.trail_entry_pool
+         (stack_ { decision_level; var; old_type; caused_conflict }
+          : Trail_entry.t));
     Hashtbl.set t.types ~key:var ~data:type_expr
   | true, `Type_eq (_, _) | false, `Type_eq _ -> ()
 ;;
@@ -78,12 +98,15 @@ let maybe_get_lemma t =
 let undo t ~to_decision_level_excl =
   let rec go () =
     match Vec.Value.last t.trail with
-    | Some entry when entry.decision_level > to_decision_level_excl ->
-      ignore (Vec.Value.pop_exn t.trail : trail_entry);
+    | Some entry_ext
+      when (Ext.get entry_ext).decision_level > to_decision_level_excl ->
+      let entry_ext = Vec.Value.pop_exn t.trail in
+      let entry = Ext.get entry_ext in
       if entry.caused_conflict then t.conflict <- None;
       (match entry.old_type with
        | None -> Hashtbl.remove t.types entry.var
        | Some type_expr -> Hashtbl.set t.types ~key:entry.var ~data:type_expr);
+      Ext.free entry_ext;
       go ()
     | None | Some _ -> ()
   in

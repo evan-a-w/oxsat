@@ -31,3 +31,7 @@ Types should typically be in a module like [Type] and be [Type.t], rather than [
 
 Only write comments for things that are truly hard to understand without them.
 Don't just restate things that can be intuited based on context, names, etc.
+
+If you see that I have changed a module, do not revert those changes, but apply
+the ideas elsewhere. For instance, I might change the API slightly to make it
+cleaner, or remove/reword comments, and you should respect that.
