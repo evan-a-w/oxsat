@@ -19,52 +19,6 @@ module Make (Term : Term) = struct
     include functor Hashable.Make
   end
 
-  module Atom_data = struct
-    type t =
-      { atom : Atom.t
-      ; mutable assignment : bool or_null [@compare.ignore]
-      }
-    [@@deriving hash, compare, sexp]
-  end
-
-  (* Justification for an edge in the [Explanation_forest]: either a directly
-     asserted equality atom, or a congruence step [f(args1) ~ f(args2)] that
-     reduces to pairwise equalities between corresponding arguments. *)
-  module Justification = struct
-    type t =
-      | Asserted of Atom.t
-      | Congruence of
-          { function_ : Tvar.t
-          ; args1 : Term.t list
-          ; args2 : Term.t list
-          }
-    [@@deriving sexp_of]
-  end
-
-  module Term_pair = struct
-    type t = Term.t * Term.t [@@deriving sexp, compare, hash]
-
-    include functor Hashable.Make
-  end
-
-  module Explanation_forest = struct
-    type t = (int * Justification.t) list Int.Table.t
-
-    let create () : t = Int.Table.create ()
-
-    let add_edge (t : t) ~x ~y ~justification =
-      Hashtbl.add_multi t ~key:x ~data:(y, justification);
-      Hashtbl.add_multi t ~key:y ~data:(x, justification)
-    ;;
-
-    let remove_edge (t : t) ~x ~y =
-      Hashtbl.remove_multi t x;
-      Hashtbl.remove_multi t y
-    ;;
-
-    let neighbors (t : t) x = Hashtbl.find_multi t x
-  end
-
   module Op = struct
     type t =
       | Var of Term.t
@@ -97,6 +51,51 @@ module Make (Term : Term) = struct
       end
     end)
 
+  module Atom_data = struct
+    type t =
+      { atom : Atom.t
+      ; id_a : G.Id.t
+      ; id_b : G.Id.t
+      ; mutable assignment : bool or_null [@compare.ignore]
+      }
+    [@@deriving hash, compare, sexp]
+  end
+
+  module Justification = struct
+    type t =
+      | Asserted of Atom.t
+      | Congruence of
+          { function_ : Tvar.t
+          ; args1 : G.Id.t list
+          ; args2 : G.Id.t list
+          }
+    [@@deriving sexp_of]
+  end
+
+  module Id_pair = struct
+    type t = G.Id.t * G.Id.t [@@deriving sexp, compare, hash]
+
+    include functor Hashable.Make
+  end
+
+  module Explanation_forest = struct
+    type t = (int * Justification.t) list Int.Table.t
+
+    let create () : t = Int.Table.create ()
+
+    let add_edge (t : t) ~x ~y ~justification =
+      Hashtbl.add_multi t ~key:x ~data:(y, justification);
+      Hashtbl.add_multi t ~key:y ~data:(x, justification)
+    ;;
+
+    let remove_edge (t : t) ~x ~y =
+      Hashtbl.remove_multi t x;
+      Hashtbl.remove_multi t y
+    ;;
+
+    let neighbors (t : t) x = Hashtbl.find_multi t x
+  end
+
   module Trail_entry = struct
     type t =
       | Truth of
@@ -123,6 +122,7 @@ module Make (Term : Term) = struct
   type t =
     { id_by_term : G.Id.t Term.Table.t
     ; term_by_id : Term.t G.Id.Table.t
+    ; node_by_id : G.Node.t G.Id.Table.t
     ; egraph : G.t
     ; atoms : Atom_data.t Atom.Table.t
     ; explanation_forest : Explanation_forest.t
@@ -130,10 +130,6 @@ module Make (Term : Term) = struct
     ; falsehoods : Atom.Hash_set.t
     ; current_decision_level : int ref
     }
-
-  let canonical_id t ~term =
-    G.canonical t.egraph (Hashtbl.find_exn t.id_by_term term)
-  ;;
 
   let add_explanation_edge t ~x ~y ~justification ~decision_level =
     Explanation_forest.add_edge t.explanation_forest ~x ~y ~justification;
@@ -161,17 +157,16 @@ module Make (Term : Term) = struct
         undo t ~to_decision_level_excl)
   ;;
 
-  let rec register_term t ~(term : Term.t) =
+  let rec register_term t ~(term : Term.t) : G.Id.t =
     match Hashtbl.find t.id_by_term term with
-    | Some _ -> ()
+    | Some id -> id
     | None ->
       let op, children =
         match Term.split_function term with
         | None -> Op.Var term, []
         | Some (function_, args) ->
-          List.iter args ~f:(fun arg -> register_term t ~term:arg);
           let children =
-            List.map args ~f:(fun arg -> Hashtbl.find_exn t.id_by_term arg)
+            List.map args ~f:(fun arg -> register_term t ~term:arg)
           in
           Op.App function_, children
       in
@@ -179,45 +174,46 @@ module Make (Term : Term) = struct
       let id = G.add_fresh t.egraph node in
       Hashtbl.set t.id_by_term ~key:term ~data:id;
       Hashtbl.set t.term_by_id ~key:id ~data:term;
-      (* If a congruent class already exists (because children are merged),
-         merge with it so equivalence queries stay correct and explanation edges
-         are recorded. *)
+      Hashtbl.set t.node_by_id ~key:id ~data:node;
       (match G.lookup t.egraph node with
        | None -> assert false
        | Some existing_id when G.Id.equal existing_id id -> ()
        | Some existing_id ->
          let dl = !(t.current_decision_level) in
          G.set_on_merge t.egraph (fun ~winner ~loser ->
-           let t1 = Hashtbl.find_exn t.term_by_id winner in
-           let t2 = Hashtbl.find_exn t.term_by_id loser in
-           match Term.split_function t1, Term.split_function t2 with
-           | Some (function_, args1), Some (_, args2) ->
+           let n1 = Hashtbl.find_exn t.node_by_id winner in
+           let n2 = Hashtbl.find_exn t.node_by_id loser in
+           match n1.op, n2.op with
+           | Op.App function_, Op.App _ ->
              add_explanation_edge
                t
                ~x:(G.Id.to_int winner)
                ~y:(G.Id.to_int loser)
                ~justification:
-                 (Justification.Congruence { function_; args1; args2 })
+                 (Justification.Congruence
+                    { function_; args1 = n1.children; args2 = n2.children })
                ~decision_level:dl
            | _ -> assert false);
          G.set_decision_level t.egraph dl;
          G.merge t.egraph id existing_id;
          G.rebuild t.egraph;
-         G.set_on_merge t.egraph (fun ~winner:_ ~loser:_ -> ()))
+         G.set_on_merge t.egraph (fun ~winner:_ ~loser:_ -> ()));
+      id
   ;;
 
   let register_atom t ~(atom : Atom.t) =
     let atom = Atom.normalize atom in
     let (`Eq (a, b)) = atom in
-    register_term t ~term:a;
-    register_term t ~term:b;
-    Hashtbl.set t.atoms ~key:atom ~data:{ atom; assignment = Null }
+    let id_a = register_term t ~term:a in
+    let id_b = register_term t ~term:b in
+    Hashtbl.set t.atoms ~key:atom ~data:{ atom; id_a; id_b; assignment = Null }
   ;;
 
   let create ~atoms =
     let t =
       { id_by_term = Term.Table.create ()
       ; term_by_id = G.Id.Table.create ()
+      ; node_by_id = G.Id.Table.create ()
       ; egraph = G.create ()
       ; atoms = Atom.Table.create ()
       ; explanation_forest = Explanation_forest.create ()
@@ -233,7 +229,8 @@ module Make (Term : Term) = struct
   let add_atom t ~atom = register_atom t ~atom
 
   let canonical_term t ~term =
-    let cid = canonical_id t ~term in
+    let id = Hashtbl.find_exn t.id_by_term term in
+    let cid = G.canonical t.egraph id in
     Hashtbl.find_exn t.term_by_id cid
   ;;
 
@@ -246,13 +243,8 @@ module Make (Term : Term) = struct
       t.current_decision_level := decision_level;
       atom_data.assignment <- This true;
       t.trail := Trail_entry.Truth { atom; decision_level } :: !(t.trail);
-      let (`Eq (a, b)) = atom in
-      let id_a = Hashtbl.find_exn t.id_by_term a in
-      let id_b = Hashtbl.find_exn t.id_by_term b in
-      (* Use a ref to distinguish the direct (asserted) merge from congruence
-         merges triggered by rebuild. The first callback invocation consumes the
-         ref; subsequent ones (during rebuild) reconstruct a Congruence
-         justification from the merged classes. *)
+      let id_a = atom_data.id_a in
+      let id_b = atom_data.id_b in
       let first_merge = ref (Some atom) in
       G.set_on_merge t.egraph (fun ~winner ~loser ->
         let justification =
@@ -261,11 +253,12 @@ module Make (Term : Term) = struct
             first_merge := None;
             Justification.Asserted asserted_atom
           | None ->
-            let t1 = Hashtbl.find_exn t.term_by_id winner in
-            let t2 = Hashtbl.find_exn t.term_by_id loser in
-            (match Term.split_function t1, Term.split_function t2 with
-             | Some (function_, args1), Some (_, args2) ->
-               Justification.Congruence { function_; args1; args2 }
+            let n1 = Hashtbl.find_exn t.node_by_id winner in
+            let n2 = Hashtbl.find_exn t.node_by_id loser in
+            (match n1.op, n2.op with
+             | Op.App function_, Op.App _ ->
+               Justification.Congruence
+                 { function_; args1 = n1.children; args2 = n2.children }
              | _ -> assert false)
         in
         add_explanation_edge
@@ -337,9 +330,9 @@ module Make (Term : Term) = struct
       build [] to_
   ;;
 
-  let rec explain t ~term1 ~term2 ~seen ~facts =
-    let v1 = G.Id.to_int (Hashtbl.find_exn t.id_by_term term1) in
-    let v2 = G.Id.to_int (Hashtbl.find_exn t.id_by_term term2) in
+  let rec explain t ~(id1 : G.Id.t) ~(id2 : G.Id.t) ~seen ~facts =
+    let v1 = G.Id.to_int id1 in
+    let v2 = G.Id.to_int id2 in
     match v1 = v2 with
     | true -> ()
     | false ->
@@ -348,16 +341,14 @@ module Make (Term : Term) = struct
         | Justification.Asserted atom -> Hash_set.add facts atom
         | Justification.Congruence { function_ = _; args1; args2 } ->
           List.iter2_exn args1 args2 ~f:(fun a b ->
-            let key : Term_pair.t =
-              match Ordering.of_int ([%compare: Term.t] a b) with
-              | Equal | Less -> a, b
-              | Greater -> b, a
+            let key : Id_pair.t =
+              if G.Id.to_int a <= G.Id.to_int b then a, b else b, a
             in
             match Hash_set.mem seen key with
             | true -> ()
             | false ->
               Hash_set.add seen key;
-              explain t ~term1:a ~term2:b ~seen ~facts))
+              explain t ~id1:a ~id2:b ~seen ~facts))
   ;;
 
   let build_lemma t ~(main_literal : Atom.t * bool) ~(facts : Atom.Hash_set.t) =
@@ -375,75 +366,68 @@ module Make (Term : Term) = struct
 
   let maybe_get_lemma t =
     let find_conflict () =
-      Hash_set.to_list t.falsehoods
-      |> List.sort ~compare:Atom.compare
-      |> List.find ~f:(fun atom ->
-        let (`Eq (a, b)) = atom in
-        G.equivalent
-          t.egraph
-          (Hashtbl.find_exn t.id_by_term a)
-          (Hashtbl.find_exn t.id_by_term b))
+      Hash_set.fold t.falsehoods ~init:None ~f:(fun acc atom ->
+        match acc with
+        | Some _ -> acc
+        | None ->
+          let data = Hashtbl.find_exn t.atoms atom in
+          if G.equivalent t.egraph data.id_a data.id_b then Some atom else None)
     in
     let find_propagation () =
-      let false_signatures =
-        Hash_set.to_list t.falsehoods
-        |> List.sort ~compare:Atom.compare
-        |> List.map ~f:(fun atom ->
-          let (`Eq (x, y)) = atom in
-          atom, (canonical_id t ~term:x, canonical_id t ~term:y))
+      let false_sigs =
+        Hash_set.fold t.falsehoods ~init:[] ~f:(fun acc atom ->
+          let data = Hashtbl.find_exn t.atoms atom in
+          ( atom
+          , (G.canonical t.egraph data.id_a, G.canonical t.egraph data.id_b) )
+          :: acc)
       in
-      Hashtbl.data t.atoms
-      |> List.sort ~compare:(fun d1 d2 -> Atom.compare d1.atom d2.atom)
-      |> List.find_map ~f:(fun atom_data ->
-        match atom_data.assignment with
-        | This _ -> None
-        | Null ->
-          let (`Eq (a, b)) = atom_data.atom in
-          let ca = canonical_id t ~term:a in
-          let cb = canonical_id t ~term:b in
-          (match G.Id.equal ca cb with
-           | true -> Some (`Propagate_true atom_data)
-           | false ->
-             List.find_map false_signatures ~f:(fun (false_atom, (cx, cy)) ->
-               match
-                 (G.Id.equal ca cx && G.Id.equal cb cy)
-                 || (G.Id.equal ca cy && G.Id.equal cb cx)
-               with
-               | true -> Some (`Propagate_false (atom_data, false_atom))
-               | false -> None)))
+      Hashtbl.fold t.atoms ~init:None ~f:(fun ~key:_ ~data:atom_data acc ->
+        match acc with
+        | Some _ -> acc
+        | None ->
+          (match atom_data.assignment with
+           | This _ -> None
+           | Null ->
+             let ca = G.canonical t.egraph atom_data.id_a in
+             let cb = G.canonical t.egraph atom_data.id_b in
+             (match G.Id.equal ca cb with
+              | true -> Some (`Propagate_true atom_data)
+              | false ->
+                List.find_map false_sigs ~f:(fun (false_atom, (cx, cy)) ->
+                  if (G.Id.equal ca cx && G.Id.equal cb cy)
+                     || (G.Id.equal ca cy && G.Id.equal cb cx)
+                  then Some (`Propagate_false (atom_data, false_atom))
+                  else None))))
     in
     match find_conflict () with
     | Some atom ->
-      let (`Eq (a, b)) = atom in
       let atom_data = Hashtbl.find_exn t.atoms atom in
       let facts = Atom.Hash_set.create () in
-      let seen = Term_pair.Hash_set.create () in
-      explain t ~term1:a ~term2:b ~seen ~facts;
+      let seen = Id_pair.Hash_set.create () in
+      explain t ~id1:atom_data.id_a ~id2:atom_data.id_b ~seen ~facts;
       build_lemma t ~main_literal:(atom_data.atom, true) ~facts
     | None ->
       (match find_propagation () with
        | None -> `Consistent
        | Some (`Propagate_true atom_data) ->
-         let (`Eq (a, b)) = atom_data.atom in
          let facts = Atom.Hash_set.create () in
-         let seen = Term_pair.Hash_set.create () in
-         explain t ~term1:a ~term2:b ~seen ~facts;
+         let seen = Id_pair.Hash_set.create () in
+         explain t ~id1:atom_data.id_a ~id2:atom_data.id_b ~seen ~facts;
          build_lemma t ~main_literal:(atom_data.atom, true) ~facts
        | Some (`Propagate_false (atom_data, false_atom)) ->
-         let (`Eq (a, b)) = atom_data.atom in
-         let (`Eq (x, y)) = false_atom in
          let facts = Atom.Hash_set.create () in
          Hash_set.add facts false_atom;
-         let seen = Term_pair.Hash_set.create () in
-         let ca = canonical_id t ~term:a in
-         let cx = canonical_id t ~term:x in
+         let seen = Id_pair.Hash_set.create () in
+         let false_data = Hashtbl.find_exn t.atoms false_atom in
+         let ca = G.canonical t.egraph atom_data.id_a in
+         let cx = G.canonical t.egraph false_data.id_a in
          (match G.Id.equal ca cx with
           | true ->
-            explain t ~term1:a ~term2:x ~seen ~facts;
-            explain t ~term1:b ~term2:y ~seen ~facts
+            explain t ~id1:atom_data.id_a ~id2:false_data.id_a ~seen ~facts;
+            explain t ~id1:atom_data.id_b ~id2:false_data.id_b ~seen ~facts
           | false ->
-            explain t ~term1:a ~term2:y ~seen ~facts;
-            explain t ~term1:b ~term2:x ~seen ~facts);
+            explain t ~id1:atom_data.id_a ~id2:false_data.id_b ~seen ~facts;
+            explain t ~id1:atom_data.id_b ~id2:false_data.id_a ~seen ~facts);
          build_lemma t ~main_literal:(atom_data.atom, false) ~facts)
   ;;
 end
