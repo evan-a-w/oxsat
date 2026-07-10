@@ -4,6 +4,6 @@
  (preprocess
   (pps ppx_jane ppx_optional))
  (inline_tests)
- (libraries core core_unix ds unboxed feel)
+ (libraries core core_unix ds unboxed feel egx)
  (flags
   (:standard -extension-universe beta)))

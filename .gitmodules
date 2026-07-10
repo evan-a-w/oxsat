@@ -1,0 +1,3 @@
+[submodule "egx"]
+	path = egx
+	url = git@github.com:/evan-a-w/egx
