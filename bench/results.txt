@@ -544,3 +544,14 @@ FACTOR_1234321: Mean: 95.87 ms  StdDev: 0.00 ns  p50: 95.87 ms  p75: 95.87 ms  p
 FACTOR_1235321: Mean: 91.99 ms  StdDev: 0.00 ns  p50: 91.99 ms  p75: 91.99 ms  p90: 91.99 ms  p95: 91.99 ms  p99: 91.99 ms  (n=1)
 FAIL_EG: Mean: 9.88 ms  StdDev: 0.00 ns  p50: 9.88 ms  p75: 9.88 ms  p90: 9.88 ms  p95: 9.88 ms  p99: 9.88 ms  (n=1)
 SUBSETS_100: Mean: 472.53 ms  StdDev: 0.00 ns  p50: 472.53 ms  p75: 472.53 ms  p90: 472.53 ms  p95: 472.53 ms  p99: 472.53 ms  (n=1)
+
+
+Splice trick for egx parent sets: replace Hash_set with circular linked list, O(1) merge via splice
+----------------------------------------------------------------------------------------------------
+
+$ dune exec --profile=release bench/feel_bench.exe -- -bench smt -min-iterations 3 -max-iterations 10
+EUF chain UNSAT (n=50): 113.20 μs
+EUF chain UNSAT (n=200): 509.87 μs
+EUF chain UNSAT (n=1000): 4.42 ms  (was 4.52 ms; target 2.46 ms)
+EUF two-group SAT (n=50): 206.87 μs
+EUF two-group SAT (n=200): 672.10 μs
