@@ -37,4 +37,4 @@ type _ t =
 type any = [ `Boolean | `Uf | `Type | `La | `Term | `Atom ] t
 [@@deriving sexp, compare, hash, equal]
 
-module Uf : Uninterpreted_functions_intf.S with type Term.t = [ `Uf ] t
+module Uf : Uninterpreted_functions_intf.S with type Term.t = [ `Uf | `Term ] t
