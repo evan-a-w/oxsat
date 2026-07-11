@@ -12,11 +12,6 @@ module Formula_with_no_shared_theories = struct
   [@@deriving sexp]
 end
 
-(* [shared_tvars_in_order]/[atom_to_shared_tvar]/[fresh_tvar] are scaffolding
-   for a not-yet-implemented feature: abstracting shared theory subterms (e.g.
-   repeated compound [Type_app]/[App] nodes) into fresh [Tvar.t]s so different
-   theories can refer to the same subterm consistently. [Solver] currently
-   ignores [shared_tvars_in_order] entirely, so this is unused for now. *)
 type t =
   { mutable next_var : int
   ; mutable next_tvar : int
@@ -145,10 +140,6 @@ let rec literal_of t ~clauses ~(formula : Formula_with_no_shared_theories.t)
     d
 ;;
 
-(* ----- Elaboration of [Formula.t] (rich, GADT-tagged terms) into
-   [Formula_with_no_shared_theories.t] (flat propositional structure over theory
-   [Atom.t]s). ----- *)
-
 (* [Formula.t]'s type parameter is a phantom tag, erased at runtime, so we can't
    dispatch on it directly; instead we classify a node by its outermost
    constructor, which unambiguously tells us which theory (if any) it belongs to
@@ -165,7 +156,9 @@ end
 let shape_of (type a) (formula : a Formula.t) : Shape.t =
   match formula with
   | Var v -> Var v
-  | Eq (_, _) -> Bool (* placeholder; [Eq] is resolved by its arguments *)
+  | Eq (_, _) ->
+    Bool
+    (* unreachable: [shape_of] is only ever called on [Eq]'s own arguments *)
   | True | False | Not _ | And _ | Or _ -> Bool
   | App (_, _) -> Uf
   | Bool | Int | Float | Type
@@ -320,9 +313,6 @@ and neq_formula_of
                 ~f:(fun atom -> Formula_with_no_shared_theories.Atom atom)))
       ]
 ;;
-
-(* ----- Reconstruction of [Formula.t] from [Atom.t], for surfacing atoms (e.g.
-   in unsat-core reasons) back as formulas. ----- *)
 
 let rec uf_term_to_formula : Uf_term.t -> [> `Uf ] Formula.t = function
   | `Var v -> Var v
