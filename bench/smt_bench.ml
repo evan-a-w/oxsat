@@ -11,7 +11,8 @@ end
 let solve_instance (inst : Instance.t) =
   let solver = Solver.create () in
   List.iter inst.formulas ~f:(fun f ->
-    ignore (Solver.assert_formula solver f : [ `Ok | `Unsat of _ ]));
+    ignore
+      (Or_error.ok_exn (Solver.assert_formula solver f) : [ `Ok | `Unsat of _ ]));
   ignore (Solver.solve solver : Solver_result.t)
 ;;
 

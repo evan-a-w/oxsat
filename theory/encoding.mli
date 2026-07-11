@@ -34,8 +34,12 @@ val new_shared_tvars_since : t -> checkpoint:Checkpoint.t -> Tvar.t list
     satisfying assignment of the clauses makes [formula] true. Fresh Tseitin
     variables and atom SAT variables are allocated from [encoding] as needed;
     reusing an [Encoding.t] across multiple calls keeps atom-to-variable
-    assignments consistent. *)
-val encode : t -> formula:[> `Boolean ] Formula.t -> int array list
+    assignments consistent.
+
+    Returns an [Error] if [formula] is ill-formed, e.g. an [Eq] or [La_compare]
+    whose arguments don't agree on which theory they belong to, or a [Type_of]
+    applied to a non-variable term. *)
+val encode : t -> formula:[> `Boolean ] Formula.t -> int array list Or_error.t
 
 (** Reconstructs a [Formula.t] representing [atom], for surfacing atoms (e.g.
     unsat-core reasons) back as formulas. *)

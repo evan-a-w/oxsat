@@ -27,7 +27,7 @@ let var v = Linear_expr.var v
 let sum exprs = List.fold exprs ~init:Linear_expr.zero ~f:Linear_expr.( + )
 
 let assert_ok solver formula =
-  match Theory.Solver.assert_formula solver formula with
+  match Or_error.ok_exn (Theory.Solver.assert_formula solver formula) with
   | `Ok -> ()
   | `Unsat _ -> failwith "unexpectedly unsat at assert time"
 ;;

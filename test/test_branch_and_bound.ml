@@ -196,7 +196,7 @@ let print_result (result : Solver_result.t) =
 ;;
 
 let assert_ok solver formula =
-  match Solver.assert_formula solver formula with
+  match Or_error.ok_exn (Solver.assert_formula solver formula) with
   | `Ok -> ()
   | `Unsat _ -> print_endline "UNSAT (at assert time)"
 ;;

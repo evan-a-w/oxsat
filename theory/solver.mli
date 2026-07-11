@@ -21,11 +21,13 @@ val create : unit -> t
     Returns [`Unsat core] if this assertion makes the (currently active scopes
     of the) formula unsatisfiable at the SAT level independent of any future
     [solve] call -- in that case the offending clause was not enforced,
-    mirroring {!Feel.Solver.add_clause}. *)
+    mirroring {!Feel.Solver.add_clause}.
+
+    Returns an [Error] if [formula] is ill-formed (see {!Encoding.encode}). *)
 val assert_formula
   :  t
   -> Formula.any
-  -> [ `Ok | `Unsat of Feel.Sat_result.Core_clause.t list ]
+  -> [ `Ok | `Unsat of Feel.Sat_result.Core_clause.t list ] Or_error.t
 
 (** Opens a new assertion scope. Formulas asserted after [push] (until the
     matching [pop]) are only enforced while this scope is active. *)

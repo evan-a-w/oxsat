@@ -151,10 +151,10 @@ let guard_clauses ~activation clauses =
 ;;
 
 let assert_formula t (formula : Formula.any)
-  : [ `Ok | `Unsat of Feel.Sat_result.Core_clause.t list ]
+  : [ `Ok | `Unsat of Feel.Sat_result.Core_clause.t list ] Or_error.t
   =
   let checkpoint = Encoding.checkpoint t.encoding in
-  let clauses = Encoding.encode t.encoding ~formula in
+  let%bind.Or_error clauses = Encoding.encode t.encoding ~formula in
   let root_lit = (List.last_exn clauses).(0) in
   Hashtbl.set t.formula_by_root_lit ~key:root_lit ~data:formula;
   let clauses =
@@ -172,14 +172,15 @@ let assert_formula t (formula : Formula.any)
       | #Uf_term.Uf.Atom.t as atom -> Uf_term.Uf.add_atom t.uf ~atom
       | `Type_eq (a, b) -> Type_expr.Uf.add_atom t.tuf ~atom:(`Eq (a, b))
       | `Le (_, _) -> ());
-  List.fold_until
-    clauses
-    ~init:`Ok
-    ~f:(fun (`Ok : [ `Ok ]) clause ->
-      match Feel.Solver.add_clause t.solver ~clause with
-      | `Ok -> Continue `Ok
-      | `Unsat _ as unsat -> Stop unsat)
-    ~finish:(fun (`Ok : [ `Ok ]) -> `Ok)
+  Ok
+    (List.fold_until
+       clauses
+       ~init:`Ok
+       ~f:(fun (`Ok : [ `Ok ]) clause ->
+         match Feel.Solver.add_clause t.solver ~clause with
+         | `Ok -> Continue `Ok
+         | `Unsat _ as unsat -> Stop unsat)
+       ~finish:(fun (`Ok : [ `Ok ]) -> `Ok))
 ;;
 
 let push t =
@@ -273,9 +274,11 @@ let stats t = Feel.Solver.stats t.solver
 
 let assert_type t var type_expr =
   ignore
-    (assert_formula
-       t
-       (Encoding.atom_to_formula (Tvar_types.has_type var type_expr :> Atom.t))
+    (Or_error.ok_exn
+       (assert_formula
+          t
+          (Encoding.atom_to_formula
+             (Tvar_types.has_type var type_expr :> Atom.t)))
      : [ `Ok | `Unsat of _ ])
 ;;
 

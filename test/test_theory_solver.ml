@@ -21,7 +21,7 @@ let print_feel_result (result : Feel.Sat_result.t) =
 ;;
 
 let assert_ok solver formula =
-  match Solver.assert_formula solver formula with
+  match Or_error.ok_exn (Solver.assert_formula solver formula) with
   | `Ok -> ()
   | `Unsat _ -> print_endline "UNSAT (at assert time)"
 ;;
@@ -57,7 +57,7 @@ let%expect_test "Tseitin: simple propositional formula matches truth table" =
   let b = eq y y in
   let formula : Formula.any = And [ a; Or [ b; Not a ] ] in
   let encoding = Encoding.create () in
-  let clauses = Encoding.encode encoding ~formula in
+  let clauses = Or_error.ok_exn (Encoding.encode encoding ~formula) in
   let solver = Feel.Solver.create () in
   List.iter clauses ~f:(fun clause ->
     ignore (Feel.Solver.add_clause solver ~clause : [ `Ok | `Unsat of _ ]));
@@ -83,9 +83,13 @@ let%expect_test "Tseitin: atom -> sat_var mapping is stable across encode calls"
   =
   let a = eq x y in
   let encoding = Encoding.create () in
-  let (_ : int array list) = Encoding.encode encoding ~formula:a in
+  let (_ : int array list) =
+    Or_error.ok_exn (Encoding.encode encoding ~formula:a)
+  in
   let var1 = Encoding.sat_var_for_atom encoding (`Eq (uf_x, uf_y)) in
-  let (_ : int array list) = Encoding.encode encoding ~formula:(Not a) in
+  let (_ : int array list) =
+    Or_error.ok_exn (Encoding.encode encoding ~formula:(Not a))
+  in
   let var2 = Encoding.sat_var_for_atom encoding (`Eq (uf_x, uf_y)) in
   print_s [%sexp (var1 : int), (var2 : int)];
   [%expect {| (1 1) |}]
@@ -95,8 +99,10 @@ let%expect_test "Tseitin: True/False and double negation" =
   let encoding = Encoding.create () in
   let solver = Feel.Solver.create () in
   let assert_formula formula =
-    List.iter (Encoding.encode encoding ~formula) ~f:(fun clause ->
-      ignore (Feel.Solver.add_clause solver ~clause : [ `Ok | `Unsat of _ ]))
+    List.iter
+      (Or_error.ok_exn (Encoding.encode encoding ~formula))
+      ~f:(fun clause ->
+        ignore (Feel.Solver.add_clause solver ~clause : [ `Ok | `Unsat of _ ]))
   in
   assert_formula True;
   assert_formula (Not (Not True));
@@ -109,7 +115,7 @@ let%expect_test "Tseitin: False is unsatisfiable" =
   let solver = Feel.Solver.create () in
   let result =
     List.fold
-      (Encoding.encode encoding ~formula:False)
+      (Or_error.ok_exn (Encoding.encode encoding ~formula:False))
       ~init:`Ok
       ~f:(fun acc clause ->
         match acc with
@@ -126,8 +132,10 @@ let%expect_test "Tseitin: And [] is True, Or [] is False" =
   let encoding = Encoding.create () in
   let solver = Feel.Solver.create () in
   let assert_formula formula =
-    List.iter (Encoding.encode encoding ~formula) ~f:(fun clause ->
-      ignore (Feel.Solver.add_clause solver ~clause : [ `Ok | `Unsat of _ ]))
+    List.iter
+      (Or_error.ok_exn (Encoding.encode encoding ~formula))
+      ~f:(fun clause ->
+        ignore (Feel.Solver.add_clause solver ~clause : [ `Ok | `Unsat of _ ]))
   in
   assert_formula (And []);
   assert_formula (Not (Or []));
@@ -140,7 +148,7 @@ let%expect_test "Tseitin: Or [] (False) contradicts True" =
   let solver = Feel.Solver.create () in
   let result =
     List.fold
-      (Encoding.encode encoding ~formula:(Or []))
+      (Or_error.ok_exn (Encoding.encode encoding ~formula:(Or [])))
       ~init:`Ok
       ~f:(fun acc clause ->
         match acc with
