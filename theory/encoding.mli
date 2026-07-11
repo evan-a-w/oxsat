@@ -9,7 +9,7 @@ module Formula_with_no_shared_theories : sig
     | Not of t
     | And of t list
     | Or of t list
-  [@@deriving sexp]
+  [@@deriving sexp_of]
 end
 
 type t

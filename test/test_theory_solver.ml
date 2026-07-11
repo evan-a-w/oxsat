@@ -28,8 +28,8 @@ let assert_ok solver formula =
 
 (* ----- Term/Atom basics ----- *)
 
-let uf_x : Uf_term.t = `Var (Tvar.of_string "x")
-let uf_y : Uf_term.t = `Var (Tvar.of_string "y")
+let uf_x : [ `Uf ] Formula.t = Var (Tvar.of_string "x")
+let uf_y : [ `Uf ] Formula.t = Var (Tvar.of_string "y")
 
 let%expect_test "Atom.normalize orders Eq sides canonically" =
   let a = `Eq (uf_x, uf_y) in
@@ -37,17 +37,15 @@ let%expect_test "Atom.normalize orders Eq sides canonically" =
   print_s [%sexp (Atom.normalize a : Atom.t)];
   print_s [%sexp (Atom.normalize b : Atom.t)];
   [%expect {|
-    (Eq ((Var x) (Var y)))
-    (Eq ((Var x) (Var y)))
+    (Eq (Var x) (Var y))
+    (Eq (Var x) (Var y))
     |}]
 ;;
 
 let%expect_test "Term/Atom sexp round trip" =
-  let term : Uf_term.t =
-    `App (~function_:(Tvar.of_string "f"), ~args:[ uf_x ])
-  in
-  print_s [%sexp (term : Uf_term.t)];
-  [%expect {| (App ((~function_ f) (~args ((Var x))))) |}]
+  let term : [ `Uf ] Formula.t = App (Tvar.of_string "f", [ uf_x ]) in
+  print_s (Formula.sexp_of_t term);
+  [%expect {| (App f ((Var x))) |}]
 ;;
 
 (* ----- Formula / Tseitin correctness ----- *)
