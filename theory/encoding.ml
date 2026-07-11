@@ -230,13 +230,6 @@ let compare_atom
   | `Gt -> Not (Atom (`Le (Linear_expr.(a - b), Q.zero)))
 ;;
 
-(* An [Eq] between two bare variables is genuinely ambiguous -- [Tvar.t]s are
-   shared across the UF, type, and arithmetic namespaces -- so per-theory
-   equality atoms are conjoined rather than picking just one theory. Crucially,
-   [Not (Eq (a, b))] is handled by negating each per-theory atom and
-   conjoining *those* (i.e. "unequal in every theory"), not by negating the
-   conjunction (which would only require *some* theory to disagree, wrongly
-   weakening disequality relative to equality). *)
 let rec bool_formula_of
   : type a. a Formula.t -> Formula_with_no_shared_theories.t
   =
