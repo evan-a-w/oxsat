@@ -32,6 +32,20 @@ module Make (Term : Term) = struct
   module G = Egx.Graph.Make (struct
       module Op = Op
 
+      module Term = struct
+        type t = App of Op.t * t list [@@deriving sexp_of]
+
+        let make ~op ~args = App (op, args)
+
+        let op = function
+          | App (op, _) -> op
+        ;;
+
+        let args = function
+          | App (_, args) -> args
+        ;;
+      end
+
       module Class_metadata = struct
         type t = unit [@@deriving compare, sexp]
 
