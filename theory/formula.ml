@@ -264,7 +264,17 @@ let hash_fold_any (state : Hash.state) (a : any) : Hash.state =
 let hash_any (a : any) : int = Hash.run hash_fold_poly a
 
 module Uf = Uninterpreted_functions.Make (struct
-    type nonrec t = [ `Uf | `Term ] t [@@deriving sexp, compare, hash]
+    type nonrec t = [ `Uf | `Term ] t [@@deriving sexp_of, compare, hash]
+
+    let rec t_of_sexp (sexp : Sexp.t) : t =
+      match sexp with
+      | List [ Atom "Var"; v ] -> Var ([%of_sexp: Tvar.t] v)
+      | List [ Atom "App"; f; args ] ->
+        App
+          ( [%of_sexp: Tvar.t] f
+          , [%of_sexp: Sexp.t list] args |> List.map ~f:t_of_sexp )
+      | _ -> of_sexp_error "Formula.Uf.Term.t_of_sexp: expected Var or App" sexp
+    ;;
 
     let split_function : t -> (Tvar.t * t list) option = function
       | Var _ -> None

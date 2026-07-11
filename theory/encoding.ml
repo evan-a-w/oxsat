@@ -169,7 +169,7 @@ let shape_of (type a) (formula : a Formula.t) : Shape.t =
     La
 ;;
 
-let rec uf_term_of : type a. a Formula.t -> [ `Uf ] Formula.t Or_error.t =
+let rec uf_term_of : type a. a Formula.t -> Formula.Uf.Term.t Or_error.t =
   fun formula ->
   match formula with
   | Var v -> Ok (Formula.Var v)
@@ -348,7 +348,8 @@ and neq_formula_of
          ])
 ;;
 
-let rec type_expr_to_formula : Type_expr.t -> [> `Type ] Formula.t = function
+let rec type_expr_to_formula : Type_expr.t -> [> `Type | `Term ] Formula.t
+  = function
   | Var v -> Var v
   | Base Bool -> Bool
   | Base Int -> Int
@@ -368,7 +369,7 @@ let rec type_expr_to_formula : Type_expr.t -> [> `Type ] Formula.t = function
     Function_type (type_expr_to_formula a, type_expr_to_formula b)
 ;;
 
-let linear_expr_to_formula (le : Linear_expr.t) : [> `La ] Formula.t =
+let linear_expr_to_formula (le : Linear_expr.t) : [> `La | `Term ] Formula.t =
   let term_summands =
     Map.to_alist le.coeffs
     |> List.map ~f:(fun (v, q) -> Formula.La_scale_const (q, Var v))
@@ -385,14 +386,13 @@ let linear_expr_to_formula (le : Linear_expr.t) : [> `La ] Formula.t =
 ;;
 
 (* [Formula.t]'s phantom tag doesn't support subtyping coercion (it's a GADT,
-   not a plain polymorphic variant), so widening a [`Uf] Formula.t] into
+   not a plain polymorphic variant), so widening a [Formula.Uf.Term.t] into
    [Formula.any] means rebuilding it via the (rank-2 polymorphic) [Var]/[App]
    constructors rather than a [:>] coercion. *)
-let rec widen_uf_term : [ `Uf ] Formula.t -> ([> `Uf ] as 'a) Formula.t
+let rec widen_uf_term : Formula.Uf.Term.t -> ([> `Uf | `Term ] as 'a) Formula.t
   = function
   | Var v -> Var v
   | App (f, args) -> App (f, List.map args ~f:widen_uf_term)
-  | _ -> assert false
 ;;
 
 let atom_to_formula : Atom.t -> Formula.any = function

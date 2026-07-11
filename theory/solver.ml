@@ -228,9 +228,9 @@ let make_unsat_core t (core_clauses : Feel.Sat_result.Core_clause.t list)
 ;;
 
 let euf_repr t ~(euf_terms : Formula.Uf.Term.Set.t) tvar
-  : [ `Uf ] Formula.t option
+  : Formula.Uf.Term.t option
   =
-  let term : [ `Uf ] Formula.t = Var tvar in
+  let term : Formula.Uf.Term.t = Var tvar in
   if not (Set.mem euf_terms term)
   then None
   else (
@@ -247,8 +247,7 @@ let tvar_assignments t : Tvar_assignment.t Tvar.Map.t =
     Set.to_list euf_terms
     |> List.filter_map ~f:(function
       | Formula.Var tvar -> Some tvar
-      | Formula.App _ -> None
-      | _ -> assert false)
+      | Formula.App _ -> None)
   in
   let all_tvars =
     List.concat

@@ -47,4 +47,4 @@ val atom_to_formula : Atom.t -> Formula.any
 
 (** Reconstructs a [Formula.t] representing [le], e.g. for building [La_compare]
     formulas out of a [Linear_expr.t] built via arithmetic on [Tvar.t]s. *)
-val linear_expr_to_formula : Linear_expr.t -> [> `La ] Formula.t
+val linear_expr_to_formula : Linear_expr.t -> [> `La | `Term ] Formula.t
