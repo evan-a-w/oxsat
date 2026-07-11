@@ -11,5 +11,4 @@ type t =
   (** The representative term of this tvar's EUF equivalence class, if it
       differs from the tvar itself (i.e. it's been unified with something). *)
   }
-
-val sexp_of_t : t -> Sexp.t
+[@@deriving sexp_of]

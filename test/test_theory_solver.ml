@@ -37,14 +37,14 @@ let%expect_test "Atom.normalize orders Eq sides canonically" =
   print_s [%sexp (Atom.normalize a : Atom.t)];
   print_s [%sexp (Atom.normalize b : Atom.t)];
   [%expect {|
-    (Eq (Var x) (Var y))
-    (Eq (Var x) (Var y))
+    (Eq ((Var x) (Var y)))
+    (Eq ((Var x) (Var y)))
     |}]
 ;;
 
 let%expect_test "Term/Atom sexp round trip" =
   let term : [ `Uf ] Formula.t = App (Tvar.of_string "f", [ uf_x ]) in
-  print_s (Formula.sexp_of_t term);
+  print_s ([%sexp_of: [ `Uf ] Formula.t] term);
   [%expect {| (App f ((Var x))) |}]
 ;;
 

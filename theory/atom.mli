@@ -12,12 +12,8 @@ type t =
   | `Le of Linear_expr.t * Q.t
   | `Type_eq of Type_expr.t * Type_expr.t
   ]
+[@@deriving sexp_of]
 
-(* Written by hand rather than [@@deriving]: ppx treats [Formula.t]'s phantom
-   parameter like an ordinary type argument, so it would generate calls assuming
-   [Formula.sexp_of_t]/[compare]/[hash] take an extra per-argument converter (as
-   they would for a real container type) -- they don't. *)
-val sexp_of_t : t -> Sexp.t
 val normalize : t -> t
 
 include Comparable.S_plain with type t := t
