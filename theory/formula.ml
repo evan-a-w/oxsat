@@ -21,11 +21,12 @@ type _ t =
   | Function_type : 'a t * 'a t -> ([> `Type ] as 'a) t
   | Type_of : 'a t -> [> `Type ] t
   | Type_app : Tvar.t * 'a t -> ([> `Type ] as 'a) t
-  (* Linear arithmetic *)
-  | Const : Q.t -> [> `La ] t
-  | Scale_const : Q.t * 'a t -> ([> `La ] as 'a) t
-  | Add : 'a t * 'a -> ([> `La ] as 'a) t
-  | Compare :
+  (* Linear arithmetic (prefixed with [La_] so we can re-use similar stuff for
+     eg. bitvectors) *)
+  | La_const : Q.t -> [> `La ] t
+  | La_scale_const : Q.t * 'a t -> ([> `La ] as 'a) t
+  | La_add : 'a t * 'a t -> ([> `La ] as 'a) t
+  | La_compare :
       (* no eq, cuz that's already above *)
       'a t
       * [ `Le | `Ge | `Lt | `Gt ]

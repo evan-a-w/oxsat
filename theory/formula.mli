@@ -23,10 +23,10 @@ type _ t =
   | Type_of : 'a t -> [> `Type ] t
   | Type_app : Tvar.t * 'a t -> ([> `Type ] as 'a) t
   (* Linear arithmetic *)
-  | Const : Q.t -> [> `La ] t
-  | Scale_const : Q.t * 'a t -> ([> `La ] as 'a) t
-  | Add : 'a t * 'a -> ([> `La ] as 'a) t
-  | Compare :
+  | La_const : Q.t -> [> `La ] t
+  | La_scale_const : Q.t * 'a t -> ([> `La ] as 'a) t
+  | La_add : 'a t * 'a t -> ([> `La ] as 'a) t
+  | La_compare :
       (* no eq, cuz that's already above *)
       'a t
       * [ `Le | `Ge | `Lt | `Gt ]
