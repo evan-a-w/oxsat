@@ -18,13 +18,13 @@ module Combined_theory = struct
     ; tuf : Type_expr.Uf.t
     ; tt : Tvar_types.t
     ; bb : Branch_and_bound.t
-    ; encoding : Formula.Encoding.t
+    ; encoding : Encoding.t
     }
 
   let assert_literal t ~decision_level ~literal =
     let var = Int.abs literal in
     let value = literal > 0 in
-    match Formula.Encoding.atom_for_sat_var t.encoding var with
+    match Encoding.atom_for_sat_var t.encoding var with
     | Some (#Uf_term.Uf.Atom.t as atom) ->
       Uf_term.Uf.assert_atom t.uf ~decision_level ~atom ~value
     | Some (`Type_eq (a, b)) ->
@@ -44,7 +44,7 @@ module Combined_theory = struct
     match Uf_term.Uf.maybe_get_lemma t.uf [@nontail] with
     | `Lemma literals ->
       lemma_to_clause literals ~sat_var_for_atom:(fun atom ->
-        Formula.Encoding.sat_var_for_atom
+        Encoding.sat_var_for_atom
           t.encoding
           (atom : Uf_term.Uf.Atom.t :> Atom.t))
     | `Consistent ->
@@ -53,14 +53,14 @@ module Combined_theory = struct
          lemma_to_clause
            literals
            ~sat_var_for_atom:(fun (`Eq (a, b) : Type_expr.Uf.Atom.t) ->
-             Formula.Encoding.sat_var_for_atom t.encoding (`Type_eq (a, b)))
+             Encoding.sat_var_for_atom t.encoding (`Type_eq (a, b)))
        | `Consistent ->
          (match Tvar_types.maybe_get_lemma t.tt [@nontail] with
           | `Lemma literals ->
             lemma_to_clause
               literals
               ~sat_var_for_atom:(fun (`Type_eq (a, b) : Tvar_types.Atom.t) ->
-                Formula.Encoding.sat_var_for_atom t.encoding (`Type_eq (a, b)))
+                Encoding.sat_var_for_atom t.encoding (`Type_eq (a, b)))
           | `Consistent ->
             (match Branch_and_bound.maybe_get_lemma t.bb [@nontail] with
              | `Consistent -> `Consistent
@@ -68,7 +68,7 @@ module Combined_theory = struct
                lemma_to_clause
                  literals
                  ~sat_var_for_atom:(fun (atom : Branch_and_bound.Atom.t) ->
-                   Formula.Encoding.sat_var_for_atom t.encoding (atom :> Atom.t)))))
+                   Encoding.sat_var_for_atom t.encoding (atom :> Atom.t)))))
   ;;
 
   let undo t ~to_decision_level_excl =
@@ -91,9 +91,9 @@ type t =
   ; tuf : Type_expr.Uf.t
   ; tt : Tvar_types.t
   ; bb : Branch_and_bound.t
-  ; encoding : Formula.Encoding.t
+  ; encoding : Encoding.t
   ; mutable scopes : int list (* activation literals, innermost first *)
-  ; formula_by_root_lit : Formula.t Int.Table.t
+  ; formula_by_root_lit : Formula.any Int.Table.t
   }
 
 let create () =
@@ -101,7 +101,7 @@ let create () =
   let tuf = Type_expr.Uf.create ~atoms:[] in
   let tt = Tvar_types.create () in
   let bb = Branch_and_bound.create () in
-  let encoding = Formula.Encoding.create () in
+  let encoding = Encoding.create () in
   let combined = { Combined_theory.uf; tuf; tt; bb; encoding } in
   let solver =
     Feel.Solver.create
@@ -132,12 +132,12 @@ let create () =
             (`Eq (Type_expr.Base b1, Type_expr.Base b2))
         in
         let atom : Atom.t = `Type_eq (a, b) in
-        let sat_var = Formula.Encoding.sat_var_for_atom t.encoding atom in
+        let sat_var = Encoding.sat_var_for_atom t.encoding atom in
         Type_expr.Uf.add_atom t.tuf ~atom:tuf_atom;
         Hashtbl.set
           t.formula_by_root_lit
           ~key:(-sat_var)
-          ~data:(Formula.Not (Formula.Atom atom));
+          ~data:(Formula.Not (Encoding.atom_to_formula atom));
         ignore
           (Feel.Solver.add_clause t.solver ~clause:[| -sat_var |]
            : [ `Ok | `Unsat of _ ]))));
@@ -150,11 +150,11 @@ let guard_clauses ~activation clauses =
   List.map clauses ~f:(fun clause -> Array.append [| -activation |] clause)
 ;;
 
-let assert_formula t formula
+let assert_formula t (formula : Formula.any)
   : [ `Ok | `Unsat of Feel.Sat_result.Core_clause.t list ]
   =
-  let checkpoint = Formula.Encoding.checkpoint t.encoding in
-  let clauses = Formula.encode t.encoding formula in
+  let checkpoint = Encoding.checkpoint t.encoding in
+  let clauses = Encoding.encode t.encoding ~formula in
   let root_lit = (List.last_exn clauses).(0) in
   Hashtbl.set t.formula_by_root_lit ~key:root_lit ~data:formula;
   let clauses =
@@ -166,7 +166,7 @@ let assert_formula t formula
      any clause, so that [assert_literal] (triggered by unit propagation during
      [add_clause]) recognizes them as theory atoms from the start. *)
   List.iter
-    (Formula.Encoding.new_atoms_since t.encoding ~checkpoint)
+    (Encoding.new_atoms_since t.encoding ~checkpoint)
     ~f:(fun ((atom, _sat_var) : Atom.t * int) ->
       match atom with
       | #Uf_term.Uf.Atom.t as atom -> Uf_term.Uf.add_atom t.uf ~atom
@@ -183,7 +183,7 @@ let assert_formula t formula
 ;;
 
 let push t =
-  let activation = Formula.Encoding.fresh_var t.encoding in
+  let activation = Encoding.fresh_var t.encoding in
   t.scopes <- activation :: t.scopes
 ;;
 
@@ -193,15 +193,14 @@ let pop t =
   | _ :: rest -> t.scopes <- rest
 ;;
 
-let clause_to_formula t (literals : int array) : Formula.t option =
+let clause_to_formula t (literals : int array) : Formula.any option =
   let formulas =
     Array.filter_map literals ~f:(fun lit ->
       let var = Int.abs lit in
-      match Formula.Encoding.atom_for_sat_var t.encoding var with
+      match Encoding.atom_for_sat_var t.encoding var with
       | Some atom ->
-        if lit > 0
-        then Some (Formula.Atom atom)
-        else Some (Formula.Not (Formula.Atom atom))
+        let formula = Encoding.atom_to_formula atom in
+        if lit > 0 then Some formula else Some (Formula.Not formula)
       | None -> None)
   in
   if Array.length formulas = Array.length literals
@@ -276,7 +275,7 @@ let assert_type t var type_expr =
   ignore
     (assert_formula
        t
-       (Formula.Atom (Tvar_types.has_type var type_expr :> Atom.t))
+       (Encoding.atom_to_formula (Tvar_types.has_type var type_expr :> Atom.t))
      : [ `Ok | `Unsat of _ ])
 ;;
 

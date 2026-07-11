@@ -3,6 +3,7 @@ open! Feel.Import
 
 module Base = struct
   type t =
+    | Bool
     | Int
     | Float
   [@@deriving sexp, compare, equal, hash, enumerate]
@@ -16,6 +17,8 @@ type t =
   | Base of Base.t
   | Type_of of Tvar.t
   | App of Tvar.t * t list
+  | Function_type of t * t
+  | Type
 [@@deriving sexp, compare, hash]
 
 include functor Hashable.Make
@@ -23,7 +26,7 @@ include functor Comparable.Make
 
 let split_function = function
   | App (function_, args) -> Some (function_, args)
-  | Base _ | Var _ | Type_of _ -> None
+  | Base _ | Var _ | Type_of _ | Function_type _ | Type -> None
 ;;
 
 let garbage_for_vec = Var (Tvar.of_string "")

@@ -5,7 +5,7 @@ open! Feel.Import
     theory of uninterpreted functions ({!Uninterpreted_functions}).
 
     Formulas are asserted via {!assert_formula} and Tseitin-encoded into CNF
-    using a shared {!Formula.Encoding.t}, so atoms keep a stable mapping to SAT
+    using a shared {!Encoding.t}, so atoms keep a stable mapping to SAT
     variables across calls. {!push}/{!pop} provide assertion scopes, implemented
     via activation literals: clauses asserted within a scope are only enforced
     while that scope (and all enclosing scopes) are active. *)
@@ -24,7 +24,7 @@ val create : unit -> t
     mirroring {!Feel.Solver.add_clause}. *)
 val assert_formula
   :  t
-  -> Formula.t
+  -> Formula.any
   -> [ `Ok | `Unsat of Feel.Sat_result.Core_clause.t list ]
 
 (** Opens a new assertion scope. Formulas asserted after [push] (until the

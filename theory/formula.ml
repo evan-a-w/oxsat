@@ -32,3 +32,43 @@ type _ t =
       * [ `Le | `Ge | `Lt | `Gt ]
       * 'a t
       -> ([> `La ] as 'a) t
+
+(* [ppx_sexp_conv] can't derive sexp converters for GADTs, so this is written by
+   hand; sexp-of only, since nothing needs to parse a [Formula.t] back. *)
+let rec sexp_of_t : type a. a t -> Sexp.t =
+  fun formula ->
+  let node tag args = Sexp.List (Sexp.Atom tag :: args) in
+  match formula with
+  | Var v -> node "Var" [ [%sexp_of: Tvar.t] v ]
+  | Eq (a, b) -> node "Eq" [ sexp_of_t a; sexp_of_t b ]
+  | True -> Sexp.Atom "True"
+  | False -> Sexp.Atom "False"
+  | Not f -> node "Not" [ sexp_of_t f ]
+  | And fs -> node "And" [ [%sexp_of: Sexp.t list] (List.map fs ~f:sexp_of_t) ]
+  | Or fs -> node "Or" [ [%sexp_of: Sexp.t list] (List.map fs ~f:sexp_of_t) ]
+  | App (f, args) ->
+    node
+      "App"
+      [ [%sexp_of: Tvar.t] f
+      ; [%sexp_of: Sexp.t list] (List.map args ~f:sexp_of_t)
+      ]
+  | Bool -> Sexp.Atom "Bool"
+  | Int -> Sexp.Atom "Int"
+  | Float -> Sexp.Atom "Float"
+  | Type -> Sexp.Atom "Type"
+  | Function_type (a, b) -> node "Function_type" [ sexp_of_t a; sexp_of_t b ]
+  | Type_of f -> node "Type_of" [ sexp_of_t f ]
+  | Type_app (f, a) -> node "Type_app" [ [%sexp_of: Tvar.t] f; sexp_of_t a ]
+  | La_const q -> node "La_const" [ [%sexp_of: Q.t] q ]
+  | La_scale_const (q, a) ->
+    node "La_scale_const" [ [%sexp_of: Q.t] q; sexp_of_t a ]
+  | La_add (a, b) -> node "La_add" [ sexp_of_t a; sexp_of_t b ]
+  | La_compare (a, op, b) ->
+    node
+      "La_compare"
+      [ sexp_of_t a; [%sexp_of: [ `Le | `Ge | `Lt | `Gt ]] op; sexp_of_t b ]
+;;
+
+type any = [ `Boolean | `Uf | `Type | `La ] t
+
+let sexp_of_any = sexp_of_t

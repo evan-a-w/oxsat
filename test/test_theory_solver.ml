@@ -2,12 +2,12 @@ open! Core
 open! Feel.Import
 open! Theory
 
-let x = `Var (Tvar.of_string "x")
-let y = `Var (Tvar.of_string "y")
-let z = `Var (Tvar.of_string "z")
-let f arg : Uf_term.t = `App (~function_:(Tvar.of_string "f"), ~args:[ arg ])
-let eq a b : Formula.t = Atom (`Eq (a, b))
-let neq a b : Formula.t = Not (eq a b)
+let x : Formula.any = Var (Tvar.of_string "x")
+let y : Formula.any = Var (Tvar.of_string "y")
+let z : Formula.any = Var (Tvar.of_string "z")
+let f arg : Formula.any = App (Tvar.of_string "f", [ arg ])
+let eq a b : Formula.any = Eq (a, b)
+let neq a b : Formula.any = Not (eq a b)
 
 let print_result (result : Solver_result.t) =
   match result with
@@ -28,9 +28,12 @@ let assert_ok solver formula =
 
 (* ----- Term/Atom basics ----- *)
 
+let uf_x : Uf_term.t = `Var (Tvar.of_string "x")
+let uf_y : Uf_term.t = `Var (Tvar.of_string "y")
+
 let%expect_test "Atom.normalize orders Eq sides canonically" =
-  let a = `Eq (x, y) in
-  let b = `Eq (y, x) in
+  let a = `Eq (uf_x, uf_y) in
+  let b = `Eq (uf_y, uf_x) in
   print_s [%sexp (Atom.normalize a : Atom.t)];
   print_s [%sexp (Atom.normalize b : Atom.t)];
   [%expect {|
@@ -40,7 +43,9 @@ let%expect_test "Atom.normalize orders Eq sides canonically" =
 ;;
 
 let%expect_test "Term/Atom sexp round trip" =
-  let term : Uf_term.t = f x in
+  let term : Uf_term.t =
+    `App (~function_:(Tvar.of_string "f"), ~args:[ uf_x ])
+  in
   print_s [%sexp (term : Uf_term.t)];
   [%expect {| (App ((~function_ f) (~args ((Var x))))) |}]
 ;;
@@ -48,17 +53,17 @@ let%expect_test "Term/Atom sexp round trip" =
 (* ----- Formula / Tseitin correctness ----- *)
 
 let%expect_test "Tseitin: simple propositional formula matches truth table" =
-  let a = `Eq (x, x) in
-  let b = `Eq (y, y) in
-  let formula : Formula.t = And [ Atom a; Or [ Atom b; Not (Atom a) ] ] in
-  let encoding = Formula.Encoding.create () in
-  let clauses = Formula.encode encoding formula in
+  let a = eq x x in
+  let b = eq y y in
+  let formula : Formula.any = And [ a; Or [ b; Not a ] ] in
+  let encoding = Encoding.create () in
+  let clauses = Encoding.encode encoding ~formula in
   let solver = Feel.Solver.create () in
   List.iter clauses ~f:(fun clause ->
     ignore (Feel.Solver.add_clause solver ~clause : [ `Ok | `Unsat of _ ]));
   let result = Feel.Solver.solve solver in
-  let var_a = Formula.Encoding.sat_var_for_atom encoding a in
-  let var_b = Formula.Encoding.sat_var_for_atom encoding b in
+  let var_a = Encoding.sat_var_for_atom encoding (`Eq (uf_x, uf_x)) in
+  let var_b = Encoding.sat_var_for_atom encoding (`Eq (uf_y, uf_y)) in
   (match result with
    | Unsat _ -> print_endline "UNSAT"
    | Sat { assignments } ->
@@ -71,26 +76,26 @@ let%expect_test "Tseitin: simple propositional formula matches truth table" =
            ~b:(assignments.(var_b) : bool option)]);
   (* a must be true; b must also be true (since a is true, [Or [b; not a]]
      forces b) *)
-  [%expect {| (SAT (var_a 1) (var_b 2) (a (true)) (b (true))) |}]
+  [%expect {| (SAT (var_a 1) (var_b 6) (a (true)) (b (true))) |}]
 ;;
 
 let%expect_test "Tseitin: atom -> sat_var mapping is stable across encode calls"
   =
-  let a = `Eq (x, y) in
-  let encoding = Formula.Encoding.create () in
-  let (_ : int array list) = Formula.encode encoding (Atom a) in
-  let var1 = Formula.Encoding.sat_var_for_atom encoding a in
-  let (_ : int array list) = Formula.encode encoding (Not (Atom a)) in
-  let var2 = Formula.Encoding.sat_var_for_atom encoding a in
+  let a = eq x y in
+  let encoding = Encoding.create () in
+  let (_ : int array list) = Encoding.encode encoding ~formula:a in
+  let var1 = Encoding.sat_var_for_atom encoding (`Eq (uf_x, uf_y)) in
+  let (_ : int array list) = Encoding.encode encoding ~formula:(Not a) in
+  let var2 = Encoding.sat_var_for_atom encoding (`Eq (uf_x, uf_y)) in
   print_s [%sexp (var1 : int), (var2 : int)];
   [%expect {| (1 1) |}]
 ;;
 
 let%expect_test "Tseitin: True/False and double negation" =
-  let encoding = Formula.Encoding.create () in
+  let encoding = Encoding.create () in
   let solver = Feel.Solver.create () in
   let assert_formula formula =
-    List.iter (Formula.encode encoding formula) ~f:(fun clause ->
+    List.iter (Encoding.encode encoding ~formula) ~f:(fun clause ->
       ignore (Feel.Solver.add_clause solver ~clause : [ `Ok | `Unsat of _ ]))
   in
   assert_formula True;
@@ -100,13 +105,16 @@ let%expect_test "Tseitin: True/False and double negation" =
 ;;
 
 let%expect_test "Tseitin: False is unsatisfiable" =
-  let encoding = Formula.Encoding.create () in
+  let encoding = Encoding.create () in
   let solver = Feel.Solver.create () in
   let result =
-    List.fold (Formula.encode encoding False) ~init:`Ok ~f:(fun acc clause ->
-      match acc with
-      | `Unsat _ -> acc
-      | `Ok -> Feel.Solver.add_clause solver ~clause)
+    List.fold
+      (Encoding.encode encoding ~formula:False)
+      ~init:`Ok
+      ~f:(fun acc clause ->
+        match acc with
+        | `Unsat _ -> acc
+        | `Ok -> Feel.Solver.add_clause solver ~clause)
   in
   (match result with
    | `Ok -> print_endline "ok"
@@ -115,10 +123,10 @@ let%expect_test "Tseitin: False is unsatisfiable" =
 ;;
 
 let%expect_test "Tseitin: And [] is True, Or [] is False" =
-  let encoding = Formula.Encoding.create () in
+  let encoding = Encoding.create () in
   let solver = Feel.Solver.create () in
   let assert_formula formula =
-    List.iter (Formula.encode encoding formula) ~f:(fun clause ->
+    List.iter (Encoding.encode encoding ~formula) ~f:(fun clause ->
       ignore (Feel.Solver.add_clause solver ~clause : [ `Ok | `Unsat of _ ]))
   in
   assert_formula (And []);
@@ -128,13 +136,16 @@ let%expect_test "Tseitin: And [] is True, Or [] is False" =
 ;;
 
 let%expect_test "Tseitin: Or [] (False) contradicts True" =
-  let encoding = Formula.Encoding.create () in
+  let encoding = Encoding.create () in
   let solver = Feel.Solver.create () in
   let result =
-    List.fold (Formula.encode encoding (Or [])) ~init:`Ok ~f:(fun acc clause ->
-      match acc with
-      | `Unsat _ -> acc
-      | `Ok -> Feel.Solver.add_clause solver ~clause)
+    List.fold
+      (Encoding.encode encoding ~formula:(Or []))
+      ~init:`Ok
+      ~f:(fun acc clause ->
+        match acc with
+        | `Unsat _ -> acc
+        | `Ok -> Feel.Solver.add_clause solver ~clause)
   in
   (match result with
    | `Ok -> print_endline "ok"
@@ -145,20 +156,20 @@ let%expect_test "Tseitin: Or [] (False) contradicts True" =
 (* ----- theory/solver.ml end-to-end EUF tests ----- *)
 
 let%expect_test "pure boolean formula (no theory atoms)" =
-  let a = `Eq (x, x) in
-  let b = `Eq (y, y) in
+  let a = eq x x in
+  let b = eq y y in
   let solver = Solver.create () in
   (* (a \/ b) /\ (~a \/ b) /\ (a \/ ~b) => b must be true *)
-  assert_ok solver (Or [ Atom a; Atom b ]);
-  assert_ok solver (Or [ Not (Atom a); Atom b ]);
-  assert_ok solver (Or [ Atom a; Not (Atom b) ]);
+  assert_ok solver (Or [ a; b ]);
+  assert_ok solver (Or [ Not a; b ]);
+  assert_ok solver (Or [ a; Not b ]);
   print_result (Solver.solve solver);
   [%expect
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ()) (numeric ()) (euf_repr ())))
-       (y ((type_ ()) (numeric ()) (euf_repr ()))))))
+      ((x ((type_ ((Var x))) (numeric ()) (euf_repr ())))
+       (y ((type_ ((Var y))) (numeric ()) (euf_repr ()))))))
     |}]
 ;;
 
@@ -174,11 +185,10 @@ let%expect_test "EUF: transitivity violation is unsat" =
      (core
       ((Theory_lemma
         (Or
-         ((Not (Atom (Eq ((Var x) (Var z))))) (Not (Atom (Eq ((Var x) (Var y)))))
-          (Atom (Eq ((Var y) (Var z)))))))
-       (Asserted (Atom (Eq ((Var x) (Var z)))))
-       (Asserted (Atom (Eq ((Var x) (Var y)))))
-       (Asserted (Not (Atom (Eq ((Var y) (Var z)))))))))
+         ((Not (Eq (Var x) (Var z))) (Not (Eq (Var x) (Var y)))
+          (Eq (Var y) (Var z)))))
+       (Asserted (Eq (Var x) (Var z))) (Asserted (Eq (Var x) (Var y)))
+       (Asserted (Not (Eq (Var y) (Var z)))))))
     |}]
 ;;
 
@@ -193,18 +203,9 @@ let%expect_test "EUF: congruence conflict (f(x) <> f(y) with x = y)" =
      (core
       ((Theory_lemma
         (Or
-         ((Not (Atom (Eq ((Var x) (Var y)))))
-          (Atom
-           (Eq
-            ((App ((~function_ f) (~args ((Var x)))))
-             (App ((~function_ f) (~args ((Var y)))))))))))
-       (Asserted (Atom (Eq ((Var x) (Var y)))))
-       (Asserted
-        (Not
-         (Atom
-          (Eq
-           ((App ((~function_ f) (~args ((Var x)))))
-            (App ((~function_ f) (~args ((Var y)))))))))))))
+         ((Not (Eq (Var x) (Var y))) (Eq (App f ((Var x))) (App f ((Var y)))))))
+       (Asserted (Eq (Var x) (Var y)))
+       (Asserted (Not (Eq (App f ((Var x))) (App f ((Var y)))))))))
     |}]
 ;;
 
@@ -222,18 +223,9 @@ let%expect_test "EUF: congruence positive propagation (x = y forces f(x) = \
      (core
       ((Theory_lemma
         (Or
-         ((Not (Atom (Eq ((Var x) (Var y)))))
-          (Atom
-           (Eq
-            ((App ((~function_ f) (~args ((Var x)))))
-             (App ((~function_ f) (~args ((Var y)))))))))))
-       (Asserted (Atom (Eq ((Var x) (Var y)))))
-       (Asserted
-        (Not
-         (Atom
-          (Eq
-           ((App ((~function_ f) (~args ((Var x)))))
-            (App ((~function_ f) (~args ((Var y)))))))))))))
+         ((Not (Eq (Var x) (Var y))) (Eq (App f ((Var x))) (App f ((Var y)))))))
+       (Asserted (Eq (Var x) (Var y)))
+       (Asserted (Not (Eq (App f ((Var x))) (App f ((Var y)))))))))
     |}]
 ;;
 
@@ -246,9 +238,18 @@ let%expect_test "EUF: satisfiable case" =
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ()) (numeric ()) (euf_repr ())))
-       (y ((type_ ()) (numeric ()) (euf_repr ((Var x)))))
-       (z ((type_ ()) (numeric ()) (euf_repr ()))))))
+      ((x
+        ((type_ ((Var y)))
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
+         (euf_repr ())))
+       (y
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
+         (euf_repr ((Var x)))))
+       (z
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ()))))))
     |}]
 ;;
 
@@ -267,8 +268,14 @@ let%expect_test "incremental: asserting a contradicting formula after solve" =
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ()) (numeric ()) (euf_repr ())))
-       (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
+      ((x
+        ((type_ ((Var y)))
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ())))
+       (y
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ((Var x))))))))
     |}];
   assert_ok solver (neq x y);
   print_result (Solver.solve solver);
@@ -277,8 +284,14 @@ let%expect_test "incremental: asserting a contradicting formula after solve" =
     UNSAT (at assert time)
     (Sat
      (tvar_assignments
-      ((x ((type_ ()) (numeric ()) (euf_repr ())))
-       (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
+      ((x
+        ((type_ ((Var y)))
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ())))
+       (y
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ((Var x))))))))
     |}]
 ;;
 
@@ -290,8 +303,14 @@ let%expect_test "incremental: new EUF atoms registered after a solve" =
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ()) (numeric ()) (euf_repr ())))
-       (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
+      ((x
+        ((type_ ((Var y)))
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ())))
+       (y
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ((Var x))))))))
     |}];
   (* introduce brand-new terms/atoms involving f, after solving once *)
   assert_ok solver (neq (f x) (f y));
@@ -302,18 +321,9 @@ let%expect_test "incremental: new EUF atoms registered after a solve" =
      (core
       ((Theory_lemma
         (Or
-         ((Not (Atom (Eq ((Var x) (Var y)))))
-          (Atom
-           (Eq
-            ((App ((~function_ f) (~args ((Var x)))))
-             (App ((~function_ f) (~args ((Var y)))))))))))
-       (Asserted (Atom (Eq ((Var x) (Var y)))))
-       (Asserted
-        (Not
-         (Atom
-          (Eq
-           ((App ((~function_ f) (~args ((Var x)))))
-            (App ((~function_ f) (~args ((Var y)))))))))))))
+         ((Not (Eq (Var x) (Var y))) (Eq (App f ((Var x))) (App f ((Var y)))))))
+       (Asserted (Eq (Var x) (Var y)))
+       (Asserted (Not (Eq (App f ((Var x))) (App f ((Var y)))))))))
     |}]
 ;;
 
@@ -327,8 +337,14 @@ let%expect_test "push/pop: retracting a contradicting constraint" =
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ()) (numeric ()) (euf_repr ())))
-       (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
+      ((x
+        ((type_ ((Var y)))
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ())))
+       (y
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ((Var x))))))))
     |}];
   Solver.push solver;
   assert_ok solver (neq x y);
@@ -337,8 +353,7 @@ let%expect_test "push/pop: retracting a contradicting constraint" =
     {|
     (Unsat
      (core
-      ((Asserted (Not (Atom (Eq ((Var x) (Var y))))))
-       (Asserted (Atom (Eq ((Var x) (Var y))))))))
+      ((Asserted (Not (Eq (Var x) (Var y)))) (Asserted (Eq (Var x) (Var y))))))
     |}];
   Solver.pop solver;
   print_result (Solver.solve solver);
@@ -346,8 +361,14 @@ let%expect_test "push/pop: retracting a contradicting constraint" =
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ()) (numeric ()) (euf_repr ())))
-       (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
+      ((x
+        ((type_ ((Var y)))
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ())))
+       (y
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ((Var x))))))))
     |}]
 ;;
 
@@ -359,8 +380,14 @@ let%expect_test "push/pop: nested scopes" =
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ()) (numeric ()) (euf_repr ())))
-       (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
+      ((x
+        ((type_ ((Var y)))
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ())))
+       (y
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ((Var x))))))))
     |}];
   Solver.push solver;
   assert_ok solver (neq y z);
@@ -369,9 +396,18 @@ let%expect_test "push/pop: nested scopes" =
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ()) (numeric ()) (euf_repr ())))
-       (y ((type_ ()) (numeric ()) (euf_repr ((Var x)))))
-       (z ((type_ ()) (numeric ()) (euf_repr ()))))))
+      ((x
+        ((type_ ((Var y)))
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
+         (euf_repr ())))
+       (y
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
+         (euf_repr ((Var x)))))
+       (z
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ()))))))
     |}];
   Solver.push solver;
   assert_ok solver (eq x z);
@@ -381,13 +417,12 @@ let%expect_test "push/pop: nested scopes" =
     {|
     (Unsat
      (core
-      ((Asserted (Not (Atom (Eq ((Var y) (Var z))))))
+      ((Asserted (Not (Eq (Var y) (Var z))))
        (Theory_lemma
         (Or
-         ((Atom (Eq ((Var y) (Var z)))) (Not (Atom (Eq ((Var x) (Var y)))))
-          (Not (Atom (Eq ((Var x) (Var z))))))))
-       (Asserted (Atom (Eq ((Var x) (Var y)))))
-       (Asserted (Atom (Eq ((Var x) (Var z))))))))
+         ((Eq (Var y) (Var z)) (Not (Eq (Var x) (Var y)))
+          (Not (Eq (Var x) (Var z))))))
+       (Asserted (Eq (Var x) (Var y))) (Asserted (Eq (Var x) (Var z))))))
     |}];
   Solver.pop solver;
   (* back to: x=y, y<>z -- satisfiable *)
@@ -396,9 +431,18 @@ let%expect_test "push/pop: nested scopes" =
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ()) (numeric ()) (euf_repr ())))
-       (y ((type_ ()) (numeric ()) (euf_repr ((Var x)))))
-       (z ((type_ ()) (numeric ()) (euf_repr ()))))))
+      ((x
+        ((type_ ((Var y)))
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
+         (euf_repr ())))
+       (y
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
+         (euf_repr ((Var x)))))
+       (z
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ()))))))
     |}];
   Solver.pop solver;
   (* back to: x=y only -- satisfiable *)
@@ -407,9 +451,18 @@ let%expect_test "push/pop: nested scopes" =
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ()) (numeric ()) (euf_repr ())))
-       (y ((type_ ()) (numeric ()) (euf_repr ((Var x)))))
-       (z ((type_ ()) (numeric ()) (euf_repr ()))))))
+      ((x
+        ((type_ ((Var y)))
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
+         (euf_repr ())))
+       (y
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
+         (euf_repr ((Var x)))))
+       (z
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ()))))))
     |}]
 ;;
 
@@ -429,10 +482,9 @@ let%expect_test "push/pop: Tseitin-encoded Or inside scope appears in unsat \
     {|
     (Unsat
      (core
-      ((Asserted (Not (Atom (Eq ((Var x) (Var y))))))
-       (Asserted
-        (Or ((Atom (Eq ((Var x) (Var y)))) (Atom (Eq ((Var y) (Var z)))))))
-       (Asserted (Not (Atom (Eq ((Var y) (Var z)))))))))
+      ((Asserted (Not (Eq (Var y) (Var z))))
+       (Asserted (Not (Eq (Var x) (Var y))))
+       (Asserted (Or ((Eq (Var x) (Var y)) (Eq (Var y) (Var z))))))))
     |}]
 ;;
 
@@ -446,8 +498,14 @@ let%expect_test "push/pop: EUF congruence conflict inside a scope is retracted \
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ()) (numeric ()) (euf_repr ())))
-       (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
+      ((x
+        ((type_ ((Var y)))
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ())))
+       (y
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ((Var x))))))))
     |}];
   Solver.push solver;
   assert_ok solver (neq (f x) (f y));
@@ -458,18 +516,9 @@ let%expect_test "push/pop: EUF congruence conflict inside a scope is retracted \
      (core
       ((Theory_lemma
         (Or
-         ((Not (Atom (Eq ((Var x) (Var y)))))
-          (Atom
-           (Eq
-            ((App ((~function_ f) (~args ((Var x)))))
-             (App ((~function_ f) (~args ((Var y)))))))))))
-       (Asserted (Atom (Eq ((Var x) (Var y)))))
-       (Asserted
-        (Not
-         (Atom
-          (Eq
-           ((App ((~function_ f) (~args ((Var x)))))
-            (App ((~function_ f) (~args ((Var y)))))))))))))
+         ((Not (Eq (Var x) (Var y))) (Eq (App f ((Var x))) (App f ((Var y)))))))
+       (Asserted (Eq (Var x) (Var y)))
+       (Asserted (Not (Eq (App f ((Var x))) (App f ((Var y)))))))))
     |}];
   Solver.pop solver;
   print_result (Solver.solve solver);
@@ -477,8 +526,14 @@ let%expect_test "push/pop: EUF congruence conflict inside a scope is retracted \
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ()) (numeric ()) (euf_repr ())))
-       (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
+      ((x
+        ((type_ ((Var y)))
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ())))
+       (y
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ((Var x))))))))
     |}];
   (* solving again should remain consistent *)
   print_result (Solver.solve solver);
@@ -486,8 +541,14 @@ let%expect_test "push/pop: EUF congruence conflict inside a scope is retracted \
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ()) (numeric ()) (euf_repr ())))
-       (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
+      ((x
+        ((type_ ((Var y)))
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ())))
+       (y
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ((Var x))))))))
     |}]
 ;;
 
@@ -510,7 +571,10 @@ let int_type : Type_expr.t = Base Int
 let float_type : Type_expr.t = Base Float
 let array_ctor = Tvar.of_string "Array"
 let array_of (elem : Type_expr.t) : Type_expr.t = App (array_ctor, [ elem ])
-let type_eq te1 te2 : Formula.t = Atom (`Type_eq (te1, te2))
+let type_eq te1 te2 : Formula.any = Eq (te1, te2)
+let ft_int : Formula.any = Int
+let ft_float : Formula.any = Float
+let ft_array (elem : Formula.any) : Formula.any = Type_app (array_ctor, elem)
 
 let%expect_test "Has_type: basic assert and get_type" =
   let solver = Solver.create () in
@@ -534,13 +598,9 @@ let%expect_test "Has_type: conflicting ground types are unsat" =
     (Unsat
      (core
       ((Theory_lemma
-        (Or
-         ((Not (Atom (Type_eq ((Var x) (Base Float)))))
-          (Not (Atom (Type_eq ((Var x) (Base Int)))))
-          (Atom (Type_eq ((Base Int) (Base Float)))))))
-       (Asserted (Atom (Type_eq ((Var x) (Base Float)))))
-       (Asserted (Atom (Type_eq ((Var x) (Base Int)))))
-       (Asserted (Not (Atom (Type_eq ((Base Int) (Base Float)))))))))
+        (Or ((Not (Eq (Var x) Float)) (Not (Eq (Var x) Int)) (Eq Int Float))))
+       (Asserted (Eq (Var x) Float)) (Asserted (Eq (Var x) Int))
+       (Asserted (Not (Eq Int Float))))))
     |}]
 ;;
 
@@ -569,11 +629,9 @@ let%expect_test "Has_type: structural conflict (Array vs Int)" =
     (Unsat
      (core
       ((Theory_lemma
-        (Or
-         ((Not (Atom (Type_eq ((Var x) (Base Int)))))
-          (Not (Atom (Type_eq ((Var x) (App Array ((Var a))))))))))
-       (Asserted (Atom (Type_eq ((Var x) (Base Int)))))
-       (Asserted (Atom (Type_eq ((Var x) (App Array ((Var a))))))))))
+        (Or ((Not (Eq (Var x) Int)) (Not (Eq (Var x) (Type_app Array (Var a)))))))
+       (Asserted (Eq (Var x) Int))
+       (Asserted (Eq (Var x) (Type_app Array (Var a)))))))
     |}]
 ;;
 
@@ -612,13 +670,9 @@ let%expect_test "Has_type: push/pop retracts type conflict" =
     (Unsat
      (core
       ((Theory_lemma
-        (Or
-         ((Not (Atom (Type_eq ((Var x) (Base Float)))))
-          (Not (Atom (Type_eq ((Var x) (Base Int)))))
-          (Atom (Type_eq ((Base Int) (Base Float)))))))
-       (Asserted (Atom (Type_eq ((Var x) (Base Float)))))
-       (Asserted (Atom (Type_eq ((Var x) (Base Int)))))
-       (Asserted (Not (Atom (Type_eq ((Base Int) (Base Float)))))))))
+        (Or ((Not (Eq (Var x) Float)) (Not (Eq (Var x) Int)) (Eq Int Float))))
+       (Asserted (Eq (Var x) Float)) (Asserted (Eq (Var x) Int))
+       (Asserted (Not (Eq Int Float))))))
     |}];
   Solver.pop solver;
   print_result (Solver.solve solver);
@@ -652,28 +706,24 @@ let%expect_test "Type_eq: TypeEq(a, Int) and TypeEq(a, Float) conflict via \
   =
   let a = Tvar.of_string "a" in
   let solver = Solver.create () in
-  assert_ok solver (type_eq (Var a) int_type);
-  assert_ok solver (type_eq (Var a) float_type);
+  assert_ok solver (type_eq (Var a) ft_int);
+  assert_ok solver (type_eq (Var a) ft_float);
   print_result (Solver.solve solver);
   [%expect
     {|
     (Unsat
      (core
       ((Theory_lemma
-        (Or
-         ((Not (Atom (Type_eq ((Var a) (Base Float)))))
-          (Not (Atom (Type_eq ((Var a) (Base Int)))))
-          (Atom (Type_eq ((Base Int) (Base Float)))))))
-       (Asserted (Atom (Type_eq ((Var a) (Base Float)))))
-       (Asserted (Atom (Type_eq ((Var a) (Base Int)))))
-       (Asserted (Not (Atom (Type_eq ((Base Int) (Base Float)))))))))
+        (Or ((Not (Eq (Var a) Float)) (Not (Eq (Var a) Int)) (Eq Int Float))))
+       (Asserted (Eq (Var a) Float)) (Asserted (Eq (Var a) Int))
+       (Asserted (Not (Eq Int Float))))))
     |}]
 ;;
 
 let%expect_test "Type_eq: TypeEq(a, Int) alone is sat" =
   let a = Tvar.of_string "a" in
   let solver = Solver.create () in
-  assert_ok solver (type_eq (Var a) int_type);
+  assert_ok solver (type_eq (Var a) ft_int);
   print_result (Solver.solve solver);
   [%expect
     {|
@@ -692,6 +742,9 @@ let%expect_test "Type_eq: normalize makes Eq(a, b) = Eq(b, a) for embedded \
   print_s [%sexp ([%equal: Atom.t] atom1 atom2 : bool)];
   [%expect {| true |}]
 ;;
+
+let (_ : Formula.any -> Formula.any) = ft_array
+let (_ : Type_expr.t) = int_type
 
 (* TODO: test that shows type theory congruence closure doesn't work, then fix
    it. *)

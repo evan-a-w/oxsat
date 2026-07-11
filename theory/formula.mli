@@ -32,3 +32,13 @@ type _ t =
       * [ `Le | `Ge | `Lt | `Gt ]
       * 'a t
       -> ([> `La ] as 'a) t
+
+val sexp_of_t : 'a t -> Sexp.t
+
+(** A [t] closed over every tag, i.e. one that could be any kind of formula
+    (boolean, UF, type, or linear-arithmetic). Used where a formula is stored or
+    returned without statically knowing (or caring) which theories it touches --
+    e.g. asserted formulas and unsat-core reasons. *)
+type any = [ `Boolean | `Uf | `Type | `La ] t
+
+val sexp_of_any : any -> Sexp.t

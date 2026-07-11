@@ -55,13 +55,25 @@ let all_typed_vars t = Hashtbl.keys t.types
 let are_structurally_incompatible t1 t2 =
   match t1, t2 with
   | Type_expr.Base b1, Type_expr.Base b2 -> not (Type_expr.Base.equal b1 b2)
-  | Type_expr.Base _, Type_expr.App _ | Type_expr.App _, Type_expr.Base _ ->
-    true
   | Type_expr.App (c1, _), Type_expr.App (c2, _) -> not (Tvar.equal c1 c2)
+  | Type_expr.Function_type _, Type_expr.Function_type _ -> false
+  | Type_expr.Type, Type_expr.Type -> false
   | Type_expr.Var _, _
   | _, Type_expr.Var _
   | Type_expr.Type_of _, _
   | _, Type_expr.Type_of _ -> false
+  | Type_expr.Base _, Type_expr.App _
+  | Type_expr.App _, Type_expr.Base _
+  | Type_expr.Base _, Type_expr.Function_type _
+  | Type_expr.Function_type _, Type_expr.Base _
+  | Type_expr.Base _, Type_expr.Type
+  | Type_expr.Type, Type_expr.Base _
+  | Type_expr.App _, Type_expr.Function_type _
+  | Type_expr.Function_type _, Type_expr.App _
+  | Type_expr.App _, Type_expr.Type
+  | Type_expr.Type, Type_expr.App _
+  | Type_expr.Function_type _, Type_expr.Type
+  | Type_expr.Type, Type_expr.Function_type _ -> true
 ;;
 
 let assert_atom t ~decision_level ~(atom : Atom.t) ~value =

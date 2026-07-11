@@ -4,6 +4,7 @@ open! Feel.Import
 (** Ground base types. *)
 module Base : sig
   type t =
+    | Bool
     | Int
     | Float
   [@@deriving sexp, compare, equal, hash, enumerate]
@@ -17,6 +18,8 @@ type t =
   | Base of Base.t
   | Type_of of Tvar.t
   | App of Tvar.t * t list
+  | Function_type of t * t
+  | Type
 [@@deriving sexp, compare, hash]
 
 include Comparable.S with type t := t
