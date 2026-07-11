@@ -2,38 +2,33 @@ open! Core
 open! Feel.Import
 
 (** Propositional formulas over theory atoms. *)
-type t =
-  | True
-  | False
-  | Atom of Atom.t
-  | Not of t
-  | And of t list
-  | Or of t list
-[@@deriving sexp]
-
-val fold_map_atoms
-  :  t
-  -> init:'a
-  -> f:('a -> Atom.t -> 'a * Atom.t) @ local
-  -> 'a * t
-
-module Encoding : sig
-  type t
-
-  val create : unit -> t
-  val fresh_var : t -> int
-  val sat_var_for_atom : t -> Atom.t -> int
-  val find_sat_var_for_atom : t -> Atom.t -> int option
-  val atom_for_sat_var : t -> int -> Atom.t option
-  val atoms : t -> (Atom.t * int) list
-  val checkpoint : t -> int
-  val new_atoms_since : t -> checkpoint:int -> (Atom.t * int) list
-end
-
-(** [encode encoding formula] Tseitin-encodes [formula] into CNF, returning a
-    list of clauses whose conjunction is satisfiable iff [formula] is, and such
-    that any satisfying assignment of the clauses makes [formula] true. Fresh
-    Tseitin variables and atom SAT variables are allocated from [encoding] as
-    needed; reusing an [Encoding.t] across multiple calls keeps atom-to-variable
-    assignments consistent. *)
-val encode : Encoding.t -> t -> int array list
+type _ t =
+  (* always used *)
+  | Var : Tvar.t -> _ t
+  | Eq : 'a t * 'a t -> 'a t
+  (* boolean structure *)
+  | True : [> `Boolean ] t
+  | False : [> `Boolean ] t
+  | Not : 'a t -> ([> `Boolean ] as 'a) t
+  | And : 'a t list -> ([> `Boolean ] as 'a) t
+  | Or : 'a t list -> ([> `Boolean ] as 'a) t
+  (* UF *)
+  | App : Tvar.t * 'a t list -> ([> `Uf ] as 'a) t
+  (* Types *)
+  | Bool : [> `Type ] t
+  | Int : [> `Type ] t
+  | Float : [> `Type ] t
+  | Type : [> `Type ] t
+  | Function_type : 'a t * 'a t -> ([> `Type ] as 'a) t
+  | Type_of : 'a t -> [> `Type ] t
+  | Type_app : Tvar.t * 'a t -> ([> `Type ] as 'a) t
+  (* Linear arithmetic *)
+  | Const : Q.t -> [> `La ] t
+  | Scale_const : Q.t * 'a t -> ([> `La ] as 'a) t
+  | Add : 'a t * 'a -> ([> `La ] as 'a) t
+  | Compare :
+      (* no eq, cuz that's already above *)
+      'a t
+      * [ `Le | `Ge | `Lt | `Gt ]
+      * 'a t
+      -> ([> `La ] as 'a) t
