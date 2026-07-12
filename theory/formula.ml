@@ -20,7 +20,7 @@ type _ t =
   | Type : [> `Type ] t
   | Function_type : 'a t * 'a t -> ([> `Type ] as 'a) t
   | Type_of : 'a t -> ([> `Type ] as 'a) t
-  | Type_app : Tvar.t * 'a t -> ([> `Type ] as 'a) t
+  | Type_app : Tvar.t * 'a t list -> ([> `Type ] as 'a) t
   (* Linear arithmetic (prefixed with [La_] so we can re-use similar stuff for
      eg. bitvectors) *)
   | La_const : Q.t -> [> `La ] t
@@ -32,6 +32,76 @@ type _ t =
       * [ `Le | `Ge | `Lt | `Gt ]
       * 'a t
       -> ([> `La ] as 'a) t
+
+module Op = struct
+  type t =
+    | Var of Tvar.t
+    | Eq
+    | True
+    | False
+    | Not
+    | And
+    | Or
+    | App of Tvar.t
+    | Bool
+    | Int
+    | Float
+    | Type
+    | Function_type
+    | Type_of
+    | Type_app of Tvar.t
+    | La_const of Q.t
+    | La_scale_const of Q.t
+    | La_add
+    | La_compare of [ `Le | `Ge | `Lt | `Gt ]
+  [@@deriving sexp, compare, hash, equal]
+end
+
+let op t : Op.t =
+  match t with
+  | Var v -> Var v
+  | Eq _ -> Eq
+  | True -> True
+  | False -> False
+  | Not _ -> Not
+  | And _ -> And
+  | Or _ -> Or
+  | App (v, _) -> App v
+  | Bool -> Bool
+  | Int -> Int
+  | Float -> Float
+  | Type -> Type
+  | Function_type _ -> Function_type
+  | Type_of _ -> Type_of
+  | Type_app (v, _) -> Type_app v
+  | La_const q -> La_const q
+  | La_scale_const (q, _) -> La_scale_const q
+  | La_add _ -> La_add
+  | La_compare (_, op, _) -> La_compare op
+;;
+
+let args t : _ t list =
+  match t with
+  | Var _ -> []
+  | Eq (a, b) -> [ a; b ]
+  | True -> []
+  | False -> []
+  | Not x -> [ x ]
+  | And l -> l
+  | Or l -> l
+  | App (_, l) -> l
+  | Bool -> []
+  | Int -> []
+  | Float -> []
+  | Type -> []
+  | Function_type (a, b) -> [ a; b ]
+  | Type_of x -> [ x ]
+  | Type_app (_, l) -> [ l ]
+  | La_const _ -> []
+  | La_scale_const (_, r) -> [ r ]
+  | La_add (a, b) -> [ a; b ]
+  | La_compare (a, _, b) -> [ a; b ]
+;;
 
 type any = [ `Boolean | `Uf | `Type | `La | `Term | `Atom ] t
 

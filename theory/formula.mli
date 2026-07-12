@@ -37,4 +37,28 @@ type _ t =
 type any = [ `Boolean | `Uf | `Type | `La | `Term | `Atom ] t
 [@@deriving sexp, compare, hash, equal]
 
+module Op : sig
+  type t =
+    | Var of Tvar.t
+    | Eq
+    | True
+    | False
+    | Not
+    | And
+    | Or
+    | App of Tvar.t
+    | Bool
+    | Int
+    | Float
+    | Type
+    | Function_type
+    | Type_of
+    | Type_app of Tvar.t
+    | La_const of Q.t
+    | La_scale_const of Q.t
+    | La_add
+    | La_compare
+  [@@deriving sexp, compare, hash, equal]
+end
+
 module Uf : Uninterpreted_functions_intf.S with type Term.t = [ `Uf | `Term ] t
