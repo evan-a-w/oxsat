@@ -197,9 +197,9 @@ let rec type_expr_of : type a. a Formula.t -> Type_expr.t Or_error.t =
      | _ ->
        Or_error.error_s
          [%message "Type_of is only supported applied to a variable"])
-  | Type_app (f, a) ->
-    let%bind.Or_error a = type_expr_of a in
-    Ok (Type_expr.App (f, [ a ]))
+  | Type_app (f, args) ->
+    let%bind.Or_error args = args |> List.map ~f:type_expr_of |> Or_error.all in
+    Ok (Type_expr.App (f, args))
   | _ -> Or_error.error_s [%message "formula is not a type expression"]
 ;;
 
@@ -355,15 +355,7 @@ let rec type_expr_to_formula : Type_expr.t -> [> `Type | `Term ] Formula.t
   | Base Int -> Int
   | Base Float -> Float
   | Type_of v -> Type_of (Var v)
-  | App (f, [ arg ]) -> Type_app (f, type_expr_to_formula arg)
-  | App (_, _) ->
-    (* [Formula.Type_app] only represents single-argument application with a
-       bare [Tvar.t] head, so multi-arg (or zero-arg) [Type_expr.App] can't be
-       reconstructed as a [Formula.t]. *)
-    raise_s
-      [%message
-        "Encoding.type_expr_to_formula: can't reconstruct a multi-argument \
-         Type_expr.App as a Formula.t"]
+  | App (f, args) -> Type_app (f, List.map args ~f:type_expr_to_formula)
   | Type_expr.Type -> Formula.Type
   | Function_type (a, b) ->
     Function_type (type_expr_to_formula a, type_expr_to_formula b)

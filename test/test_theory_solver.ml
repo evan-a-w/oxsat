@@ -580,7 +580,7 @@ let array_of (elem : Type_expr.t) : Type_expr.t = App (array_ctor, [ elem ])
 let type_eq te1 te2 : Formula.any = Eq (te1, te2)
 let ft_int : Formula.any = Int
 let ft_float : Formula.any = Float
-let ft_array (elem : Formula.any) : Formula.any = Type_app (array_ctor, elem)
+let ft_array (elem : Formula.any) : Formula.any = Type_app (array_ctor, [ elem ])
 
 let%expect_test "Has_type: basic assert and get_type" =
   let solver = Solver.create () in
@@ -635,9 +635,10 @@ let%expect_test "Has_type: structural conflict (Array vs Int)" =
     (Unsat
      (core
       ((Theory_lemma
-        (Or ((Not (Eq (Var x) Int)) (Not (Eq (Var x) (Type_app Array (Var a)))))))
+        (Or
+         ((Not (Eq (Var x) Int)) (Not (Eq (Var x) (Type_app Array ((Var a))))))))
        (Asserted (Eq (Var x) Int))
-       (Asserted (Eq (Var x) (Type_app Array (Var a)))))))
+       (Asserted (Eq (Var x) (Type_app Array ((Var a))))))))
     |}]
 ;;
 

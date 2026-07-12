@@ -21,7 +21,7 @@ type _ t =
   | Type : [> `Type ] t
   | Function_type : 'a t * 'a t -> ([> `Type ] as 'a) t
   | Type_of : 'a t -> ([> `Type ] as 'a) t
-  | Type_app : Tvar.t * 'a t -> ([> `Type ] as 'a) t
+  | Type_app : Tvar.t * 'a t list -> ([> `Type ] as 'a) t
   (* Linear arithmetic *)
   | La_const : Q.t -> [> `La ] t
   | La_scale_const : Q.t * 'a t -> ([> `La ] as 'a) t
@@ -57,8 +57,11 @@ module Op : sig
     | La_const of Q.t
     | La_scale_const of Q.t
     | La_add
-    | La_compare
+    | La_compare of [ `Le | `Ge | `Lt | `Gt ]
   [@@deriving sexp, compare, hash, equal]
 end
+
+val op : 'a t -> Op.t
+val args : 'a t -> any list
 
 module Uf : Uninterpreted_functions_intf.S with type Term.t = [ `Uf | `Term ] t

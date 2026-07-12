@@ -57,7 +57,8 @@ module Op = struct
   [@@deriving sexp, compare, hash, equal]
 end
 
-let op t : Op.t =
+let op : type a. a t -> Op.t =
+  fun t ->
   match t with
   | Var v -> Var v
   | Eq _ -> Eq
@@ -80,30 +81,33 @@ let op t : Op.t =
   | La_compare (_, op, _) -> La_compare op
 ;;
 
-let args t : _ t list =
+type any = [ `Boolean | `Uf | `Type | `La | `Term | `Atom ] t
+
+let widen (type a) (t : a t) : any = Obj.magic t
+let widen_list (type a) (l : a t list) : any list = Obj.magic l
+
+let args (type a) (t : a t) : any list =
   match t with
   | Var _ -> []
-  | Eq (a, b) -> [ a; b ]
+  | Eq (a, b) -> [ widen a; widen b ]
   | True -> []
   | False -> []
-  | Not x -> [ x ]
-  | And l -> l
-  | Or l -> l
-  | App (_, l) -> l
+  | Not x -> [ widen x ]
+  | And l -> widen_list l
+  | Or l -> widen_list l
+  | App (_, l) -> widen_list l
   | Bool -> []
   | Int -> []
   | Float -> []
   | Type -> []
-  | Function_type (a, b) -> [ a; b ]
-  | Type_of x -> [ x ]
-  | Type_app (_, l) -> [ l ]
+  | Function_type (a, b) -> [ widen a; widen b ]
+  | Type_of x -> [ widen x ]
+  | Type_app (_, l) -> widen_list l
   | La_const _ -> []
-  | La_scale_const (_, r) -> [ r ]
-  | La_add (a, b) -> [ a; b ]
-  | La_compare (a, _, b) -> [ a; b ]
+  | La_scale_const (_, r) -> [ widen r ]
+  | La_add (a, b) -> [ widen a; widen b ]
+  | La_compare (a, _, b) -> [ widen a; widen b ]
 ;;
-
-type any = [ `Boolean | `Uf | `Type | `La | `Term | `Atom ] t
 
 let rec sexp_of_t : type a. (a -> Sexp.t) -> a t -> Sexp.t =
   fun sexp_of_a formula ->
@@ -129,7 +133,12 @@ let rec sexp_of_t : type a. (a -> Sexp.t) -> a t -> Sexp.t =
   | Type -> Sexp.Atom "Type"
   | Function_type (a, b) -> node "Function_type" [ sexp_of_t a; sexp_of_t b ]
   | Type_of f -> node "Type_of" [ sexp_of_t f ]
-  | Type_app (f, a) -> node "Type_app" [ [%sexp_of: Tvar.t] f; sexp_of_t a ]
+  | Type_app (f, args) ->
+    node
+      "Type_app"
+      [ [%sexp_of: Tvar.t] f
+      ; [%sexp_of: Sexp.t list] (List.map args ~f:sexp_of_t)
+      ]
   | La_const q -> node "La_const" [ [%sexp_of: Q.t] q ]
   | La_scale_const (q, a) ->
     node "La_scale_const" [ [%sexp_of: Q.t] q; sexp_of_t a ]
@@ -168,7 +177,10 @@ let rec any_of_sexp sexp : any =
          , [%of_sexp: Sexp.t list] args |> List.map ~f:any_of_sexp )
      | "Function_type", [ a; b ] -> Function_type (any_of_sexp a, any_of_sexp b)
      | "Type_of", [ f ] -> Type_of (any_of_sexp f)
-     | "Type_app", [ f; a ] -> Type_app ([%of_sexp: Tvar.t] f, any_of_sexp a)
+     | "Type_app", [ f; args ] ->
+       Type_app
+         ( [%of_sexp: Tvar.t] f
+         , [%of_sexp: Sexp.t list] args |> List.map ~f:any_of_sexp )
      | "La_const", [ q ] -> La_const ([%of_sexp: Q.t] q)
      | "La_scale_const", [ q; a ] ->
        La_scale_const ([%of_sexp: Q.t] q, any_of_sexp a)
@@ -239,8 +251,10 @@ let rec compare_poly : type a b. a t -> b t -> int =
   | Function_type (a1, b1), Function_type (a2, b2) ->
     lex (compare_poly a1 a2) (fun () -> compare_poly b1 b2)
   | Type_of f1, Type_of f2 -> compare_poly f1 f2
-  | Type_app (f1, a1), Type_app (f2, a2) ->
-    lex ([%compare: Tvar.t] f1 f2) (fun () -> compare_poly a1 a2)
+  | Type_app (f1, args1), Type_app (f2, args2) ->
+    lex
+      ([%compare: Tvar.t] f1 f2)
+      (fun () -> compare_list_poly compare_poly args1 args2)
   | La_const q1, La_const q2 -> [%compare: Q.t] q1 q2
   | La_scale_const (q1, a1), La_scale_const (q2, a2) ->
     lex ([%compare: Q.t] q1 q2) (fun () -> compare_poly a1 a2)
@@ -303,7 +317,8 @@ let rec hash_fold_poly : type a. Hash.state -> a t -> Hash.state =
     hash_fold_list_poly hash_fold_poly ([%hash_fold: Tvar.t] state f) args
   | Function_type (a, b) -> hash_fold_poly (hash_fold_poly state a) b
   | Type_of f -> hash_fold_poly state f
-  | Type_app (f, a) -> hash_fold_poly ([%hash_fold: Tvar.t] state f) a
+  | Type_app (f, args) ->
+    hash_fold_list_poly hash_fold_poly ([%hash_fold: Tvar.t] state f) args
   | La_const q -> [%hash_fold: Q.t] state q
   | La_scale_const (q, a) -> hash_fold_poly ([%hash_fold: Q.t] state q) a
   | La_add (a, b) -> hash_fold_poly (hash_fold_poly state a) b
