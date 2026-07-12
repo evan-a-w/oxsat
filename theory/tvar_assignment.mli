@@ -7,7 +7,7 @@ open! Feel.Import
 type t =
   { type_ : Type_expr.t option
   ; numeric : Simplex.Q_eps.t option
-  ; euf_repr : Formula.Uf.Term.t option
+  ; euf_repr : Formula.any option
   (** The representative term of this tvar's EUF equivalence class, if it
       differs from the tvar itself (i.e. it's been unified with something). *)
   }

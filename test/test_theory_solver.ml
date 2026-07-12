@@ -28,8 +28,8 @@ let assert_ok solver formula =
 
 (* ----- Term/Atom basics ----- *)
 
-let uf_x : Formula.Uf.Term.t = Var (Tvar.of_string "x")
-let uf_y : Formula.Uf.Term.t = Var (Tvar.of_string "y")
+let uf_x : Formula.any = Var (Tvar.of_string "x")
+let uf_y : Formula.any = Var (Tvar.of_string "y")
 
 let%expect_test "Atom.normalize orders Eq sides canonically" =
   let a = `Eq (uf_x, uf_y) in
@@ -43,8 +43,8 @@ let%expect_test "Atom.normalize orders Eq sides canonically" =
 ;;
 
 let%expect_test "Term/Atom sexp round trip" =
-  let term : Formula.Uf.Term.t = App (Tvar.of_string "f", [ uf_x ]) in
-  print_s ([%sexp_of: Formula.Uf.Term.t] term);
+  let term : Formula.any = App (Tvar.of_string "f", [ uf_x ]) in
+  print_s ([%sexp_of: Formula.any] term);
   [%expect {| (App f ((Var x))) |}]
 ;;
 
@@ -426,8 +426,8 @@ let%expect_test "push/pop: nested scopes" =
       ((Asserted (Not (Eq (Var y) (Var z))))
        (Theory_lemma
         (Or
-         ((Eq (Var y) (Var z)) (Not (Eq (Var x) (Var y)))
-          (Not (Eq (Var x) (Var z))))))
+         ((Eq (Type_var y) (Type_var z)) (Not (Eq (Type_var x) (Type_var y)))
+          (Not (Eq (Type_var x) (Type_var z))))))
        (Asserted (Eq (Var x) (Var y))) (Asserted (Eq (Var x) (Var z))))))
     |}];
   Solver.pop solver;
@@ -604,8 +604,10 @@ let%expect_test "Has_type: conflicting ground types are unsat" =
     (Unsat
      (core
       ((Theory_lemma
-        (Or ((Not (Eq (Var x) Float)) (Not (Eq (Var x) Int)) (Eq Int Float))))
-       (Asserted (Eq (Var x) Float)) (Asserted (Eq (Var x) Int))
+        (Or
+         ((Not (Eq (Type_var x) Float)) (Not (Eq (Type_var x) Int))
+          (Eq Int Float))))
+       (Asserted (Eq (Type_var x) Float)) (Asserted (Eq (Type_var x) Int))
        (Asserted (Not (Eq Int Float))))))
     |}]
 ;;
@@ -636,9 +638,10 @@ let%expect_test "Has_type: structural conflict (Array vs Int)" =
      (core
       ((Theory_lemma
         (Or
-         ((Not (Eq (Var x) Int)) (Not (Eq (Var x) (Type_app Array ((Var a))))))))
-       (Asserted (Eq (Var x) Int))
-       (Asserted (Eq (Var x) (Type_app Array ((Var a))))))))
+         ((Not (Eq (Type_var x) Int))
+          (Not (Eq (Type_var x) (Type_app Array ((Type_var a))))))))
+       (Asserted (Eq (Type_var x) Int))
+       (Asserted (Eq (Type_var x) (Type_app Array ((Type_var a))))))))
     |}]
 ;;
 
@@ -677,8 +680,10 @@ let%expect_test "Has_type: push/pop retracts type conflict" =
     (Unsat
      (core
       ((Theory_lemma
-        (Or ((Not (Eq (Var x) Float)) (Not (Eq (Var x) Int)) (Eq Int Float))))
-       (Asserted (Eq (Var x) Float)) (Asserted (Eq (Var x) Int))
+        (Or
+         ((Not (Eq (Type_var x) Float)) (Not (Eq (Type_var x) Int))
+          (Eq Int Float))))
+       (Asserted (Eq (Type_var x) Float)) (Asserted (Eq (Type_var x) Int))
        (Asserted (Not (Eq Int Float))))))
     |}];
   Solver.pop solver;
@@ -721,7 +726,9 @@ let%expect_test "Type_eq: TypeEq(a, Int) and TypeEq(a, Float) conflict via \
     (Unsat
      (core
       ((Theory_lemma
-        (Or ((Not (Eq (Var a) Float)) (Not (Eq (Var a) Int)) (Eq Int Float))))
+        (Or
+         ((Not (Eq (Type_var a) Float)) (Not (Eq (Type_var a) Int))
+          (Eq Int Float))))
        (Asserted (Eq (Var a) Float)) (Asserted (Eq (Var a) Int))
        (Asserted (Not (Eq Int Float))))))
     |}]

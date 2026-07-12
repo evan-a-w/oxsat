@@ -29,5 +29,3 @@ val split_function : t -> (Tvar.t * t list) option
 
 (** for vec *)
 val garbage_for_vec : t
-
-module Uf : Uninterpreted_functions_intf.S with type Term.t := t

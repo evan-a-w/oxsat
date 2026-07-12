@@ -8,7 +8,7 @@ open! Feel.Import
     - [x < c] is
       [Not (Atom (`Le (Linear_expr.neg (Linear_expr.var x), Q.neg c)))] *)
 type t =
-  [ `Eq of Formula.Uf.Term.t * Formula.Uf.Term.t
+  [ `Eq of Formula.any * Formula.any
   | `Le of Linear_expr.t * Q.t
   | `Type_eq of Type_expr.t * Type_expr.t
   ]

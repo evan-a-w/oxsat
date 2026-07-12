@@ -30,13 +30,3 @@ let split_function = function
 ;;
 
 let garbage_for_vec = Var (Tvar.of_string "")
-
-module Uf = Uninterpreted_functions.Make (struct
-    type nonrec t = t [@@deriving sexp, compare, hash]
-
-    let split_function = split_function
-    let garbage_for_vec = garbage_for_vec
-
-    include functor Comparable.Make
-    include functor Hashable.Make
-  end)

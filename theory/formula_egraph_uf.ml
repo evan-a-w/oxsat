@@ -1,19 +1,12 @@
 open! Core
 open! Feel.Import
 
-module Formula_any = struct
-  type t = Formula.any [@@deriving sexp, compare, hash]
-
-  include functor Comparable.Make
-  include functor Hashable.Make
-end
-
 module Atom = struct
   type t = [ `Eq of Formula.any * Formula.any ] [@@deriving sexp, compare, hash]
 
   let normalize = function
     | `Eq (a, b) as x ->
-      (match Ordering.of_int ([%compare: Formula.any] a b) with
+      (match Ordering.of_int (Formula.compare_any a b) with
        | Equal | Less -> x
        | Greater -> `Eq (b, a))
   ;;
@@ -93,7 +86,7 @@ module Trail_entry = struct
 end
 
 type t =
-  { id_by_term : G.Id.t Formula_any.Table.t
+  { id_by_term : G.Id.t Formula.Any.Table.t
   ; term_by_id : Formula.any G.Id.Table.t
   ; node_by_id : G.Node.t G.Id.Table.t
   ; egraph : G.t
@@ -175,7 +168,7 @@ let register_atom t ~(atom : Atom.t) =
 
 let create ~atoms =
   let t =
-    { id_by_term = Formula_any.Table.create ()
+    { id_by_term = Formula.Any.Table.create ()
     ; term_by_id = G.Id.Table.create ()
     ; node_by_id = G.Id.Table.create ()
     ; egraph = G.create ()
@@ -210,25 +203,37 @@ let assert_true_atom t ~decision_level ~(atom : Atom.t) =
     t.trail := Trail_entry.Truth { atom; decision_level } :: !(t.trail);
     let id_a = atom_data.id_a in
     let id_b = atom_data.id_b in
-    let first_merge = ref (Some atom) in
+    let first_merge = ref true in
     let on_merge ~winner ~loser =
-      let justification =
-        match !first_merge with
-        | Some asserted_atom ->
-          first_merge := None;
-          Justification.Asserted asserted_atom
-        | None ->
-          let n1 = Hashtbl.find_exn t.node_by_id winner in
-          let n2 = Hashtbl.find_exn t.node_by_id loser in
-          Justification.Congruence
-            { op = n1.op; args1 = n1.children; args2 = n2.children }
-      in
-      add_explanation_edge
-        t
-        ~x:(G.Id.to_int winner)
-        ~y:(G.Id.to_int loser)
-        ~justification
-        ~decision_level
+      match !first_merge with
+      | true ->
+        (* The direct merge this assertion requested. [winner]/[loser] are the
+           union-find's post-canonicalization ids, which needn't be [id_a]/
+           [id_b] (e.g. one of them may already have been absorbed into another
+           class by an earlier, unrelated merge) -- recording the edge between
+           the *union-find's* choice of ids would silently skip whatever fact
+           connected [id_a] or [id_b] to their current class, breaking
+           [explain]'s ability to reconstruct the full justification chain.
+           Recording it between [id_a]/[id_b] directly keeps every asserted fact
+           reachable regardless of union-by-rank tie-breaking. *)
+        first_merge := false;
+        add_explanation_edge
+          t
+          ~x:(G.Id.to_int id_a)
+          ~y:(G.Id.to_int id_b)
+          ~justification:(Justification.Asserted atom)
+          ~decision_level
+      | false ->
+        let n1 = Hashtbl.find_exn t.node_by_id winner in
+        let n2 = Hashtbl.find_exn t.node_by_id loser in
+        add_explanation_edge
+          t
+          ~x:(G.Id.to_int winner)
+          ~y:(G.Id.to_int loser)
+          ~justification:
+            (Justification.Congruence
+               { op = n1.op; args1 = n1.children; args2 = n2.children })
+          ~decision_level
     in
     G.set_decision_level t.egraph decision_level;
     G.merge t.egraph ~on_merge id_a id_b;

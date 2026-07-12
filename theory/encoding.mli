@@ -48,3 +48,12 @@ val atom_to_formula : Atom.t -> Formula.any
 (** Reconstructs a [Formula.t] representing [le], e.g. for building [La_compare]
     formulas out of a [Linear_expr.t] built via arithmetic on [Tvar.t]s. *)
 val linear_expr_to_formula : Linear_expr.t -> [> `La | `Term ] Formula.t
+
+(** Reconstructs a [Formula.t] representing [type_expr], widening
+    [Type_expr.Var] to [Formula.Type_var] so it's distinguishable from a bare
+    [Formula.Var] used as a UF term. *)
+val type_expr_to_formula : Type_expr.t -> [> `Type | `Term ] Formula.t
+
+(** Interprets [formula] as a type expression; the inverse of
+    {!type_expr_to_formula}. *)
+val type_expr_of : [> `Type | `Term ] Formula.t -> Type_expr.t Or_error.t

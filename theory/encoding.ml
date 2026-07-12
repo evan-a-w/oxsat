@@ -163,13 +163,13 @@ let shape_of (type a) (formula : a Formula.t) : Shape.t =
   | App (_, _) -> Uf
   | Bool | Int | Float | Type
   | Function_type (_, _)
-  | Type_of _
+  | Type_of _ | Type_var _
   | Type_app (_, _) -> Type
   | La_const _ | La_scale_const (_, _) | La_add (_, _) | La_compare (_, _, _) ->
     La
 ;;
 
-let rec uf_term_of : type a. a Formula.t -> Formula.Uf.Term.t Or_error.t =
+let rec uf_term_of : type a. a Formula.t -> Formula.any Or_error.t =
   fun formula ->
   match formula with
   | Var v -> Ok (Formula.Var v)
@@ -183,6 +183,7 @@ let rec type_expr_of : type a. a Formula.t -> Type_expr.t Or_error.t =
   fun formula ->
   match formula with
   | Var v -> Ok (Type_expr.Var v)
+  | Type_var v -> Ok (Type_expr.Var v)
   | Bool -> Ok (Type_expr.Base Bool)
   | Int -> Ok (Type_expr.Base Int)
   | Float -> Ok (Type_expr.Base Float)
@@ -348,9 +349,8 @@ and neq_formula_of
          ])
 ;;
 
-let rec type_expr_to_formula : Type_expr.t -> [> `Type | `Term ] Formula.t
-  = function
-  | Var v -> Var v
+let rec type_expr_to_formula : Type_expr.t -> [> `Type ] Formula.t = function
+  | Var v -> Type_var v
   | Base Bool -> Bool
   | Base Int -> Int
   | Base Float -> Float
@@ -377,18 +377,8 @@ let linear_expr_to_formula (le : Linear_expr.t) : [> `La | `Term ] Formula.t =
     List.fold rest ~init:first ~f:(fun acc s -> Formula.La_add (acc, s))
 ;;
 
-(* [Formula.t]'s phantom tag doesn't support subtyping coercion (it's a GADT,
-   not a plain polymorphic variant), so widening a [Formula.Uf.Term.t] into
-   [Formula.any] means rebuilding it via the (rank-2 polymorphic) [Var]/[App]
-   constructors rather than a [:>] coercion. *)
-let rec widen_uf_term : Formula.Uf.Term.t -> ([> `Uf | `Term ] as 'a) Formula.t
-  = function
-  | Var v -> Var v
-  | App (f, args) -> App (f, List.map args ~f:widen_uf_term)
-;;
-
 let atom_to_formula : Atom.t -> Formula.any = function
-  | `Eq (a, b) -> Eq (widen_uf_term a, widen_uf_term b)
+  | `Eq (a, b) -> Eq (a, b)
   | `Type_eq (a, b) -> Eq (type_expr_to_formula a, type_expr_to_formula b)
   | `Le (le, c) -> La_compare (linear_expr_to_formula le, `Le, La_const c)
 ;;

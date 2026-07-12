@@ -20,6 +20,7 @@ type _ t =
   | Type : [> `Type ] t
   | Function_type : 'a t * 'a t -> ([> `Type ] as 'a) t
   | Type_of : 'a t -> ([> `Type ] as 'a) t
+  | Type_var : Tvar.t -> [> `Type ] t
   | Type_app : Tvar.t * 'a t list -> ([> `Type ] as 'a) t
   (* Linear arithmetic (prefixed with [La_] so we can re-use similar stuff for
      eg. bitvectors) *)
@@ -49,6 +50,7 @@ module Op = struct
     | Type
     | Function_type
     | Type_of
+    | Type_var of Tvar.t
     | Type_app of Tvar.t
     | La_const of Q.t
     | La_scale_const of Q.t
@@ -77,6 +79,7 @@ let op : type a. a t -> Op.t =
   | Type -> Type
   | Function_type _ -> Function_type
   | Type_of _ -> Type_of
+  | Type_var v -> Type_var v
   | Type_app (v, _) -> Type_app v
   | La_const q -> La_const q
   | La_scale_const (q, _) -> La_scale_const q
@@ -105,6 +108,7 @@ let args (type a) (t : a t) : any list =
   | Type -> []
   | Function_type (a, b) -> [ widen a; widen b ]
   | Type_of x -> [ widen x ]
+  | Type_var _ -> []
   | Type_app (_, l) -> widen_list l
   | La_const _ -> []
   | La_scale_const (_, r) -> [ widen r ]
@@ -128,6 +132,7 @@ let make_opt ~(op : Op.t) ~(args : any list) : any option =
   | Type, [] -> Some Type
   | Function_type, [ a; b ] -> Some (Function_type (a, b))
   | Type_of, [ a ] -> Some (Type_of a)
+  | Type_var v, [] -> Some (Type_var v)
   | Type_app v, l -> Some (Type_app (v, l))
   | La_const q, [] -> Some (La_const q)
   | La_scale_const q, [ a ] -> Some (La_scale_const (q, a))
@@ -144,6 +149,7 @@ let make_opt ~(op : Op.t) ~(args : any list) : any option =
       | Type
       | Function_type
       | Type_of
+      | Type_var _
       | La_const _
       | La_scale_const _
       | La_add
@@ -177,6 +183,7 @@ let rec sexp_of_t : type a. (a -> Sexp.t) -> a t -> Sexp.t =
   | Type -> Sexp.Atom "Type"
   | Function_type (a, b) -> node "Function_type" [ sexp_of_t a; sexp_of_t b ]
   | Type_of f -> node "Type_of" [ sexp_of_t f ]
+  | Type_var v -> node "Type_var" [ [%sexp_of: Tvar.t] v ]
   | Type_app (f, args) ->
     node
       "Type_app"
@@ -221,6 +228,7 @@ let rec any_of_sexp sexp : any =
          , [%of_sexp: Sexp.t list] args |> List.map ~f:any_of_sexp )
      | "Function_type", [ a; b ] -> Function_type (any_of_sexp a, any_of_sexp b)
      | "Type_of", [ f ] -> Type_of (any_of_sexp f)
+     | "Type_var", [ v ] -> Type_var ([%of_sexp: Tvar.t] v)
      | "Type_app", [ f; args ] ->
        Type_app
          ( [%of_sexp: Tvar.t] f
@@ -255,11 +263,12 @@ let rank : type a. a t -> int = function
   | Type -> 11
   | Function_type _ -> 12
   | Type_of _ -> 13
-  | Type_app _ -> 14
-  | La_const _ -> 15
-  | La_scale_const _ -> 16
-  | La_add _ -> 17
-  | La_compare _ -> 18
+  | Type_var _ -> 14
+  | Type_app _ -> 15
+  | La_const _ -> 16
+  | La_scale_const _ -> 17
+  | La_add _ -> 18
+  | La_compare _ -> 19
 ;;
 
 let lex first second = if first <> 0 then first else second ()
@@ -295,6 +304,7 @@ let rec compare_poly : type a b. a t -> b t -> int =
   | Function_type (a1, b1), Function_type (a2, b2) ->
     lex (compare_poly a1 a2) (fun () -> compare_poly b1 b2)
   | Type_of f1, Type_of f2 -> compare_poly f1 f2
+  | Type_var v1, Type_var v2 -> [%compare: Tvar.t] v1 v2
   | Type_app (f1, args1), Type_app (f2, args2) ->
     lex
       ([%compare: Tvar.t] f1 f2)
@@ -323,6 +333,7 @@ let rec compare_poly : type a b. a t -> b t -> int =
   | Type, _
   | Function_type _, _
   | Type_of _, _
+  | Type_var _, _
   | Type_app _, _
   | La_const _, _
   | La_scale_const _, _
@@ -361,6 +372,7 @@ let rec hash_fold_poly : type a. Hash.state -> a t -> Hash.state =
     hash_fold_list_poly hash_fold_poly ([%hash_fold: Tvar.t] state f) args
   | Function_type (a, b) -> hash_fold_poly (hash_fold_poly state a) b
   | Type_of f -> hash_fold_poly state f
+  | Type_var v -> [%hash_fold: Tvar.t] state v
   | Type_app (f, args) ->
     hash_fold_list_poly hash_fold_poly ([%hash_fold: Tvar.t] state f) args
   | La_const q -> [%hash_fold: Q.t] state q
@@ -392,27 +404,9 @@ let hash_fold_any (state : Hash.state) (a : any) : Hash.state =
 
 let hash_any (a : any) : int = Hash.run hash_fold_poly a
 
-module Uf = Uninterpreted_functions.Make (struct
-    type nonrec t = [ `Uf | `Term ] t [@@deriving sexp_of, compare, hash]
+module Any = struct
+  type t = any [@@deriving sexp, compare, hash]
 
-    let rec t_of_sexp (sexp : Sexp.t) : t =
-      match sexp with
-      | List [ Atom "Var"; v ] -> Var ([%of_sexp: Tvar.t] v)
-      | List [ Atom "App"; f; args ] ->
-        App
-          ( [%of_sexp: Tvar.t] f
-          , [%of_sexp: Sexp.t list] args |> List.map ~f:t_of_sexp )
-      | _ -> of_sexp_error "Formula.Uf.Term.t_of_sexp: expected Var or App" sexp
-    ;;
-
-    let split_function : t -> (Tvar.t * t list) option = function
-      | Var _ -> None
-      | App (function_, args) -> Some (function_, args)
-      | _ -> .
-    ;;
-
-    let garbage_for_vec : t = Var (Tvar.of_string "")
-
-    include functor Comparable.Make
-    include functor Hashable.Make
-  end)
+  include functor Comparable.Make
+  include functor Hashable.Make
+end

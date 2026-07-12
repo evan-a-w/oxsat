@@ -21,6 +21,7 @@ type _ t =
   | Type : [> `Type ] t
   | Function_type : 'a t * 'a t -> ([> `Type ] as 'a) t
   | Type_of : 'a t -> ([> `Type ] as 'a) t
+  | Type_var : Tvar.t -> [> `Type ] t
   | Type_app : Tvar.t * 'a t list -> ([> `Type ] as 'a) t
   (* Linear arithmetic *)
   | La_const : Q.t -> [> `La ] t
@@ -36,6 +37,13 @@ type _ t =
 
 type any = [ `Boolean | `Uf | `Type | `La | `Term | `Atom ] t
 [@@deriving sexp, compare, hash, equal]
+
+module Any : sig
+  type t = any [@@deriving sexp, compare, hash]
+
+  include Comparable.S with type t := t
+  include Hashable.S with type t := t
+end
 
 module Op : sig
   type t =
@@ -53,6 +61,7 @@ module Op : sig
     | Type
     | Function_type
     | Type_of
+    | Type_var of Tvar.t
     | Type_app of Tvar.t
     | La_const of Q.t
     | La_scale_const of Q.t
@@ -68,5 +77,3 @@ val op : 'a t -> Op.t
 val args : 'a t -> any list
 val make_opt : op:Op.t -> args:any list -> any option
 val make : op:Op.t -> args:any list -> any
-
-module Uf : Uninterpreted_functions_intf.S with type Term.t = [ `Uf | `Term ] t

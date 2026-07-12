@@ -278,7 +278,7 @@ let%expect_test "solver: integral var branches on a non-integral relaxed \
            (La_const ((num 1) (den 1))))
           (La_compare (La_scale_const ((num -1) (den 1)) (Var x)) Le
            (La_const ((num -2) (den 1))))
-          (Not (Eq (Var x) Int)))))
+          (Not (Eq (Type_var x) Int)))))
        (Asserted (Eq (Var x) Int))
        (Asserted
         (La_compare (La_scale_const ((num 2) (den 1)) (Var x)) Ge
