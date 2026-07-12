@@ -59,9 +59,14 @@ module Op : sig
     | La_add
     | La_compare of [ `Le | `Ge | `Lt | `Gt ]
   [@@deriving sexp, compare, hash, equal]
+
+  include Comparable.S with type t := t
+  include Hashable.S with type t := t
 end
 
 val op : 'a t -> Op.t
 val args : 'a t -> any list
+val make_opt : op:Op.t -> args:any list -> any option
+val make : op:Op.t -> args:any list -> any
 
 module Uf : Uninterpreted_functions_intf.S with type Term.t = [ `Uf | `Term ] t

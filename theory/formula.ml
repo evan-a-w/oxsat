@@ -55,6 +55,9 @@ module Op = struct
     | La_add
     | La_compare of [ `Le | `Ge | `Lt | `Gt ]
   [@@deriving sexp, compare, hash, equal]
+
+  include functor Hashable.Make
+  include functor Comparable.Make
 end
 
 let op : type a. a t -> Op.t =
@@ -108,6 +111,47 @@ let args (type a) (t : a t) : any list =
   | La_add (a, b) -> [ widen a; widen b ]
   | La_compare (a, _, b) -> [ widen a; widen b ]
 ;;
+
+let make_opt ~(op : Op.t) ~(args : any list) : any option =
+  match (op : Op.t), args with
+  | Var v, [] -> Some (Var v)
+  | Eq, [ a; b ] -> Some (Eq (a, b))
+  | True, [] -> Some True
+  | False, [] -> Some False
+  | Not, [ a ] -> Some (Not a)
+  | And, l -> Some (And l)
+  | Or, l -> Some (Or l)
+  | App v, l -> Some (App (v, l))
+  | Bool, [] -> Some Bool
+  | Int, [] -> Some Int
+  | Float, [] -> Some Float
+  | Type, [] -> Some Type
+  | Function_type, [ a; b ] -> Some (Function_type (a, b))
+  | Type_of, [ a ] -> Some (Type_of a)
+  | Type_app v, l -> Some (Type_app (v, l))
+  | La_const q, [] -> Some (La_const q)
+  | La_scale_const q, [ a ] -> Some (La_scale_const (q, a))
+  | La_add, [ a; b ] -> Some (La_add (a, b))
+  | La_compare cmp, [ a; b ] -> Some (La_compare (a, cmp, b))
+  | ( ( Var _
+      | Eq
+      | True
+      | False
+      | Not
+      | Bool
+      | Int
+      | Float
+      | Type
+      | Function_type
+      | Type_of
+      | La_const _
+      | La_scale_const _
+      | La_add
+      | La_compare _ )
+    , _ ) -> None
+;;
+
+let make ~op ~args = Option.value_exn (make_opt ~op ~args)
 
 let rec sexp_of_t : type a. (a -> Sexp.t) -> a t -> Sexp.t =
   fun sexp_of_a formula ->
