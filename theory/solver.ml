@@ -14,7 +14,7 @@ let lemma_to_clause literals ~sat_var_for_atom =
 
 module Combined_theory = struct
   type t =
-    { euf : Formula_egraph_uf.t
+    { egraph : Formula_egraph_uf.t
     ; tt : Tvar_types.t
     ; bb : Branch_and_bound.t
     ; encoding : Encoding.t
@@ -25,7 +25,9 @@ module Combined_theory = struct
      can be looked up in [Encoding]'s atom<->sat-var table. A bare [Var]/[App]
      is (per the [Type_var] tag added specifically to disambiguate this) always
      the UF role; anything else is the type role. *)
-  let euf_atom_to_atom (`Eq (a, _) as atom : Formula_egraph_uf.Atom.t) : Atom.t =
+  let egraph_atom_to_atom (`Eq (a, _) as atom : Formula_egraph_uf.Atom.t)
+    : Atom.t
+    =
     match Formula.op a with
     | Var _ | App _ -> (atom :> Atom.t)
     | _ ->
@@ -41,13 +43,13 @@ module Combined_theory = struct
     match Encoding.atom_for_sat_var t.encoding var with
     | Some (`Eq (a, b)) ->
       Formula_egraph_uf.assert_atom
-        t.euf
+        t.egraph
         ~decision_level
         ~atom:(`Eq (a, b))
         ~value
     | Some (`Type_eq (a, b)) ->
       Formula_egraph_uf.assert_atom
-        t.euf
+        t.egraph
         ~decision_level
         ~atom:
           (`Eq
@@ -65,10 +67,10 @@ module Combined_theory = struct
   ;;
 
   let maybe_get_lemma t = exclave_
-    match Formula_egraph_uf.maybe_get_lemma t.euf [@nontail] with
+    match Formula_egraph_uf.maybe_get_lemma t.egraph [@nontail] with
     | `Lemma literals ->
       lemma_to_clause literals ~sat_var_for_atom:(fun atom ->
-        Encoding.sat_var_for_atom t.encoding (euf_atom_to_atom atom))
+        Encoding.sat_var_for_atom t.encoding (egraph_atom_to_atom atom))
     | `Consistent ->
       (match Tvar_types.maybe_get_lemma t.tt [@nontail] with
        | `Lemma literals ->
@@ -87,7 +89,7 @@ module Combined_theory = struct
   ;;
 
   let undo t ~to_decision_level_excl =
-    Formula_egraph_uf.undo t.euf ~to_decision_level_excl;
+    Formula_egraph_uf.undo t.egraph ~to_decision_level_excl;
     Tvar_types.undo t.tt ~to_decision_level_excl;
     Branch_and_bound.undo t.bb ~to_decision_level_excl
   ;;
@@ -101,7 +103,7 @@ end
 
 type t =
   { solver : Feel.Solver.t
-  ; euf : Formula_egraph_uf.t
+  ; egraph : Formula_egraph_uf.t
   ; tt : Tvar_types.t
   ; bb : Branch_and_bound.t
   ; encoding : Encoding.t
@@ -110,11 +112,11 @@ type t =
   }
 
 let create () =
-  let euf = Formula_egraph_uf.create ~atoms:[] in
+  let egraph = Formula_egraph_uf.create ~atoms:[] in
   let tt = Tvar_types.create () in
   let bb = Branch_and_bound.create () in
   let encoding = Encoding.create () in
-  let combined = { Combined_theory.euf; tt; bb; encoding } in
+  let combined = { Combined_theory.egraph; tt; bb; encoding } in
   let solver =
     Feel.Solver.create
       ~theory:(Feel.Theory.pack (module Combined_theory) combined)
@@ -122,7 +124,7 @@ let create () =
   in
   let t =
     { solver
-    ; euf
+    ; egraph
     ; tt
     ; bb
     ; encoding
@@ -131,8 +133,8 @@ let create () =
     }
   in
   (* Pre-register pairwise disequalities between distinct base types. This makes
-     the type-level EUF aware that e.g. [Int ≠ Float], so that asserting types
-     unifying a variable with both [Int] and [Float] yields a conflict. *)
+     the type-level EGRAPH aware that e.g. [Int ≠ Float], so that asserting
+     types unifying a variable with both [Int] and [Float] yields a conflict. *)
   let base_types = Type_expr.Base.all in
   List.iter base_types ~f:(fun b1 ->
     List.iter base_types ~f:(fun b2 ->
@@ -144,7 +146,7 @@ let create () =
         let atom : Atom.t = `Type_eq (a, b) in
         let sat_var = Encoding.sat_var_for_atom t.encoding atom in
         Formula_egraph_uf.add_atom
-          t.euf
+          t.egraph
           ~atom:
             (`Eq
               (Encoding.type_expr_to_formula a, Encoding.type_expr_to_formula b));
@@ -183,10 +185,10 @@ let assert_formula t (formula : Formula.any)
     (Encoding.new_atoms_since t.encoding ~checkpoint)
     ~f:(fun ((atom, _sat_var) : Atom.t * int) ->
       match atom with
-      | `Eq (a, b) -> Formula_egraph_uf.add_atom t.euf ~atom:(`Eq (a, b))
+      | `Eq (a, b) -> Formula_egraph_uf.add_atom t.egraph ~atom:(`Eq (a, b))
       | `Type_eq (a, b) ->
         Formula_egraph_uf.add_atom
-          t.euf
+          t.egraph
           ~atom:
             (`Eq
               (Encoding.type_expr_to_formula a, Encoding.type_expr_to_formula b))
@@ -246,22 +248,22 @@ let make_unsat_core t (core_clauses : Feel.Sat_result.Core_clause.t list)
         |> Option.map ~f:(fun f -> Solver_result.Core_step.Asserted f)))
 ;;
 
-let euf_repr t ~(euf_terms : Formula.Any.Set.t) tvar : Formula.any option =
+let egraph_repr t ~(egraph_terms : Formula.Any.Set.t) tvar : Formula.any option =
   let term : Formula.any = Var tvar in
-  if not (Set.mem euf_terms term)
+  if not (Set.mem egraph_terms term)
   then None
   else (
-    match Formula_egraph_uf.canonical_term t.euf ~term with
+    match Formula_egraph_uf.canonical_term t.egraph ~term with
     | Var v when Tvar.equal v tvar -> None
     | repr -> Some repr)
 ;;
 
 let tvar_assignments t : Tvar_assignment.t Tvar.Map.t =
-  let euf_terms =
-    Formula_egraph_uf.registered_terms t.euf |> Formula.Any.Set.of_list
+  let egraph_terms =
+    Formula_egraph_uf.registered_terms t.egraph |> Formula.Any.Set.of_list
   in
-  let euf_tvars =
-    Set.to_list euf_terms
+  let egraph_tvars =
+    Set.to_list egraph_terms
     |> List.filter_map ~f:(function
       | Formula.Var tvar -> Some tvar
       | _ -> None)
@@ -270,7 +272,7 @@ let tvar_assignments t : Tvar_assignment.t Tvar.Map.t =
     List.concat
       [ Tvar_types.all_typed_vars t.tt
       ; Branch_and_bound.all_numeric_vars t.bb
-      ; euf_tvars
+      ; egraph_tvars
       ]
     |> List.dedup_and_sort ~compare:[%compare: Tvar.t]
   in
@@ -278,7 +280,7 @@ let tvar_assignments t : Tvar_assignment.t Tvar.Map.t =
     ( tvar
     , { Tvar_assignment.type_ = Tvar_types.get_type t.tt tvar
       ; numeric = Branch_and_bound.assignment t.bb ~tvar
-      ; euf_repr = euf_repr t ~euf_terms tvar
+      ; euf_repr = egraph_repr t ~egraph_terms tvar
       } ))
   |> Tvar.Map.of_alist_exn
 ;;
