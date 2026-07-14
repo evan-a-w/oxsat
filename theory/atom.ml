@@ -2,15 +2,15 @@ open! Core
 open! Feel.Import
 
 type t =
-  [ `Eq of Uf_term.t * Uf_term.t
+  [ `Eq of Formula.any * Formula.any
   | `Le of Linear_expr.t * Q.t
   | `Type_eq of Type_expr.t * Type_expr.t
   ]
-[@@deriving sexp, compare, hash]
+[@@deriving sexp_of, compare, hash]
 
 let normalize = function
   | `Eq (a, b) as x ->
-    (match Ordering.of_int ([%compare: Uf_term.t] a b) with
+    (match Ordering.of_int (Formula.compare_any a b) with
      | Equal | Less -> x
      | Greater -> `Eq (b, a))
   | `Le (expr, c) ->
@@ -22,5 +22,5 @@ let normalize = function
      | Greater -> `Type_eq (b, a))
 ;;
 
-include functor Comparable.Make
-include functor Hashable.Make
+include functor Comparable.Make_plain
+include functor Hashable.Make_plain

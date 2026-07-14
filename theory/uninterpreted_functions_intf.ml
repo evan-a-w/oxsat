@@ -2,8 +2,10 @@ open! Core
 open! Feel.Import
 
 module type Term = sig
-  type t [@@deriving sexp, compare, hash]
+  type t
 
+  val sexp_of_t : t -> Sexp.t
+  val t_of_sexp : Sexp.t -> t
   val split_function : t -> (Tvar.t * t list) option
 
   (** for vec *)
@@ -19,8 +21,10 @@ module type S = sig
   module Term : Term
 
   module Atom : sig
-    type t = [ `Eq of Term.t * Term.t ] [@@deriving sexp, compare, hash]
+    type t = [ `Eq of Term.t * Term.t ]
 
+    val sexp_of_t : t -> Sexp.t
+    val t_of_sexp : Sexp.t -> t
     val normalize : t -> t
 
     include Comparable.S with type t := t

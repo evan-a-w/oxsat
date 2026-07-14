@@ -178,15 +178,15 @@ let%expect_test "undo retracts a constraint and restores consistency" =
 
 (* ----- Solver-level: exercise Le/Type_eq through Solver.assert_formula ----- *)
 
-let solver_le tvar c : Formula.t = Atom (`Le (Linear_expr.var tvar, Q.of_int c))
-
-let solver_ge tvar c : Formula.t =
-  Atom (`Le (Linear_expr.neg (Linear_expr.var tvar), Q.of_int (-c)))
+let solver_le tvar c : Formula.any =
+  La_compare (Var tvar, `Le, La_const (Q.of_int c))
 ;;
 
-let solver_is_int tvar : Formula.t =
-  Atom (`Type_eq (Type_expr.Var tvar, Base Int))
+let solver_ge tvar c : Formula.any =
+  La_compare (Var tvar, `Ge, La_const (Q.of_int c))
 ;;
+
+let solver_is_int tvar : Formula.any = Eq (Var tvar, Int)
 
 let print_result (result : Solver_result.t) =
   match result with
@@ -196,7 +196,7 @@ let print_result (result : Solver_result.t) =
 ;;
 
 let assert_ok solver formula =
-  match Solver.assert_formula solver formula with
+  match Or_error.ok_exn (Solver.assert_formula solver formula) with
   | `Ok -> ()
   | `Unsat _ -> print_endline "UNSAT (at assert time)"
 ;;
@@ -234,25 +234,13 @@ let%expect_test "solver: x <= 3 and x >= 5 is unsat via the simplex theory" =
       ((Theory_lemma
         (Or
          ((Not
-           (Atom
-            (Le
-             (((coeffs ((x ((num -1) (den 1))))) (const ((num 0) (den 1))))
-              ((num -5) (den 1))))))
+           (La_compare (La_scale_const ((num -1) (den 1)) (Var x)) Le
+            (La_const ((num -5) (den 1)))))
           (Not
-           (Atom
-            (Le
-             (((coeffs ((x ((num 1) (den 1))))) (const ((num 0) (den 1))))
-              ((num 3) (den 1)))))))))
-       (Asserted
-        (Atom
-         (Le
-          (((coeffs ((x ((num -1) (den 1))))) (const ((num 0) (den 1))))
-           ((num -5) (den 1))))))
-       (Asserted
-        (Atom
-         (Le
-          (((coeffs ((x ((num 1) (den 1))))) (const ((num 0) (den 1))))
-           ((num 3) (den 1)))))))))
+           (La_compare (La_scale_const ((num 1) (den 1)) (Var x)) Le
+            (La_const ((num 3) (den 1))))))))
+       (Asserted (La_compare (Var x) Ge (La_const ((num 5) (den 1)))))
+       (Asserted (La_compare (Var x) Le (La_const ((num 3) (den 1))))))))
     |}]
 ;;
 
@@ -265,13 +253,12 @@ let%expect_test "solver: integral var branches on a non-integral relaxed \
      it: unsat. *)
   assert_ok
     solver
-    (Atom (`Le (Linear_expr.scale (Q.of_int 2) (Linear_expr.var x), Q.of_int 3)));
+    (Formula.La_compare
+       (La_scale_const (Q.of_int 2, Var x), `Le, La_const (Q.of_int 3)));
   assert_ok
     solver
-    (Atom
-       (`Le
-         ( Linear_expr.neg (Linear_expr.scale (Q.of_int 2) (Linear_expr.var x))
-         , Q.of_int (-3) )));
+    (Formula.La_compare
+       (La_scale_const (Q.of_int 2, Var x), `Ge, La_const (Q.of_int 3)));
   print_result (Solver.solve solver);
   [%expect
     {|
@@ -280,32 +267,22 @@ let%expect_test "solver: integral var branches on a non-integral relaxed \
       ((Theory_lemma
         (Or
          ((Not
-           (Atom
-            (Le
-             (((coeffs ((x ((num 1) (den 1))))) (const ((num 0) (den 1))))
-              ((num 1) (den 1))))))
+           (La_compare (La_scale_const ((num 1) (den 1)) (Var x)) Le
+            (La_const ((num 1) (den 1)))))
           (Not
-           (Atom
-            (Le
-             (((coeffs ((x ((num -2) (den 1))))) (const ((num 0) (den 1))))
-              ((num -3) (den 1)))))))))
+           (La_compare (La_scale_const ((num -2) (den 1)) (Var x)) Le
+            (La_const ((num -3) (den 1))))))))
        (Theory_lemma
         (Or
-         ((Atom
-           (Le
-            (((coeffs ((x ((num 1) (den 1))))) (const ((num 0) (den 1))))
-             ((num 1) (den 1)))))
-          (Atom
-           (Le
-            (((coeffs ((x ((num -1) (den 1))))) (const ((num 0) (den 1))))
-             ((num -2) (den 1)))))
-          (Not (Atom (Type_eq ((Var x) (Base Int))))))))
-       (Asserted (Atom (Type_eq ((Var x) (Base Int)))))
+         ((La_compare (La_scale_const ((num 1) (den 1)) (Var x)) Le
+           (La_const ((num 1) (den 1))))
+          (La_compare (La_scale_const ((num -1) (den 1)) (Var x)) Le
+           (La_const ((num -2) (den 1))))
+          (Not (Eq (Type_var x) Int)))))
+       (Asserted (Eq (Var x) Int))
        (Asserted
-        (Atom
-         (Le
-          (((coeffs ((x ((num -2) (den 1))))) (const ((num 0) (den 1))))
-           ((num -3) (den 1)))))))))
+        (La_compare (La_scale_const ((num 2) (den 1)) (Var x)) Ge
+         (La_const ((num 3) (den 1))))))))
     |}]
 ;;
 
@@ -332,25 +309,13 @@ let%expect_test "solver: push/pop retracts a simplex conflict" =
       ((Theory_lemma
         (Or
          ((Not
-           (Atom
-            (Le
-             (((coeffs ((x ((num -1) (den 1))))) (const ((num 0) (den 1))))
-              ((num -5) (den 1))))))
+           (La_compare (La_scale_const ((num -1) (den 1)) (Var x)) Le
+            (La_const ((num -5) (den 1)))))
           (Not
-           (Atom
-            (Le
-             (((coeffs ((x ((num 1) (den 1))))) (const ((num 0) (den 1))))
-              ((num 3) (den 1)))))))))
-       (Asserted
-        (Atom
-         (Le
-          (((coeffs ((x ((num -1) (den 1))))) (const ((num 0) (den 1))))
-           ((num -5) (den 1))))))
-       (Asserted
-        (Atom
-         (Le
-          (((coeffs ((x ((num 1) (den 1))))) (const ((num 0) (den 1))))
-           ((num 3) (den 1)))))))))
+           (La_compare (La_scale_const ((num 1) (den 1)) (Var x)) Le
+            (La_const ((num 3) (den 1))))))))
+       (Asserted (La_compare (Var x) Ge (La_const ((num 5) (den 1)))))
+       (Asserted (La_compare (Var x) Le (La_const ((num 3) (den 1))))))))
     |}];
   Solver.pop solver;
   print_result (Solver.solve solver);

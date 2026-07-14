@@ -180,7 +180,7 @@ module Make (Term : Term) = struct
        | Some existing_id when G.Id.equal existing_id id -> ()
        | Some existing_id ->
          let dl = !(t.current_decision_level) in
-         G.set_on_merge t.egraph (fun ~winner ~loser ->
+         let on_merge ~winner ~loser =
            let n1 = Hashtbl.find_exn t.node_by_id winner in
            let n2 = Hashtbl.find_exn t.node_by_id loser in
            match n1.op, n2.op with
@@ -193,11 +193,11 @@ module Make (Term : Term) = struct
                  (Justification.Congruence
                     { function_; args1 = n1.children; args2 = n2.children })
                ~decision_level:dl
-           | _ -> assert false);
+           | _ -> assert false
+         in
          G.set_decision_level t.egraph dl;
-         G.merge t.egraph id existing_id;
-         G.rebuild t.egraph;
-         G.set_on_merge t.egraph (fun ~winner:_ ~loser:_ -> ()));
+         G.merge t.egraph ~on_merge id existing_id;
+         G.rebuild t.egraph ~on_merge ());
       id
   ;;
 
@@ -246,7 +246,7 @@ module Make (Term : Term) = struct
       let id_a = atom_data.id_a in
       let id_b = atom_data.id_b in
       let first_merge = ref (Some atom) in
-      G.set_on_merge t.egraph (fun ~winner ~loser ->
+      let on_merge ~winner ~loser =
         let justification =
           match !first_merge with
           | Some asserted_atom ->
@@ -266,11 +266,11 @@ module Make (Term : Term) = struct
           ~x:(G.Id.to_int winner)
           ~y:(G.Id.to_int loser)
           ~justification
-          ~decision_level);
+          ~decision_level
+      in
       G.set_decision_level t.egraph decision_level;
-      G.merge t.egraph id_a id_b;
-      G.rebuild t.egraph;
-      G.set_on_merge t.egraph (fun ~winner:_ ~loser:_ -> ())
+      G.merge t.egraph ~on_merge id_a id_b;
+      G.rebuild t.egraph ~on_merge ()
   ;;
 
   let assert_false_atom t ~decision_level ~(atom : Atom.t) =

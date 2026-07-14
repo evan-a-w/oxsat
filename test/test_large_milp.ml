@@ -13,14 +13,21 @@ open! Theory
    branch-and-bound must explore many nodes even on small instances. *)
 
 let tvar name = Tvar.of_string name
-let le expr c : Formula.t = Atom (`Le (expr, Q.of_int c))
-let ge expr c : Formula.t = Atom (`Le (Linear_expr.neg expr, Q.of_int (-c)))
-let is_int v : Formula.t = Atom (`Type_eq (Type_expr.Var v, Base Int))
+
+let le expr c : Formula.any =
+  La_compare (Encoding.linear_expr_to_formula expr, `Le, La_const (Q.of_int c))
+;;
+
+let ge expr c : Formula.any =
+  La_compare (Encoding.linear_expr_to_formula expr, `Ge, La_const (Q.of_int c))
+;;
+
+let is_int v : Formula.any = Eq (Var v, Int)
 let var v = Linear_expr.var v
 let sum exprs = List.fold exprs ~init:Linear_expr.zero ~f:Linear_expr.( + )
 
 let assert_ok solver formula =
-  match Theory.Solver.assert_formula solver formula with
+  match Or_error.ok_exn (Theory.Solver.assert_formula solver formula) with
   | `Ok -> ()
   | `Unsat _ -> failwith "unexpectedly unsat at assert time"
 ;;
@@ -53,10 +60,10 @@ let make_bin_packing_solver ~sizes ~cap ~num_bins =
            Linear_expr.scale (Q.of_int sz) (var x.(i).(b))))
     in
     let cap_expr = Linear_expr.(load - scale (Q.of_int cap) (var y_b)) in
-    assert_ok solver (Atom (`Le (cap_expr, Q.of_int 0)));
+    assert_ok solver (le cap_expr 0);
     Array.iter x ~f:(fun row ->
       let link = Linear_expr.(var row.(b) - var y_b) in
-      assert_ok solver (Atom (`Le (link, Q.of_int 0)))));
+      assert_ok solver (le link 0)));
   solver
 ;;
 

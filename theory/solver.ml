@@ -14,21 +14,47 @@ let lemma_to_clause literals ~sat_var_for_atom =
 
 module Combined_theory = struct
   type t =
-    { uf : Uf_term.Uf.t
-    ; tuf : Type_expr.Uf.t
+    { egraph : Formula_egraph_uf.t
     ; tt : Tvar_types.t
     ; bb : Branch_and_bound.t
-    ; encoding : Formula.Encoding.t
+    ; encoding : Encoding.t
     }
+
+  (* Converts a lemma atom coming back from [Formula_egraph_uf] (a bare
+     [Formula.any] equality) to the [Atom.t] its originating shape used, so it
+     can be looked up in [Encoding]'s atom<->sat-var table. A bare [Var]/[App]
+     is (per the [Type_var] tag added specifically to disambiguate this) always
+     the UF role; anything else is the type role. *)
+  let egraph_atom_to_atom (`Eq (a, _) as atom : Formula_egraph_uf.Atom.t)
+    : Atom.t
+    =
+    match Formula.op a with
+    | Var _ | App _ -> (atom :> Atom.t)
+    | _ ->
+      let (`Eq (a, b)) = atom in
+      `Type_eq
+        ( Or_error.ok_exn (Encoding.type_expr_of a)
+        , Or_error.ok_exn (Encoding.type_expr_of b) )
+  ;;
 
   let assert_literal t ~decision_level ~literal =
     let var = Int.abs literal in
     let value = literal > 0 in
-    match Formula.Encoding.atom_for_sat_var t.encoding var with
-    | Some (#Uf_term.Uf.Atom.t as atom) ->
-      Uf_term.Uf.assert_atom t.uf ~decision_level ~atom ~value
+    match Encoding.atom_for_sat_var t.encoding var with
+    | Some (`Eq (a, b)) ->
+      Formula_egraph_uf.assert_atom
+        t.egraph
+        ~decision_level
+        ~atom:(`Eq (a, b))
+        ~value
     | Some (`Type_eq (a, b)) ->
-      Type_expr.Uf.assert_atom t.tuf ~decision_level ~atom:(`Eq (a, b)) ~value;
+      Formula_egraph_uf.assert_atom
+        t.egraph
+        ~decision_level
+        ~atom:
+          (`Eq
+            (Encoding.type_expr_to_formula a, Encoding.type_expr_to_formula b))
+        ~value;
       Tvar_types.assert_atom t.tt ~decision_level ~atom:(`Type_eq (a, b)) ~value;
       Branch_and_bound.assert_atom
         t.bb
@@ -41,39 +67,29 @@ module Combined_theory = struct
   ;;
 
   let maybe_get_lemma t = exclave_
-    match Uf_term.Uf.maybe_get_lemma t.uf [@nontail] with
+    match Formula_egraph_uf.maybe_get_lemma t.egraph [@nontail] with
     | `Lemma literals ->
       lemma_to_clause literals ~sat_var_for_atom:(fun atom ->
-        Formula.Encoding.sat_var_for_atom
-          t.encoding
-          (atom : Uf_term.Uf.Atom.t :> Atom.t))
+        Encoding.sat_var_for_atom t.encoding (egraph_atom_to_atom atom))
     | `Consistent ->
-      (match Type_expr.Uf.maybe_get_lemma t.tuf [@nontail] with
+      (match Tvar_types.maybe_get_lemma t.tt [@nontail] with
        | `Lemma literals ->
          lemma_to_clause
            literals
-           ~sat_var_for_atom:(fun (`Eq (a, b) : Type_expr.Uf.Atom.t) ->
-             Formula.Encoding.sat_var_for_atom t.encoding (`Type_eq (a, b)))
+           ~sat_var_for_atom:(fun (`Type_eq (a, b) : Tvar_types.Atom.t) ->
+             Encoding.sat_var_for_atom t.encoding (`Type_eq (a, b)))
        | `Consistent ->
-         (match Tvar_types.maybe_get_lemma t.tt [@nontail] with
+         (match Branch_and_bound.maybe_get_lemma t.bb [@nontail] with
+          | `Consistent -> `Consistent
           | `Lemma literals ->
             lemma_to_clause
               literals
-              ~sat_var_for_atom:(fun (`Type_eq (a, b) : Tvar_types.Atom.t) ->
-                Formula.Encoding.sat_var_for_atom t.encoding (`Type_eq (a, b)))
-          | `Consistent ->
-            (match Branch_and_bound.maybe_get_lemma t.bb [@nontail] with
-             | `Consistent -> `Consistent
-             | `Lemma literals ->
-               lemma_to_clause
-                 literals
-                 ~sat_var_for_atom:(fun (atom : Branch_and_bound.Atom.t) ->
-                   Formula.Encoding.sat_var_for_atom t.encoding (atom :> Atom.t)))))
+              ~sat_var_for_atom:(fun (atom : Branch_and_bound.Atom.t) ->
+                Encoding.sat_var_for_atom t.encoding (atom :> Atom.t))))
   ;;
 
   let undo t ~to_decision_level_excl =
-    Uf_term.Uf.undo t.uf ~to_decision_level_excl;
-    Type_expr.Uf.undo t.tuf ~to_decision_level_excl;
+    Formula_egraph_uf.undo t.egraph ~to_decision_level_excl;
     Tvar_types.undo t.tt ~to_decision_level_excl;
     Branch_and_bound.undo t.bb ~to_decision_level_excl
   ;;
@@ -87,22 +103,20 @@ end
 
 type t =
   { solver : Feel.Solver.t
-  ; uf : Uf_term.Uf.t
-  ; tuf : Type_expr.Uf.t
+  ; egraph : Formula_egraph_uf.t
   ; tt : Tvar_types.t
   ; bb : Branch_and_bound.t
-  ; encoding : Formula.Encoding.t
+  ; encoding : Encoding.t
   ; mutable scopes : int list (* activation literals, innermost first *)
-  ; formula_by_root_lit : Formula.t Int.Table.t
+  ; formula_by_root_lit : Formula.any Int.Table.t
   }
 
 let create () =
-  let uf = Uf_term.Uf.create ~atoms:[] in
-  let tuf = Type_expr.Uf.create ~atoms:[] in
+  let egraph = Formula_egraph_uf.create ~atoms:[] in
   let tt = Tvar_types.create () in
   let bb = Branch_and_bound.create () in
-  let encoding = Formula.Encoding.create () in
-  let combined = { Combined_theory.uf; tuf; tt; bb; encoding } in
+  let encoding = Encoding.create () in
+  let combined = { Combined_theory.egraph; tt; bb; encoding } in
   let solver =
     Feel.Solver.create
       ~theory:(Feel.Theory.pack (module Combined_theory) combined)
@@ -110,8 +124,7 @@ let create () =
   in
   let t =
     { solver
-    ; uf
-    ; tuf
+    ; egraph
     ; tt
     ; bb
     ; encoding
@@ -120,24 +133,27 @@ let create () =
     }
   in
   (* Pre-register pairwise disequalities between distinct base types. This makes
-     the type-level EUF aware that e.g. [Int ≠ Float], so that asserting types
-     unifying a variable with both [Int] and [Float] yields a conflict. *)
+     the type-level EGRAPH aware that e.g. [Int ≠ Float], so that asserting
+     types unifying a variable with both [Int] and [Float] yields a conflict. *)
   let base_types = Type_expr.Base.all in
   List.iter base_types ~f:(fun b1 ->
     List.iter base_types ~f:(fun b2 ->
       if [%compare: Type_expr.Base.t] b1 b2 < 0
       then (
-        let (`Eq (a, b) as tuf_atom) =
-          Type_expr.Uf.Atom.normalize
-            (`Eq (Type_expr.Base b1, Type_expr.Base b2))
+        let (`Type_eq (a, b) : Tvar_types.Atom.t) =
+          `Type_eq (Type_expr.Base b1, Type_expr.Base b2)
         in
         let atom : Atom.t = `Type_eq (a, b) in
-        let sat_var = Formula.Encoding.sat_var_for_atom t.encoding atom in
-        Type_expr.Uf.add_atom t.tuf ~atom:tuf_atom;
+        let sat_var = Encoding.sat_var_for_atom t.encoding atom in
+        Formula_egraph_uf.add_atom
+          t.egraph
+          ~atom:
+            (`Eq
+              (Encoding.type_expr_to_formula a, Encoding.type_expr_to_formula b));
         Hashtbl.set
           t.formula_by_root_lit
           ~key:(-sat_var)
-          ~data:(Formula.Not (Formula.Atom atom));
+          ~data:(Formula.Not (Encoding.atom_to_formula atom));
         ignore
           (Feel.Solver.add_clause t.solver ~clause:[| -sat_var |]
            : [ `Ok | `Unsat of _ ]))));
@@ -150,11 +166,11 @@ let guard_clauses ~activation clauses =
   List.map clauses ~f:(fun clause -> Array.append [| -activation |] clause)
 ;;
 
-let assert_formula t formula
-  : [ `Ok | `Unsat of Feel.Sat_result.Core_clause.t list ]
+let assert_formula t (formula : Formula.any)
+  : [ `Ok | `Unsat of Feel.Sat_result.Core_clause.t list ] Or_error.t
   =
-  let checkpoint = Formula.Encoding.checkpoint t.encoding in
-  let clauses = Formula.encode t.encoding formula in
+  let checkpoint = Encoding.checkpoint t.encoding in
+  let%bind.Or_error clauses = Encoding.encode t.encoding ~formula in
   let root_lit = (List.last_exn clauses).(0) in
   Hashtbl.set t.formula_by_root_lit ~key:root_lit ~data:formula;
   let clauses =
@@ -166,24 +182,30 @@ let assert_formula t formula
      any clause, so that [assert_literal] (triggered by unit propagation during
      [add_clause]) recognizes them as theory atoms from the start. *)
   List.iter
-    (Formula.Encoding.new_atoms_since t.encoding ~checkpoint)
+    (Encoding.new_atoms_since t.encoding ~checkpoint)
     ~f:(fun ((atom, _sat_var) : Atom.t * int) ->
       match atom with
-      | #Uf_term.Uf.Atom.t as atom -> Uf_term.Uf.add_atom t.uf ~atom
-      | `Type_eq (a, b) -> Type_expr.Uf.add_atom t.tuf ~atom:(`Eq (a, b))
+      | `Eq (a, b) -> Formula_egraph_uf.add_atom t.egraph ~atom:(`Eq (a, b))
+      | `Type_eq (a, b) ->
+        Formula_egraph_uf.add_atom
+          t.egraph
+          ~atom:
+            (`Eq
+              (Encoding.type_expr_to_formula a, Encoding.type_expr_to_formula b))
       | `Le (_, _) -> ());
-  List.fold_until
-    clauses
-    ~init:`Ok
-    ~f:(fun (`Ok : [ `Ok ]) clause ->
-      match Feel.Solver.add_clause t.solver ~clause with
-      | `Ok -> Continue `Ok
-      | `Unsat _ as unsat -> Stop unsat)
-    ~finish:(fun (`Ok : [ `Ok ]) -> `Ok)
+  Ok
+    (List.fold_until
+       clauses
+       ~init:`Ok
+       ~f:(fun (`Ok : [ `Ok ]) clause ->
+         match Feel.Solver.add_clause t.solver ~clause with
+         | `Ok -> Continue `Ok
+         | `Unsat _ as unsat -> Stop unsat)
+       ~finish:(fun (`Ok : [ `Ok ]) -> `Ok))
 ;;
 
 let push t =
-  let activation = Formula.Encoding.fresh_var t.encoding in
+  let activation = Encoding.fresh_var t.encoding in
   t.scopes <- activation :: t.scopes
 ;;
 
@@ -193,15 +215,14 @@ let pop t =
   | _ :: rest -> t.scopes <- rest
 ;;
 
-let clause_to_formula t (literals : int array) : Formula.t option =
+let clause_to_formula t (literals : int array) : Formula.any option =
   let formulas =
     Array.filter_map literals ~f:(fun lit ->
       let var = Int.abs lit in
-      match Formula.Encoding.atom_for_sat_var t.encoding var with
+      match Encoding.atom_for_sat_var t.encoding var with
       | Some atom ->
-        if lit > 0
-        then Some (Formula.Atom atom)
-        else Some (Formula.Not (Formula.Atom atom))
+        let formula = Encoding.atom_to_formula atom in
+        if lit > 0 then Some formula else Some (Formula.Not formula)
       | None -> None)
   in
   if Array.length formulas = Array.length literals
@@ -227,29 +248,31 @@ let make_unsat_core t (core_clauses : Feel.Sat_result.Core_clause.t list)
         |> Option.map ~f:(fun f -> Solver_result.Core_step.Asserted f)))
 ;;
 
-let euf_repr t ~(euf_terms : Uf_term.Set.t) tvar : Uf_term.t option =
-  let term : Uf_term.t = `Var tvar in
-  if not (Set.mem euf_terms term)
+let egraph_repr t ~(egraph_terms : Formula.Any.Set.t) tvar : Formula.any option =
+  let term : Formula.any = Var tvar in
+  if not (Set.mem egraph_terms term)
   then None
   else (
-    match Uf_term.Uf.canonical_term t.uf ~term with
-    | `Var v when Tvar.equal v tvar -> None
+    match Formula_egraph_uf.canonical_term t.egraph ~term with
+    | Var v when Tvar.equal v tvar -> None
     | repr -> Some repr)
 ;;
 
 let tvar_assignments t : Tvar_assignment.t Tvar.Map.t =
-  let euf_terms = Uf_term.Uf.registered_terms t.uf |> Uf_term.Set.of_list in
-  let euf_tvars =
-    Set.to_list euf_terms
+  let egraph_terms =
+    Formula_egraph_uf.registered_terms t.egraph |> Formula.Any.Set.of_list
+  in
+  let egraph_tvars =
+    Set.to_list egraph_terms
     |> List.filter_map ~f:(function
-      | `Var tvar -> Some tvar
-      | `App _ -> None)
+      | Formula.Var tvar -> Some tvar
+      | _ -> None)
   in
   let all_tvars =
     List.concat
       [ Tvar_types.all_typed_vars t.tt
       ; Branch_and_bound.all_numeric_vars t.bb
-      ; euf_tvars
+      ; egraph_tvars
       ]
     |> List.dedup_and_sort ~compare:[%compare: Tvar.t]
   in
@@ -257,7 +280,7 @@ let tvar_assignments t : Tvar_assignment.t Tvar.Map.t =
     ( tvar
     , { Tvar_assignment.type_ = Tvar_types.get_type t.tt tvar
       ; numeric = Branch_and_bound.assignment t.bb ~tvar
-      ; euf_repr = euf_repr t ~euf_terms tvar
+      ; euf_repr = egraph_repr t ~egraph_terms tvar
       } ))
   |> Tvar.Map.of_alist_exn
 ;;
@@ -274,9 +297,11 @@ let stats t = Feel.Solver.stats t.solver
 
 let assert_type t var type_expr =
   ignore
-    (assert_formula
-       t
-       (Formula.Atom (Tvar_types.has_type var type_expr :> Atom.t))
+    (Or_error.ok_exn
+       (assert_formula
+          t
+          (Encoding.atom_to_formula
+             (Tvar_types.has_type var type_expr :> Atom.t)))
      : [ `Ok | `Unsat of _ ])
 ;;
 

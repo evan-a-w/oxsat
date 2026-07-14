@@ -4,14 +4,15 @@ open! Theory
 module Instance = struct
   type t =
     { name : string
-    ; formulas : Formula.t list
+    ; formulas : Formula.any list
     }
 end
 
 let solve_instance (inst : Instance.t) =
   let solver = Solver.create () in
   List.iter inst.formulas ~f:(fun f ->
-    ignore (Solver.assert_formula solver f : [ `Ok | `Unsat of _ ]));
+    ignore
+      (Or_error.ok_exn (Solver.assert_formula solver f) : [ `Ok | `Unsat of _ ]));
   ignore (Solver.solve solver : Solver_result.t)
 ;;
 
@@ -23,14 +24,21 @@ let benchmark_of_instance inst =
 
 let tvar name = Tvar.of_string name
 let var t = Linear_expr.var t
-let le expr c : Formula.t = Atom (`Le (expr, Q.of_int c))
-let ge expr c : Formula.t = Atom (`Le (Linear_expr.neg expr, Q.of_int (-c)))
-let is_int t : Formula.t = Atom (`Type_eq (Type_expr.Var t, Base Int))
+
+let le expr c : Formula.any =
+  La_compare (Encoding.linear_expr_to_formula expr, `Le, La_const (Q.of_int c))
+;;
+
+let ge expr c : Formula.any =
+  La_compare (Encoding.linear_expr_to_formula expr, `Ge, La_const (Q.of_int c))
+;;
+
+let is_int t : Formula.any = Eq (Var t, Int)
 let sum es = List.fold es ~init:Linear_expr.zero ~f:Linear_expr.( + )
-let eq_t a b : Formula.t = Atom (`Eq (a, b))
-let neq_t a b : Formula.t = Not (eq_t a b)
-let uft_var name : Uf_term.t = `Var (tvar name)
-let uft_app fn arg : Uf_term.t = `App (~function_:(tvar fn), ~args:[ arg ])
+let uft_var name : Formula.any = Var (tvar name)
+let uft_app fn arg : Formula.any = App (tvar fn, [ arg ])
+let eq_t a b : Formula.any = Eq (a, b)
+let neq_t a b : Formula.any = Not (eq_t a b)
 
 (* Simple LCG, same constants as in test_large_milp.ml. Always returns a
    positive 31-bit value. *)
@@ -142,11 +150,8 @@ let gen_bin_packing ~num_items ~num_bins ~max_size ~seed =
         (List.mapi sizes ~f:(fun i sz ->
            Linear_expr.scale (Q.of_int sz) (var x.(i).(b))))
     in
-    add
-      (Atom
-         (`Le (Linear_expr.(load - scale (Q.of_int cap) (var yb)), Q.of_int 0)));
-    Array.iter x ~f:(fun row ->
-      add (Atom (`Le (Linear_expr.(var row.(b) - var yb), Q.of_int 0)))));
+    add (le Linear_expr.(load - scale (Q.of_int cap) (var yb)) 0);
+    Array.iter x ~f:(fun row -> add (le Linear_expr.(var row.(b) - var yb) 0)));
   Instance.
     { name = sprintf "Bin packing (items=%d, bins=%d)" num_items num_bins
     ; formulas = !fs

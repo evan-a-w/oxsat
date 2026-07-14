@@ -2,38 +2,78 @@ open! Core
 open! Feel.Import
 
 (** Propositional formulas over theory atoms. *)
-type t =
-  | True
-  | False
-  | Atom of Atom.t
-  | Not of t
-  | And of t list
-  | Or of t list
-[@@deriving sexp]
+type _ t =
+  (* always used *)
+  | Var : Tvar.t -> [> `Term ] t
+  | Eq : 'a t * 'a t -> ([> `Atom ] as 'a) t
+  (* boolean structure *)
+  | True : [> `Boolean ] t
+  | False : [> `Boolean ] t
+  | Not : 'a t -> ([> `Boolean ] as 'a) t
+  | And : 'a t list -> ([> `Boolean ] as 'a) t
+  | Or : 'a t list -> ([> `Boolean ] as 'a) t
+  (* UF *)
+  | App : Tvar.t * 'a t list -> ([> `Uf ] as 'a) t
+  (* Types *)
+  | Bool : [> `Type ] t
+  | Int : [> `Type ] t
+  | Float : [> `Type ] t
+  | Type : [> `Type ] t
+  | Function_type : 'a t * 'a t -> ([> `Type ] as 'a) t
+  | Type_of : 'a t -> ([> `Type ] as 'a) t
+  | Type_var : Tvar.t -> [> `Type ] t
+  | Type_app : Tvar.t * 'a t list -> ([> `Type ] as 'a) t
+  (* Linear arithmetic *)
+  | La_const : Q.t -> [> `La ] t
+  | La_scale_const : Q.t * 'a t -> ([> `La ] as 'a) t
+  | La_add : 'a t * 'a t -> ([> `La ] as 'a) t
+  | La_compare :
+      (* no eq, cuz that's already above *)
+      'a t
+      * [ `Le | `Ge | `Lt | `Gt ]
+      * 'a t
+      -> ([> `La ] as 'a) t
+[@@deriving sexp, compare, hash, equal]
 
-val fold_map_atoms
-  :  t
-  -> init:'a
-  -> f:('a -> Atom.t -> 'a * Atom.t) @ local
-  -> 'a * t
+type any = [ `Boolean | `Uf | `Type | `La | `Term | `Atom ] t
+[@@deriving sexp, compare, hash, equal]
 
-module Encoding : sig
-  type t
+module Any : sig
+  type t = any [@@deriving sexp, compare, hash]
 
-  val create : unit -> t
-  val fresh_var : t -> int
-  val sat_var_for_atom : t -> Atom.t -> int
-  val find_sat_var_for_atom : t -> Atom.t -> int option
-  val atom_for_sat_var : t -> int -> Atom.t option
-  val atoms : t -> (Atom.t * int) list
-  val checkpoint : t -> int
-  val new_atoms_since : t -> checkpoint:int -> (Atom.t * int) list
+  include Comparable.S with type t := t
+  include Hashable.S with type t := t
 end
 
-(** [encode encoding formula] Tseitin-encodes [formula] into CNF, returning a
-    list of clauses whose conjunction is satisfiable iff [formula] is, and such
-    that any satisfying assignment of the clauses makes [formula] true. Fresh
-    Tseitin variables and atom SAT variables are allocated from [encoding] as
-    needed; reusing an [Encoding.t] across multiple calls keeps atom-to-variable
-    assignments consistent. *)
-val encode : Encoding.t -> t -> int array list
+module Op : sig
+  type t =
+    | Var of Tvar.t
+    | Eq
+    | True
+    | False
+    | Not
+    | And
+    | Or
+    | App of Tvar.t
+    | Bool
+    | Int
+    | Float
+    | Type
+    | Function_type
+    | Type_of
+    | Type_var of Tvar.t
+    | Type_app of Tvar.t
+    | La_const of Q.t
+    | La_scale_const of Q.t
+    | La_add
+    | La_compare of [ `Le | `Ge | `Lt | `Gt ]
+  [@@deriving sexp, compare, hash, equal]
+
+  include Comparable.S with type t := t
+  include Hashable.S with type t := t
+end
+
+val op : 'a t -> Op.t
+val args : 'a t -> any list
+val make_opt : op:Op.t -> args:any list -> any option
+val make : op:Op.t -> args:any list -> any
