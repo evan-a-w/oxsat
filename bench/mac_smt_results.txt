@@ -1,3 +1,25 @@
+new egraph
+$ time dune exec --profile=release bench/feel_bench.exe -- -bench smt
+SMT solver benchmarks (LP, MILP, EUF): 
+LP feasible (n=10, m=30): Mean: 142.66 μs  StdDev: 20.62 μs  p50: 150.42 μs  p75: 163.13 μs  p90: 163.13 μs  p95: 163.13 μs  p99: 163.13 μs  (n=3)
+LP feasible (n=20, m=60): Mean: 370.01 μs  StdDev: 4.87 μs  p50: 370.54 μs  p75: 375.69 μs  p90: 375.69 μs  p95: 375.69 μs  p99: 375.69 μs  (n=3)
+LP feasible (n=50, m=150): Mean: 1.31 ms  StdDev: 57.13 μs  p50: 1.32 ms  p75: 1.38 ms  p90: 1.38 ms  p95: 1.38 ms  p99: 1.38 ms  (n=3)
+LP tight OR (n=5): Mean: 126.00 μs  StdDev: 2.62 μs  p50: 127.10 μs  p75: 128.52 μs  p90: 128.52 μs  p95: 128.52 μs  p99: 128.52 μs  (n=3)
+LP tight OR (n=7): Mean: 169.62 μs  StdDev: 13.86 μs  p50: 160.60 μs  p75: 189.21 μs  p90: 189.21 μs  p95: 189.21 μs  p99: 189.21 μs  (n=3)
+LP tight OR (n=9): Mean: 240.39 μs  StdDev: 6.08 μs  p50: 237.68 μs  p75: 248.82 μs  p90: 248.82 μs  p95: 248.82 μs  p99: 248.82 μs  (n=3)
+Bin packing (items=10, bins=3): Mean: 3.05 ms  StdDev: 50.66 μs  p50: 3.06 ms  p75: 3.11 ms  p90: 3.11 ms  p95: 3.11 ms  p99: 3.11 ms  (n=3)
+Bin packing (items=15, bins=4): Mean: 27.44 ms  StdDev: 2.00 ms  p50: 26.92 ms  p75: 30.11 ms  p90: 30.11 ms  p95: 30.11 ms  p99: 30.11 ms  (n=3)
+Bin packing (items=20, bins=4): Mean: 59.52 ms  StdDev: 1.39 ms  p50: 59.36 ms  p75: 61.29 ms  p90: 61.29 ms  p95: 61.29 ms  p99: 61.29 ms  (n=3)
+EUF chain UNSAT (n=50): Mean: 1.30 ms  StdDev: 46.36 μs  p50: 1.27 ms  p75: 1.36 ms  p90: 1.36 ms  p95: 1.36 ms  p99: 1.36 ms  (n=3)
+EUF chain UNSAT (n=200): Mean: 9.24 ms  StdDev: 467.22 μs  p50: 9.46 ms  p75: 9.66 ms  p90: 9.66 ms  p95: 9.66 ms  p99: 9.66 ms  (n=3)
+EUF chain UNSAT (n=1000): Mean: 251.18 ms  StdDev: 87.30 ms  p50: 280.07 ms  p75: 340.69 ms  p90: 340.69 ms  p95: 340.69 ms  p99: 340.69 ms  (n=3)
+EUF two-group SAT (n=50): Mean: 1.32 ms  StdDev: 35.49 μs  p50: 1.33 ms  p75: 1.36 ms  p90: 1.36 ms  p95: 1.36 ms  p99: 1.36 ms  (n=3)
+EUF two-group SAT (n=200): Mean: 8.82 ms  StdDev: 330.40 μs  p50: 8.82 ms  p75: 9.23 ms  p90: 9.23 ms  p95: 9.23 ms  p99: 9.23 ms  (n=3)
+EUF web (n=20, f=3): Mean: 1.00 ms  StdDev: 172.25 μs  p50: 951.55 μs  p75: 1.23 ms  p90: 1.23 ms  p95: 1.23 ms  p99: 1.23 ms  (n=3)
+EUF web (n=50, f=5): Mean: 5.13 ms  StdDev: 734.23 μs  p50: 5.08 ms  p75: 6.06 ms  p90: 6.06 ms  p95: 6.06 ms  p99: 6.06 ms  (n=3)
+dune exec --profile=release bench/feel_bench.exe -- -bench smt  92.93s user 7.53s system 62% cpu 2:41.83 total
+
+
 n_infeasible counter for O(1) sat-check in solve (no measurable impact: branch constraints usually violated on add, and findi scan is negligible vs pivot work)
 
 Bin packing unchanged. LP unchanged.
