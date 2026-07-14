@@ -260,6 +260,16 @@ let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
   | false -> assert_false_atom t ~decision_level ~atom
 ;;
 
+let atom_value t ~(atom : Atom.t) =
+  let atom = Atom.normalize atom in
+  match Hashtbl.find t.atoms atom with
+  | None -> None
+  | Some atom_data ->
+    (match atom_data.assignment with
+     | Null -> None
+     | This value -> Some value)
+;;
+
 let explanation_path t ~from ~to_ =
   match from = to_ with
   | true -> []

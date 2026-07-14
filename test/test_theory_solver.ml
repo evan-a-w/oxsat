@@ -74,7 +74,7 @@ let%expect_test "Tseitin: simple propositional formula matches truth table" =
            ~b:(assignments.(var_b) : bool option)]);
   (* a must be true; b must also be true (since a is true, [Or [b; not a]]
      forces b) *)
-  [%expect {| (SAT (var_a 1) (var_b 6) (a (true)) (b (true))) |}]
+  [%expect {| (SAT (var_a 1) (var_b 4) (a (true)) (b (true))) |}]
 ;;
 
 let%expect_test "Tseitin: atom -> sat_var mapping is stable across encode calls"
@@ -244,10 +244,7 @@ let%expect_test "EUF: satisfiable case" =
     {|
     (Sat
      (tvar_assignments
-      ((x
-        ((type_ ((Var y)))
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
-         (euf_repr ())))
+      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
        (y
         ((type_ ())
          (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
@@ -274,14 +271,8 @@ let%expect_test "incremental: asserting a contradicting formula after solve" =
     {|
     (Sat
      (tvar_assignments
-      ((x
-        ((type_ ((Var y)))
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ())))
-       (y
-        ((type_ ())
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ((Var x))))))))
+      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
+       (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
     |}];
   assert_ok solver (neq x y);
   print_result (Solver.solve solver);
@@ -309,14 +300,8 @@ let%expect_test "incremental: new EUF atoms registered after a solve" =
     {|
     (Sat
      (tvar_assignments
-      ((x
-        ((type_ ((Var y)))
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ())))
-       (y
-        ((type_ ())
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ((Var x))))))))
+      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
+       (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
     |}];
   (* introduce brand-new terms/atoms involving f, after solving once *)
   assert_ok solver (neq (f x) (f y));
@@ -343,14 +328,8 @@ let%expect_test "push/pop: retracting a contradicting constraint" =
     {|
     (Sat
      (tvar_assignments
-      ((x
-        ((type_ ((Var y)))
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ())))
-       (y
-        ((type_ ())
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ((Var x))))))))
+      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
+       (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
     |}];
   Solver.push solver;
   assert_ok solver (neq x y);
@@ -386,14 +365,8 @@ let%expect_test "push/pop: nested scopes" =
     {|
     (Sat
      (tvar_assignments
-      ((x
-        ((type_ ((Var y)))
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ())))
-       (y
-        ((type_ ())
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ((Var x))))))))
+      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
+       (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
     |}];
   Solver.push solver;
   assert_ok solver (neq y z);
@@ -402,10 +375,7 @@ let%expect_test "push/pop: nested scopes" =
     {|
     (Sat
      (tvar_assignments
-      ((x
-        ((type_ ((Var y)))
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
-         (euf_repr ())))
+      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
        (y
         ((type_ ())
          (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
@@ -437,10 +407,7 @@ let%expect_test "push/pop: nested scopes" =
     {|
     (Sat
      (tvar_assignments
-      ((x
-        ((type_ ((Var y)))
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
-         (euf_repr ())))
+      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
        (y
         ((type_ ())
          (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
@@ -457,10 +424,7 @@ let%expect_test "push/pop: nested scopes" =
     {|
     (Sat
      (tvar_assignments
-      ((x
-        ((type_ ((Var y)))
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
-         (euf_repr ())))
+      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
        (y
         ((type_ ())
          (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
@@ -504,14 +468,8 @@ let%expect_test "push/pop: EUF congruence conflict inside a scope is retracted \
     {|
     (Sat
      (tvar_assignments
-      ((x
-        ((type_ ((Var y)))
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ())))
-       (y
-        ((type_ ())
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ((Var x))))))))
+      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
+       (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
     |}];
   Solver.push solver;
   assert_ok solver (neq (f x) (f y));
@@ -532,14 +490,8 @@ let%expect_test "push/pop: EUF congruence conflict inside a scope is retracted \
     {|
     (Sat
      (tvar_assignments
-      ((x
-        ((type_ ((Var y)))
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ())))
-       (y
-        ((type_ ())
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ((Var x))))))))
+      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
+       (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
     |}];
   (* solving again should remain consistent *)
   print_result (Solver.solve solver);
@@ -547,14 +499,8 @@ let%expect_test "push/pop: EUF congruence conflict inside a scope is retracted \
     {|
     (Sat
      (tvar_assignments
-      ((x
-        ((type_ ((Var y)))
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ())))
-       (y
-        ((type_ ())
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ((Var x))))))))
+      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
+       (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
     |}]
 ;;
 

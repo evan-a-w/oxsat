@@ -288,21 +288,19 @@ and eq_formula_of
     let%bind.Or_error b = uf_term_of b in
     Ok (F.Atom (`Eq (a, b)))
   | Var _, Var _ ->
-    (* Fully ambiguous: propagate the equality into every theory that shares
-       [Tvar.t] as a namespace. *)
+    (* Ambiguous: [a]/[b] might turn out to be UF terms, numbers, or both. The
+       UF and type consequences are cheap, so assert them eagerly; the
+       linear-arithmetic consequence is only injected lazily, once the type
+       theory actually resolves both to a numeric type (see
+       [Uf_la_bridge]) -- eagerly emitting La atoms for every bare-variable
+       equality regardless of whether it's ever numeric made purely-UF
+       workloads dramatically slower. *)
     let%bind.Or_error uf_a = uf_term_of a in
     let%bind.Or_error uf_b = uf_term_of b in
     let%bind.Or_error type_a = type_expr_of a in
     let%bind.Or_error type_b = type_expr_of b in
-    let%bind.Or_error la_a = linear_expr_of a in
-    let%bind.Or_error la_b = linear_expr_of b in
     Ok
-      (F.And
-         [ F.Atom (`Eq (uf_a, uf_b))
-         ; F.Atom (`Type_eq (type_a, type_b))
-         ; F.And
-             (List.map (le_atoms_of_eq la_a la_b) ~f:(fun atom -> F.Atom atom))
-         ])
+      (F.And [ F.Atom (`Eq (uf_a, uf_b)); F.Atom (`Type_eq (type_a, type_b)) ])
 
 (* Mirrors [eq_formula_of], but conjoining the *negation* of each per-theory
    atom, so a bare-variable disequality is "unequal in every applicable theory"

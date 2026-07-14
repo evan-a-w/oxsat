@@ -18,6 +18,7 @@ module Combined_theory = struct
     ; tt : Tvar_types.t
     ; bb : Branch_and_bound.t
     ; encoding : Encoding.t
+    ; bridge : Uf_la_bridge.t
     }
 
   (* Converts a lemma atom coming back from [Formula_egraph_uf] (a bare
@@ -80,12 +81,25 @@ module Combined_theory = struct
              Encoding.sat_var_for_atom t.encoding (`Type_eq (a, b)))
        | `Consistent ->
          (match Branch_and_bound.maybe_get_lemma t.bb [@nontail] with
-          | `Consistent -> `Consistent
           | `Lemma literals ->
             lemma_to_clause
               literals
               ~sat_var_for_atom:(fun (atom : Branch_and_bound.Atom.t) ->
-                Encoding.sat_var_for_atom t.encoding (atom :> Atom.t))))
+                Encoding.sat_var_for_atom t.encoding (atom :> Atom.t))
+          | `Consistent ->
+            (match
+               Uf_la_bridge.maybe_get_lemma
+                 t.bridge
+                 ~uf_equal:(fun a b ->
+                   Formula_egraph_uf.atom_value
+                     t.egraph
+                     ~atom:(`Eq (Formula.Var a, Formula.Var b)))
+                 ~get_type:(Tvar_types.get_type t.tt)
+             with
+             | `Consistent -> `Consistent
+             | `Lemma literals ->
+               lemma_to_clause literals ~sat_var_for_atom:(fun atom ->
+                 Encoding.sat_var_for_atom t.encoding atom))))
   ;;
 
   let undo t ~to_decision_level_excl =
@@ -95,8 +109,11 @@ module Combined_theory = struct
   ;;
 
   let on_new_var (_ : t) ~var:(_ : int) =
-    (* All theory atoms (and their SAT vars) are registered up front, as new
-       formulas are asserted; no theory introduces variables lazily. *)
+    (* Most theory atoms (and their SAT vars) are registered up front, as new
+       formulas are asserted; the sole exception is [Uf_la_bridge], which
+       lazily introduces La atoms on demand via [maybe_get_lemma]'s returned
+       clause -- the SAT engine allocates those vars itself, so there's
+       nothing to react to here either way. *)
     ()
   ;;
 end
@@ -107,6 +124,7 @@ type t =
   ; tt : Tvar_types.t
   ; bb : Branch_and_bound.t
   ; encoding : Encoding.t
+  ; bridge : Uf_la_bridge.t
   ; mutable scopes : int list (* activation literals, innermost first *)
   ; formula_by_root_lit : Formula.any Int.Table.t
   }
@@ -116,7 +134,8 @@ let create () =
   let tt = Tvar_types.create () in
   let bb = Branch_and_bound.create () in
   let encoding = Encoding.create () in
-  let combined = { Combined_theory.egraph; tt; bb; encoding } in
+  let bridge = Uf_la_bridge.create () in
+  let combined = { Combined_theory.egraph; tt; bb; encoding; bridge } in
   let solver =
     Feel.Solver.create
       ~theory:(Feel.Theory.pack (module Combined_theory) combined)
@@ -128,6 +147,7 @@ let create () =
     ; tt
     ; bb
     ; encoding
+    ; bridge
     ; scopes = []
     ; formula_by_root_lit = Int.Table.create ()
     }
@@ -185,7 +205,11 @@ let assert_formula t (formula : Formula.any)
     (Encoding.new_atoms_since t.encoding ~checkpoint)
     ~f:(fun ((atom, _sat_var) : Atom.t * int) ->
       match atom with
-      | `Eq (a, b) -> Formula_egraph_uf.add_atom t.egraph ~atom:(`Eq (a, b))
+      | `Eq (a, b) ->
+        Formula_egraph_uf.add_atom t.egraph ~atom:(`Eq (a, b));
+        (match a, b with
+         | Formula.Var va, Formula.Var vb -> Uf_la_bridge.register t.bridge va vb
+         | _ -> ())
       | `Type_eq (a, b) ->
         Formula_egraph_uf.add_atom
           t.egraph

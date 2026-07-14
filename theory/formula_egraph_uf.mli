@@ -26,6 +26,11 @@ val assert_atom : t -> decision_level:int -> atom:Atom.t -> value:bool -> unit
 val maybe_get_lemma : t -> [ `Consistent | `Lemma of (Atom.t * bool) list ]
 val undo : t -> to_decision_level_excl:int -> unit
 
+(** The current truth value of [atom], if it has been assigned one (via
+    {!assert_atom}) and not since undone. [None] if [atom] hasn't been
+    registered or hasn't been assigned. *)
+val atom_value : t -> atom:Atom.t -> bool option
+
 (** The representative term of [term]'s equivalence class under the current
     congruence closure. [term] must already be registered (e.g. via [add_atom]
     or [create]). *)
