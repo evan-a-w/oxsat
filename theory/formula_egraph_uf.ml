@@ -184,6 +184,7 @@ let create ~atoms =
 ;;
 
 let add_atom t ~atom = register_atom t ~atom
+let mem_term t term = Hashtbl.mem t.id_by_term term
 
 let canonical_term t ~term =
   let id = Hashtbl.find_exn t.id_by_term term in

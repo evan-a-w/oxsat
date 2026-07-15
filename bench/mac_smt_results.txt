@@ -1,3 +1,25 @@
+lazy bare-variable type equality
+
+$ time dune exec --profile=release bench/feel_bench.exe -- -bench smt
+SMT solver benchmarks (LP, MILP, EUF):
+LP feasible (n=10, m=30): Mean: 98.19 μs  StdDev: 565.08 ns  p50: 97.81 μs  p75: 98.99 μs  p90: 98.99 μs  p95: 98.99 μs  p99: 98.99 μs  (n=3)
+LP feasible (n=20, m=60): Mean: 252.11 μs  StdDev: 108.09 ns  p50: 252.12 μs  p75: 252.23 μs  p90: 252.23 μs  p95: 252.23 μs  p99: 252.23 μs  (n=3)
+LP feasible (n=50, m=150): Mean: 928.23 μs  StdDev: 852.60 ns  p50: 928.58 μs  p75: 929.07 μs  p90: 929.07 μs  p95: 929.07 μs  p99: 929.07 μs  (n=3)
+LP tight OR (n=5): Mean: 86.76 μs  StdDev: 26.59 ns  p50: 86.77 μs  p75: 86.78 μs  p90: 86.78 μs  p95: 86.78 μs  p99: 86.78 μs  (n=3)
+LP tight OR (n=7): Mean: 127.31 μs  StdDev: 6.30 μs  p50: 129.52 μs  p75: 133.67 μs  p90: 133.67 μs  p95: 133.67 μs  p99: 133.67 μs  (n=3)
+LP tight OR (n=9): Mean: 163.79 μs  StdDev: 282.30 ns  p50: 163.66 μs  p75: 164.18 μs  p90: 164.18 μs  p95: 164.18 μs  p99: 164.18 μs  (n=3)
+Bin packing (items=10, bins=3): Mean: 2.09 ms  StdDev: 1.10 μs  p50: 2.09 ms  p75: 2.09 ms  p90: 2.09 ms  p95: 2.09 ms  p99: 2.09 ms  (n=3)
+Bin packing (items=15, bins=4): Mean: 18.76 ms  StdDev: 196.39 μs  p50: 18.88 ms  p75: 18.91 ms  p90: 18.91 ms  p95: 18.91 ms  p99: 18.91 ms  (n=3)
+Bin packing (items=20, bins=4): Mean: 41.82 ms  StdDev: 18.41 μs  p50: 41.83 ms  p75: 41.84 ms  p90: 41.84 ms  p95: 41.84 ms  p99: 41.84 ms  (n=3)
+EUF chain UNSAT (n=50): Mean: 132.20 μs  StdDev: 299.92 ns  p50: 132.15 μs  p75: 132.59 μs  p90: 132.59 μs  p95: 132.59 μs  p99: 132.59 μs  (n=3)
+EUF chain UNSAT (n=200): Mean: 712.29 μs  StdDev: 12.77 μs  p50: 720.98 μs  p75: 721.66 μs  p90: 721.66 μs  p95: 721.66 μs  p99: 721.66 μs  (n=3)
+EUF chain UNSAT (n=1000): Mean: 6.67 ms  StdDev: 23.53 μs  p50: 6.65 ms  p75: 6.70 ms  p90: 6.70 ms  p95: 6.70 ms  p99: 6.70 ms  (n=3)
+EUF two-group SAT (n=50): Mean: 137.39 μs  StdDev: 339.31 ns  p50: 137.19 μs  p75: 137.87 μs  p90: 137.87 μs  p95: 137.87 μs  p99: 137.87 μs  (n=3)
+EUF two-group SAT (n=200): Mean: 675.63 μs  StdDev: 672.72 ns  p50: 675.45 μs  p75: 676.53 μs  p90: 676.53 μs  p95: 676.53 μs  p99: 676.53 μs  (n=3)
+EUF web (n=20, f=3): Mean: 88.19 μs  StdDev: 148.47 ns  p50: 88.10 μs  p75: 88.40 μs  p90: 88.40 μs  p95: 88.40 μs  p99: 88.40 μs  (n=3)
+EUF web (n=50, f=5): Mean: 274.33 μs  StdDev: 392.58 ns  p50: 274.06 μs  p75: 274.89 μs  p90: 274.89 μs  p95: 274.89 μs  p99: 274.89 μs  (n=3)
+dune exec --profile=release bench/feel_bench.exe -- -bench smt  101.60s user 0.76s system 82% cpu 2:04.66 total
+
 new egraph
 $ time dune exec --profile=release bench/feel_bench.exe -- -bench smt
 SMT solver benchmarks (LP, MILP, EUF): 
@@ -84,3 +106,5 @@ EUF two-group SAT (n=200): Mean: 418.53 μs  StdDev: 764.64 ns  p50: 418.33 μs 
 EUF web (n=20, f=3): Mean: 71.44 μs  StdDev: 67.76 ns  p50: 71.45 μs  p75: 71.52 μs  p90: 71.52 μs  p95: 71.52 μs  p99: 71.52 μs  (n=3)
 EUF web (n=50, f=5): Mean: 205.28 μs  StdDev: 473.64 ns  p50: 205.09 μs  p75: 205.93 μs  p90: 205.93 μs  p95: 205.93 μs  p99: 205.93 μs  (n=3)
 dune exec --profile=release bench/feel_bench.exe -- -bench smt  87.75s user 0.79s system 77% cpu 1:54.15 total
+
+

@@ -74,7 +74,7 @@ let%expect_test "Tseitin: simple propositional formula matches truth table" =
            ~b:(assignments.(var_b) : bool option)]);
   (* a must be true; b must also be true (since a is true, [Or [b; not a]]
      forces b) *)
-  [%expect {| (SAT (var_a 1) (var_b 4) (a (true)) (b (true))) |}]
+  [%expect {| (SAT (var_a 1) (var_b 2) (a (true)) (b (true))) |}]
 ;;
 
 let%expect_test "Tseitin: atom -> sat_var mapping is stable across encode calls"
@@ -271,7 +271,7 @@ let%expect_test "incremental: asserting a contradicting formula after solve" =
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
+      ((x ((type_ ()) (numeric ()) (euf_repr ())))
        (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
     |}];
   assert_ok solver (neq x y);
@@ -300,7 +300,7 @@ let%expect_test "incremental: new EUF atoms registered after a solve" =
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
+      ((x ((type_ ()) (numeric ()) (euf_repr ())))
        (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
     |}];
   (* introduce brand-new terms/atoms involving f, after solving once *)
@@ -328,7 +328,7 @@ let%expect_test "push/pop: retracting a contradicting constraint" =
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
+      ((x ((type_ ()) (numeric ()) (euf_repr ())))
        (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
     |}];
   Solver.push solver;
@@ -365,7 +365,7 @@ let%expect_test "push/pop: nested scopes" =
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
+      ((x ((type_ ()) (numeric ()) (euf_repr ())))
        (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
     |}];
   Solver.push solver;
@@ -396,8 +396,8 @@ let%expect_test "push/pop: nested scopes" =
       ((Asserted (Not (Eq (Var y) (Var z))))
        (Theory_lemma
         (Or
-         ((Eq (Type_var y) (Type_var z)) (Not (Eq (Type_var x) (Type_var y)))
-          (Not (Eq (Type_var x) (Type_var z))))))
+         ((Eq (Var y) (Var z)) (Not (Eq (Var x) (Var y)))
+          (Not (Eq (Var x) (Var z))))))
        (Asserted (Eq (Var x) (Var y))) (Asserted (Eq (Var x) (Var z))))))
     |}];
   Solver.pop solver;
@@ -407,9 +407,9 @@ let%expect_test "push/pop: nested scopes" =
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
+      ((x ((type_ ((Var z))) (numeric ()) (euf_repr ())))
        (y
-        ((type_ ())
+        ((type_ ((Var z)))
          (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
          (euf_repr ((Var x)))))
        (z
@@ -424,9 +424,9 @@ let%expect_test "push/pop: nested scopes" =
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
+      ((x ((type_ ((Var z))) (numeric ()) (euf_repr ())))
        (y
-        ((type_ ())
+        ((type_ ((Var z)))
          (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
          (euf_repr ((Var x)))))
        (z
@@ -468,7 +468,7 @@ let%expect_test "push/pop: EUF congruence conflict inside a scope is retracted \
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
+      ((x ((type_ ()) (numeric ()) (euf_repr ())))
        (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
     |}];
   Solver.push solver;
@@ -490,7 +490,7 @@ let%expect_test "push/pop: EUF congruence conflict inside a scope is retracted \
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
+      ((x ((type_ ()) (numeric ()) (euf_repr ())))
        (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
     |}];
   (* solving again should remain consistent *)
@@ -499,7 +499,7 @@ let%expect_test "push/pop: EUF congruence conflict inside a scope is retracted \
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
+      ((x ((type_ ()) (numeric ()) (euf_repr ())))
        (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
     |}]
 ;;
@@ -705,6 +705,42 @@ let%expect_test "Type_eq: normalize makes Eq(a, b) = Eq(b, a) for embedded \
 
 let (_ : Formula.any -> Formula.any) = ft_array
 let (_ : Type_expr.t) = int_type
+
+let%expect_test "bare-variable equality does not eagerly create a type equality"
+  =
+  let solver = Solver.create () in
+  assert_ok solver (eq x y);
+  print_result (Solver.solve solver);
+  [%expect
+    {|
+    (Sat
+     (tvar_assignments
+      ((x ((type_ ()) (numeric ()) (euf_repr ())))
+       (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
+    |}]
+;;
+
+let%expect_test "lazy bare-variable type equality detects incompatible types" =
+  let solver = Solver.create () in
+  assert_ok solver (eq x y);
+  ignore (Solver.solve solver : Solver_result.t);
+  Solver.assert_type solver xv int_type;
+  Solver.assert_type solver yv float_type;
+  print_result (Solver.solve solver);
+  [%expect
+    {|
+    (Unsat
+     (core
+      ((Theory_lemma
+        (Or
+         ((Not (Eq (Type_var x) (Type_var y))) (Not (Eq (Type_var y) Float))
+          (Not (Eq (Type_var x) Int)) (Eq Int Float))))
+       (Theory_lemma
+        (Or ((Eq (Type_var x) (Type_var y)) (Not (Eq (Var x) (Var y))))))
+       (Asserted (Eq (Var x) (Var y))) (Asserted (Eq (Type_var y) Float))
+       (Asserted (Eq (Type_var x) Int)) (Asserted (Not (Eq Int Float))))))
+    |}]
+;;
 
 (* TODO: test that shows type theory congruence closure doesn't work, then fix
    it. *)

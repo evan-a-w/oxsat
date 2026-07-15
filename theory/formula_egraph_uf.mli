@@ -31,6 +31,9 @@ val undo : t -> to_decision_level_excl:int -> unit
     registered or hasn't been assigned. *)
 val atom_value : t -> atom:Atom.t -> bool option
 
+(** Whether [term] has been registered as an atom endpoint or subterm. *)
+val mem_term : t -> Formula.any -> bool
+
 (** The representative term of [term]'s equivalence class under the current
     congruence closure. [term] must already be registered (e.g. via [add_atom]
     or [create]). *)

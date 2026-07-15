@@ -14,19 +14,12 @@ end
 
 type t
 
-module Checkpoint : sig
-  type t
-end
-
 val create : unit -> t
 val fresh_var : t -> int
 val sat_var_for_atom : t -> Atom.t -> int
 val find_sat_var_for_atom : t -> Atom.t -> int option
 val atom_for_sat_var : t -> int -> Atom.t option
 val atoms : t -> (Atom.t * int) list
-val checkpoint : t -> Checkpoint.t
-val new_atoms_since : t -> checkpoint:Checkpoint.t -> (Atom.t * int) list
-val new_shared_tvars_since : t -> checkpoint:Checkpoint.t -> Tvar.t list
 
 (** [encode encoding formula] elaborates the rich [formula] into flat theory
     atoms, then Tseitin-encodes the result into CNF, returning a list of clauses

@@ -18,7 +18,7 @@ module Combined_theory = struct
     ; tt : Tvar_types.t
     ; bb : Branch_and_bound.t
     ; encoding : Encoding.t
-    ; bridge : Uf_la_bridge.t
+    ; bare_var_eq : Bare_var_eq.t
     }
 
   (* Converts a lemma atom coming back from [Formula_egraph_uf] (a bare
@@ -88,12 +88,14 @@ module Combined_theory = struct
                 Encoding.sat_var_for_atom t.encoding (atom :> Atom.t))
           | `Consistent ->
             (match
-               Uf_la_bridge.maybe_get_lemma
-                 t.bridge
+               Bare_var_eq.maybe_get_lemma
+                 t.bare_var_eq
                  ~uf_equal:(fun a b ->
                    Formula_egraph_uf.atom_value
                      t.egraph
                      ~atom:(`Eq (Formula.Var a, Formula.Var b)))
+                 ~type_is_relevant:(fun var ->
+                   Formula_egraph_uf.mem_term t.egraph (Formula.Type_var var))
                  ~get_type:(Tvar_types.get_type t.tt)
              with
              | `Consistent -> `Consistent
@@ -108,13 +110,20 @@ module Combined_theory = struct
     Branch_and_bound.undo t.bb ~to_decision_level_excl
   ;;
 
-  let on_new_var (_ : t) ~var:(_ : int) =
-    (* Most theory atoms (and their SAT vars) are registered up front, as new
-       formulas are asserted; the sole exception is [Uf_la_bridge], which
-       lazily introduces La atoms on demand via [maybe_get_lemma]'s returned
-       clause -- the SAT engine allocates those vars itself, so there's
-       nothing to react to here either way. *)
-    ()
+  let on_new_var t ~var =
+    match Encoding.atom_for_sat_var t.encoding var with
+    | None | Some (`Le _) -> ()
+    | Some (`Eq (a, b)) ->
+      Formula_egraph_uf.add_atom t.egraph ~atom:(`Eq (a, b));
+      (match a, b with
+       | Formula.Var a, Formula.Var b -> Bare_var_eq.register t.bare_var_eq a b
+       | _ -> ())
+    | Some (`Type_eq (a, b)) ->
+      Formula_egraph_uf.add_atom
+        t.egraph
+        ~atom:
+          (`Eq
+            (Encoding.type_expr_to_formula a, Encoding.type_expr_to_formula b))
   ;;
 end
 
@@ -124,7 +133,6 @@ type t =
   ; tt : Tvar_types.t
   ; bb : Branch_and_bound.t
   ; encoding : Encoding.t
-  ; bridge : Uf_la_bridge.t
   ; mutable scopes : int list (* activation literals, innermost first *)
   ; formula_by_root_lit : Formula.any Int.Table.t
   }
@@ -134,8 +142,8 @@ let create () =
   let tt = Tvar_types.create () in
   let bb = Branch_and_bound.create () in
   let encoding = Encoding.create () in
-  let bridge = Uf_la_bridge.create () in
-  let combined = { Combined_theory.egraph; tt; bb; encoding; bridge } in
+  let bare_var_eq = Bare_var_eq.create () in
+  let combined = { Combined_theory.egraph; tt; bb; encoding; bare_var_eq } in
   let solver =
     Feel.Solver.create
       ~theory:(Feel.Theory.pack (module Combined_theory) combined)
@@ -147,7 +155,6 @@ let create () =
     ; tt
     ; bb
     ; encoding
-    ; bridge
     ; scopes = []
     ; formula_by_root_lit = Int.Table.create ()
     }
@@ -165,11 +172,6 @@ let create () =
         in
         let atom : Atom.t = `Type_eq (a, b) in
         let sat_var = Encoding.sat_var_for_atom t.encoding atom in
-        Formula_egraph_uf.add_atom
-          t.egraph
-          ~atom:
-            (`Eq
-              (Encoding.type_expr_to_formula a, Encoding.type_expr_to_formula b));
         Hashtbl.set
           t.formula_by_root_lit
           ~key:(-sat_var)
@@ -189,7 +191,6 @@ let guard_clauses ~activation clauses =
 let assert_formula t (formula : Formula.any)
   : [ `Ok | `Unsat of Feel.Sat_result.Core_clause.t list ] Or_error.t
   =
-  let checkpoint = Encoding.checkpoint t.encoding in
   let%bind.Or_error clauses = Encoding.encode t.encoding ~formula in
   let root_lit = (List.last_exn clauses).(0) in
   Hashtbl.set t.formula_by_root_lit ~key:root_lit ~data:formula;
@@ -198,25 +199,6 @@ let assert_formula t (formula : Formula.any)
     | [] -> clauses
     | activation :: _ -> guard_clauses ~activation clauses
   in
-  (* New theory atoms must be registered before their sat vars are referenced by
-     any clause, so that [assert_literal] (triggered by unit propagation during
-     [add_clause]) recognizes them as theory atoms from the start. *)
-  List.iter
-    (Encoding.new_atoms_since t.encoding ~checkpoint)
-    ~f:(fun ((atom, _sat_var) : Atom.t * int) ->
-      match atom with
-      | `Eq (a, b) ->
-        Formula_egraph_uf.add_atom t.egraph ~atom:(`Eq (a, b));
-        (match a, b with
-         | Formula.Var va, Formula.Var vb -> Uf_la_bridge.register t.bridge va vb
-         | _ -> ())
-      | `Type_eq (a, b) ->
-        Formula_egraph_uf.add_atom
-          t.egraph
-          ~atom:
-            (`Eq
-              (Encoding.type_expr_to_formula a, Encoding.type_expr_to_formula b))
-      | `Le (_, _) -> ());
   Ok
     (List.fold_until
        clauses
