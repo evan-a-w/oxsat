@@ -14,32 +14,18 @@ end
 
 type t =
   { mutable next_var : int
-  ; mutable next_tvar : int
   ; atom_to_sat_var : int Atom.Table.t
   ; sat_var_to_atom : Atom.t Int.Table.t
   ; atoms_in_order : (Atom.t * int) Vec.Value.t
-  ; shared_tvars_in_order : Tvar.t Vec.Value.t
   ; mutable true_var : int or_null
-  ; atom_to_shared_tvar : Tvar.t Atom.Table.t
   }
-[@@warning "-69"]
-
-module Checkpoint = struct
-  type t =
-    { atoms_length : int
-    ; shared_tvars_length : int
-    }
-end
 
 let create () =
   { next_var = 1
-  ; next_tvar = 1
   ; atom_to_sat_var = Atom.Table.create ()
   ; sat_var_to_atom = Int.Table.create ()
   ; atoms_in_order = Vec.Value.create ()
   ; true_var = Null
-  ; atom_to_shared_tvar = Atom.Table.create ()
-  ; shared_tvars_in_order = Vec.Value.create ()
   }
 ;;
 
@@ -47,14 +33,6 @@ let fresh_var t =
   let var = t.next_var in
   t.next_var <- t.next_var + 1;
   var
-;;
-
-let (_fresh_tvar : t -> Tvar.t) =
-  fun t ->
-  let raw = t.next_tvar in
-  t.next_tvar <- t.next_tvar + 1;
-  let s = [%string "temp_var#%{raw#Int}"] in
-  Tvar.of_string s
 ;;
 
 let sat_var_for_atom t atom =
@@ -72,28 +50,6 @@ let find_sat_var_for_atom t atom =
 
 let atom_for_sat_var t sat_var = Hashtbl.find t.sat_var_to_atom sat_var
 let atoms t = Vec.Value.to_list t.atoms_in_order
-
-let checkpoint t : Checkpoint.t =
-  { atoms_length = Vec.Value.length t.atoms_in_order
-  ; shared_tvars_length = Vec.Value.length t.shared_tvars_in_order
-  }
-;;
-
-let new_atoms_since t ~checkpoint:({ atoms_length; _ } : Checkpoint.t) =
-  List.init
-    (Vec.Value.length t.atoms_in_order - atoms_length)
-    ~f:(fun i -> Vec.Value.get t.atoms_in_order (atoms_length + i))
-;;
-
-let new_shared_tvars_since
-  t
-  ~checkpoint:({ shared_tvars_length; _ } : Checkpoint.t)
-  =
-  List.init
-    (Vec.Value.length t.shared_tvars_in_order - shared_tvars_length)
-    ~f:(fun i ->
-      Vec.Value.get t.shared_tvars_in_order (shared_tvars_length + i))
-;;
 
 (* A variable that is always true: a fresh variable with a unit clause asserting
    it, allocated lazily and cached so [True]/[False] don't waste a variable when
@@ -288,21 +244,9 @@ and eq_formula_of
     let%bind.Or_error b = uf_term_of b in
     Ok (F.Atom (`Eq (a, b)))
   | Var _, Var _ ->
-    (* Fully ambiguous: propagate the equality into every theory that shares
-       [Tvar.t] as a namespace. *)
     let%bind.Or_error uf_a = uf_term_of a in
     let%bind.Or_error uf_b = uf_term_of b in
-    let%bind.Or_error type_a = type_expr_of a in
-    let%bind.Or_error type_b = type_expr_of b in
-    let%bind.Or_error la_a = linear_expr_of a in
-    let%bind.Or_error la_b = linear_expr_of b in
-    Ok
-      (F.And
-         [ F.Atom (`Eq (uf_a, uf_b))
-         ; F.Atom (`Type_eq (type_a, type_b))
-         ; F.And
-             (List.map (le_atoms_of_eq la_a la_b) ~f:(fun atom -> F.Atom atom))
-         ])
+    Ok (F.Atom (`Eq (uf_a, uf_b)))
 
 (* Mirrors [eq_formula_of], but conjoining the *negation* of each per-theory
    atom, so a bare-variable disequality is "unequal in every applicable theory"

@@ -184,6 +184,7 @@ let create ~atoms =
 ;;
 
 let add_atom t ~atom = register_atom t ~atom
+let mem_term t term = Hashtbl.mem t.id_by_term term
 
 let canonical_term t ~term =
   let id = Hashtbl.find_exn t.id_by_term term in
@@ -258,6 +259,16 @@ let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
   match value with
   | true -> assert_true_atom t ~decision_level ~atom
   | false -> assert_false_atom t ~decision_level ~atom
+;;
+
+let atom_value t ~(atom : Atom.t) =
+  let atom = Atom.normalize atom in
+  match Hashtbl.find t.atoms atom with
+  | None -> None
+  | Some atom_data ->
+    (match atom_data.assignment with
+     | Null -> None
+     | This value -> Some value)
 ;;
 
 let explanation_path t ~from ~to_ =
