@@ -16,5 +16,6 @@ val maybe_get_lemma
   :  t
   -> uf_equal:(Tvar.t -> Tvar.t -> bool option)
   -> type_is_relevant:(Tvar.t -> bool)
+  -> shared_la_is_relevant:(Tvar.t -> bool)
   -> get_type:(Tvar.t -> Type_expr.t option)
   -> [ `Consistent | `Lemma of (Atom.t * bool) list ]

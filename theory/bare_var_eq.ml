@@ -48,7 +48,13 @@ let find_ready t ~injected ~is_ready =
     (not (Hash_set.mem injected pair)) && is_ready pair)
 ;;
 
-let maybe_get_lemma t ~uf_equal ~type_is_relevant ~get_type =
+let maybe_get_lemma
+  t
+  ~uf_equal
+  ~type_is_relevant
+  ~shared_la_is_relevant
+  ~get_type
+  =
   let uf_equal (a, b) = Option.value (uf_equal a b) ~default:false in
   let type_ready ((a, b) as pair) =
     uf_equal pair && (type_is_relevant a || type_is_relevant b)
@@ -59,7 +65,11 @@ let maybe_get_lemma t ~uf_equal ~type_is_relevant ~get_type =
     `Lemma (type_lemma pair)
   | None ->
     let la_ready ((a, b) as pair) =
-      uf_equal pair && (is_numeric (get_type a) || is_numeric (get_type b))
+      uf_equal pair
+      && (shared_la_is_relevant a
+          || shared_la_is_relevant b
+          || is_numeric (get_type a)
+          || is_numeric (get_type b))
     in
     (match find_ready t ~injected:t.la_injected ~is_ready:la_ready with
      | None -> `Consistent

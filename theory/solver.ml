@@ -19,6 +19,8 @@ module Combined_theory = struct
     ; bb : Branch_and_bound.t
     ; encoding : Encoding.t
     ; bare_var_eq : Bare_var_eq.t
+    ; shared_tvar : Shared_tvar.t
+    ; la_tvars : Tvar.Hash_set.t
     }
 
   (* Converts a lemma atom coming back from [Formula_egraph_uf] (a bare
@@ -96,12 +98,20 @@ module Combined_theory = struct
                      ~atom:(`Eq (Formula.Var a, Formula.Var b)))
                  ~type_is_relevant:(fun var ->
                    Formula_egraph_uf.mem_term t.egraph (Formula.Type_var var))
+                 ~shared_la_is_relevant:(fun var ->
+                   Hash_set.mem t.la_tvars var
+                   && Shared_tvar.mem t.shared_tvar var)
                  ~get_type:(Tvar_types.get_type t.tt)
              with
-             | `Consistent -> `Consistent
              | `Lemma literals ->
                lemma_to_clause literals ~sat_var_for_atom:(fun atom ->
-                 Encoding.sat_var_for_atom t.encoding atom))))
+                 Encoding.sat_var_for_atom t.encoding atom)
+             | `Consistent ->
+               (match Shared_tvar.maybe_get_lemma t.shared_tvar with
+                | `Consistent -> `Consistent
+                | `Lemma literals ->
+                  lemma_to_clause literals ~sat_var_for_atom:(fun atom ->
+                    Encoding.sat_var_for_atom t.encoding atom)))))
   ;;
 
   let undo t ~to_decision_level_excl =
@@ -112,7 +122,21 @@ module Combined_theory = struct
 
   let on_new_var t ~var =
     match Encoding.atom_for_sat_var t.encoding var with
-    | None | Some (`Le _) -> ()
+    | None -> ()
+    | Some (`Le ({ coeffs; _ }, _)) ->
+      let tvars = Map.keys coeffs in
+      List.iter tvars ~f:(fun tvar ->
+        Hash_set.iter t.la_tvars ~f:(fun other ->
+          if not (Tvar.equal tvar other)
+          then
+            Formula_egraph_uf.add_atom
+              t.egraph
+              ~atom:(`Eq (Formula.Var tvar, Formula.Var other))));
+      List.iter tvars ~f:(fun tvar ->
+        Hash_set.add t.la_tvars tvar;
+        match Encoding.shared_term t.encoding tvar with
+        | None -> ()
+        | Some term -> Shared_tvar.register t.shared_tvar ~tvar ~term)
     | Some (`Eq (a, b)) ->
       Formula_egraph_uf.add_atom t.egraph ~atom:(`Eq (a, b));
       (match a, b with
@@ -143,7 +167,18 @@ let create () =
   let bb = Branch_and_bound.create () in
   let encoding = Encoding.create () in
   let bare_var_eq = Bare_var_eq.create () in
-  let combined = { Combined_theory.egraph; tt; bb; encoding; bare_var_eq } in
+  let shared_tvar = Shared_tvar.create () in
+  let la_tvars = Tvar.Hash_set.create () in
+  let combined =
+    { Combined_theory.egraph
+    ; tt
+    ; bb
+    ; encoding
+    ; bare_var_eq
+    ; shared_tvar
+    ; la_tvars
+    }
+  in
   let solver =
     Feel.Solver.create
       ~theory:(Feel.Theory.pack (module Combined_theory) combined)

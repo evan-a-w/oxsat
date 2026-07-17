@@ -26,6 +26,18 @@ let assert_ok solver formula =
   | `Unsat _ -> print_endline "UNSAT (at assert time)"
 ;;
 
+let%expect_test "shared tvar connects a UF term to linear arithmetic" =
+  let solver = Solver.create () in
+  let fx = f x in
+  assert_ok solver (La_compare (fx, `Le, La_const (Q.of_int 5)));
+  assert_ok solver (eq fx y);
+  assert_ok solver (La_compare (y, `Gt, La_const (Q.of_int 5)));
+  (match Solver.solve solver with
+   | Unsat _ -> print_endline "UNSAT"
+   | Sat _ -> print_endline "SAT");
+  [%expect {| UNSAT |}]
+;;
+
 (* ----- Term/Atom basics ----- *)
 
 let uf_x : Formula.any = Var (Tvar.of_string "x")

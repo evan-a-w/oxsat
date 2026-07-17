@@ -160,10 +160,12 @@ let rec register_term t ~(term : Formula.any) : G.Id.t =
 
 let register_atom t ~(atom : Atom.t) =
   let atom = Atom.normalize atom in
-  let (`Eq (a, b)) = atom in
-  let id_a = register_term t ~term:a in
-  let id_b = register_term t ~term:b in
-  Hashtbl.set t.atoms ~key:atom ~data:{ atom; id_a; id_b; assignment = Null }
+  if not (Hashtbl.mem t.atoms atom)
+  then (
+    let (`Eq (a, b)) = atom in
+    let id_a = register_term t ~term:a in
+    let id_b = register_term t ~term:b in
+    Hashtbl.set t.atoms ~key:atom ~data:{ atom; id_a; id_b; assignment = Null })
 ;;
 
 let create ~atoms =

@@ -20,6 +20,7 @@ val sat_var_for_atom : t -> Atom.t -> int
 val find_sat_var_for_atom : t -> Atom.t -> int option
 val atom_for_sat_var : t -> int -> Atom.t option
 val atoms : t -> (Atom.t * int) list
+val shared_term : t -> Tvar.t -> Formula.any option
 
 (** [encode encoding formula] elaborates the rich [formula] into flat theory
     atoms, then Tseitin-encodes the result into CNF, returning a list of clauses

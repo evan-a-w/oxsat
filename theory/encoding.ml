@@ -14,17 +14,23 @@ end
 
 type t =
   { mutable next_var : int
+  ; mutable next_tvar : int
   ; atom_to_sat_var : int Atom.Table.t
   ; sat_var_to_atom : Atom.t Int.Table.t
   ; atoms_in_order : (Atom.t * int) Vec.Value.t
+  ; shared_tvar_by_term : Tvar.t Formula.Any.Table.t
+  ; shared_term_by_tvar : Formula.any Tvar.Table.t
   ; mutable true_var : int or_null
   }
 
 let create () =
   { next_var = 1
+  ; next_tvar = 1
   ; atom_to_sat_var = Atom.Table.create ()
   ; sat_var_to_atom = Int.Table.create ()
   ; atoms_in_order = Vec.Value.create ()
+  ; shared_tvar_by_term = Formula.Any.Table.create ()
+  ; shared_term_by_tvar = Tvar.Table.create ()
   ; true_var = Null
   }
 ;;
@@ -34,6 +40,17 @@ let fresh_var t =
   t.next_var <- t.next_var + 1;
   var
 ;;
+
+let shared_tvar_for_term t term =
+  Hashtbl.find_or_add t.shared_tvar_by_term term ~default:(fun () ->
+    let raw = t.next_tvar in
+    t.next_tvar <- t.next_tvar + 1;
+    let tvar = Tvar.of_string [%string "#%{raw#Int}"] in
+    Hashtbl.set t.shared_term_by_tvar ~key:tvar ~data:term;
+    tvar)
+;;
+
+let shared_term t tvar = Hashtbl.find t.shared_term_by_tvar tvar
 
 let sat_var_for_atom t atom =
   let atom = Atom.normalize atom in
@@ -160,17 +177,21 @@ let rec type_expr_of : type a. a Formula.t -> Type_expr.t Or_error.t =
   | _ -> Or_error.error_s [%message "formula is not a type expression"]
 ;;
 
-let rec linear_expr_of : type a. a Formula.t -> Linear_expr.t Or_error.t =
-  fun formula ->
+let rec linear_expr_of : type a. t -> a Formula.t -> Linear_expr.t Or_error.t =
+  fun encoding formula ->
   match formula with
   | Var v -> Ok (Linear_expr.var v)
+  | App (function_, args) ->
+    let%bind.Or_error args = Or_error.all (List.map args ~f:uf_term_of) in
+    let term : Formula.any = Formula.App (function_, args) in
+    Ok (Linear_expr.var (shared_tvar_for_term encoding term))
   | La_const q -> Ok (Linear_expr.const q)
   | La_scale_const (q, a) ->
-    let%bind.Or_error a = linear_expr_of a in
+    let%bind.Or_error a = linear_expr_of encoding a in
     Ok (Linear_expr.scale q a)
   | La_add (a, b) ->
-    let%bind.Or_error a = linear_expr_of a in
-    let%bind.Or_error b = linear_expr_of b in
+    let%bind.Or_error a = linear_expr_of encoding a in
+    let%bind.Or_error b = linear_expr_of encoding b in
     Ok Linear_expr.(a + b)
   | _ -> Or_error.error_s [%message "formula is not a linear expression"]
 ;;
@@ -194,41 +215,48 @@ let compare_atom
 ;;
 
 let rec bool_formula_of
-  : type a. a Formula.t -> Formula_with_no_shared_theories.t Or_error.t
+  : type a. t -> a Formula.t -> Formula_with_no_shared_theories.t Or_error.t
   =
-  fun formula ->
+  fun encoding formula ->
   let module F = Formula_with_no_shared_theories in
   match formula with
   | True -> Ok F.True
   | False -> Ok F.False
-  | Not (Eq (a, b)) -> neq_formula_of a b
+  | Not (Eq (a, b)) -> neq_formula_of encoding a b
   | Not f ->
-    let%bind.Or_error f = bool_formula_of f in
+    let%bind.Or_error f = bool_formula_of encoding f in
     Ok (F.Not f)
   | And fs ->
-    let%bind.Or_error fs = Or_error.all (List.map fs ~f:bool_formula_of) in
+    let%bind.Or_error fs =
+      Or_error.all (List.map fs ~f:(bool_formula_of encoding))
+    in
     Ok (F.And fs)
   | Or fs ->
-    let%bind.Or_error fs = Or_error.all (List.map fs ~f:bool_formula_of) in
+    let%bind.Or_error fs =
+      Or_error.all (List.map fs ~f:(bool_formula_of encoding))
+    in
     Ok (F.Or fs)
   | La_compare (a, op, b) ->
-    let%bind.Or_error a = linear_expr_of a in
-    let%bind.Or_error b = linear_expr_of b in
+    let%bind.Or_error a = linear_expr_of encoding a in
+    let%bind.Or_error b = linear_expr_of encoding b in
     Ok (compare_atom a op b)
-  | Eq (a, b) -> eq_formula_of a b
+  | Eq (a, b) -> eq_formula_of encoding a b
   | Var _ -> Or_error.error_s [%message "a bare variable is not a formula"]
   | _ -> Or_error.error_s [%message "formula is not boolean"]
 
 and eq_formula_of
   : type a.
-    a Formula.t -> a Formula.t -> Formula_with_no_shared_theories.t Or_error.t
+    t
+    -> a Formula.t
+    -> a Formula.t
+    -> Formula_with_no_shared_theories.t Or_error.t
   =
-  fun a b ->
+  fun encoding a b ->
   let module F = Formula_with_no_shared_theories in
   match shape_of a, shape_of b with
   | Bool, _ | _, Bool ->
-    let%bind.Or_error a = bool_formula_of a in
-    let%bind.Or_error b = bool_formula_of b in
+    let%bind.Or_error a = bool_formula_of encoding a in
+    let%bind.Or_error b = bool_formula_of encoding b in
     (* [a <-> b] as [(¬a \/ b) /\ (a \/ ¬b)] *)
     Ok (F.And [ F.Or [ F.Not a; b ]; F.Or [ a; F.Not b ] ])
   | Type, _ | _, Type ->
@@ -236,8 +264,8 @@ and eq_formula_of
     let%bind.Or_error b = type_expr_of b in
     Ok (F.Atom (`Type_eq (a, b)))
   | La, _ | _, La ->
-    let%bind.Or_error a = linear_expr_of a in
-    let%bind.Or_error b = linear_expr_of b in
+    let%bind.Or_error a = linear_expr_of encoding a in
+    let%bind.Or_error b = linear_expr_of encoding b in
     Ok (F.And (List.map (le_atoms_of_eq a b) ~f:(fun atom -> F.Atom atom)))
   | Uf, _ | _, Uf ->
     let%bind.Or_error a = uf_term_of a in
@@ -253,21 +281,24 @@ and eq_formula_of
    rather than merely "not equal in every theory at once". *)
 and neq_formula_of
   : type a.
-    a Formula.t -> a Formula.t -> Formula_with_no_shared_theories.t Or_error.t
+    t
+    -> a Formula.t
+    -> a Formula.t
+    -> Formula_with_no_shared_theories.t Or_error.t
   =
-  fun a b ->
+  fun encoding a b ->
   let module F = Formula_with_no_shared_theories in
   match shape_of a, shape_of b with
   | Bool, _ | _, Bool ->
-    let%bind.Or_error eq = eq_formula_of a b in
+    let%bind.Or_error eq = eq_formula_of encoding a b in
     Ok (F.Not eq)
   | Type, _ | _, Type ->
     let%bind.Or_error a = type_expr_of a in
     let%bind.Or_error b = type_expr_of b in
     Ok (F.Not (F.Atom (`Type_eq (a, b))))
   | La, _ | _, La ->
-    let%bind.Or_error a = linear_expr_of a in
-    let%bind.Or_error b = linear_expr_of b in
+    let%bind.Or_error a = linear_expr_of encoding a in
+    let%bind.Or_error b = linear_expr_of encoding b in
     Ok
       (F.Not
          (F.And (List.map (le_atoms_of_eq a b) ~f:(fun atom -> F.Atom atom))))
@@ -280,8 +311,8 @@ and neq_formula_of
     let%bind.Or_error uf_b = uf_term_of b in
     let%bind.Or_error type_a = type_expr_of a in
     let%bind.Or_error type_b = type_expr_of b in
-    let%bind.Or_error la_a = linear_expr_of a in
-    let%bind.Or_error la_b = linear_expr_of b in
+    let%bind.Or_error la_a = linear_expr_of encoding a in
+    let%bind.Or_error la_b = linear_expr_of encoding b in
     Ok
       (F.And
          [ F.Not (F.Atom (`Eq (uf_a, uf_b)))
@@ -330,7 +361,7 @@ let atom_to_formula : Atom.t -> Formula.any = function
 let encode (encoding : t) ~(formula : [> `Boolean ] Formula.t)
   : int array list Or_error.t
   =
-  let%bind.Or_error formula = bool_formula_of formula in
+  let%bind.Or_error formula = bool_formula_of encoding formula in
   let clauses = Vec.Value.create () in
   let root = literal_of encoding ~clauses ~formula in
   Vec.Value.push clauses [| root |];
