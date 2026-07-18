@@ -54,8 +54,7 @@ val stats : t -> Feel.Stats.t
     EUF equivalence-class representative). On [Unsat], [core] contains the
     conflicting assertions and theory lemmas, with Tseitin variables resolved
     back to their formulas. When proof production is enabled, [proof] contains a
-    checked proof if the contradiction is propositional over the theory atoms;
-    theory-certificate extraction is not yet available for every theory. *)
+    checked proof if the contradiction is propositional over the theory atoms. *)
 val solve
   :  ?time_bound:Feel.Solver.time_bound
   -> ?assumptions:int array

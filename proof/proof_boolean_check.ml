@@ -23,8 +23,8 @@ let rec eval formula ~assignment =
   | True -> true
   | False -> false
   | Atom atom ->
-    List.Assoc.find_exn assignment atom ~equal:(fun a b ->
-      Proof_atom.compare a b = 0)
+    (* TODO: [Error] here *)
+    List.Assoc.find_exn assignment atom ~equal:[%compare.equal: Proof_atom.t]
   | Not formula -> not (eval formula ~assignment)
   | And formulas -> List.for_all formulas ~f:(eval ~assignment)
   | Or formulas -> List.exists formulas ~f:(eval ~assignment)

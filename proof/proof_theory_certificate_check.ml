@@ -22,7 +22,7 @@ let theory_literal_at clause index =
 let clause_equal clause literals =
   match Proof_clause.create literals with
   | `Tautology -> false
-  | `Clause expected -> Proof_clause.compare clause expected = 0
+  | `Clause expected -> [%compare.equal: Proof_clause.t] clause expected
 ;;
 
 let theory_literal atom positive =
