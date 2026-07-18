@@ -95,33 +95,21 @@ let maybe_get_lemma t ~eq_value ~theory_of ~get_type =
         (match clauses pair with
          | [] -> None
          | first :: rest ->
-           List.iter rest ~f:(fun lemma -> Queue.enqueue t.pending lemma);
+           List.iter rest ~f:(Queue.enqueue t.pending);
            Some first)
     in
-    (* A theory-discovered shared pair gets the reverse/split clause
-       [eq \/ ~le1 \/ ~le2] regardless of the eq atom's value (it typically
-       doesn't exist yet -- this clause is what creates it), so the SAT solver
-       is forced to decide the pair's arrangement -- delayed theory combination.
-       The forward clauses then follow from the value-gated attempts below once
-       the eq atom is assigned. Emitting just this one clause matters: the host
-       solver stops polling for lemmas after a clause that doesn't propagate, so
-       a queued-up satisfied clause could leave the split clause undelivered;
-       this clause always introduces a fresh atom, keeping the search (and hence
-       polling) alive. Sound even for pairs that merely coincided in a theory's
-       model by chance; see [Branch_and_bound.equality_candidates]. *)
     let candidate_attempt () =
       match
-        Hash_set.find t.candidates ~f:(fun pair ->
-          not (Hash_set.mem t.candidate_injected pair))
+        Hash_set.find t.candidates ~f:(fun (a, b) ->
+          (not (Hash_set.mem t.candidate_injected (a, b)))
+          && la_member a
+          && la_member b)
       with
       | None -> None
-      | Some ((a, b) as pair) ->
+      | Some pair ->
         Hash_set.add t.candidate_injected pair;
-        if la_member a && la_member b
-        then (
-          Hash_set.add t.la_reverse_injected pair;
-          List.hd (la_reverse_clauses pair))
-        else None
+        Hash_set.add t.la_reverse_injected pair;
+        List.hd (la_reverse_clauses pair)
     in
     let attempts =
       [ candidate_attempt

@@ -15,6 +15,35 @@ let assignments_to_int_array assignments =
   Array.of_list_rev !literals
 ;;
 
+module Polling_theory = struct
+  type t = { mutable polls : int }
+
+  let assert_literal _ ~decision_level:_ ~literal:_ = ()
+
+  let maybe_get_lemma t =
+    t.polls <- t.polls + 1;
+    match t.polls with
+    | 1 -> `Lemma { Modes.Global.global = [| 1 |] }
+    | 2 -> `Lemma { Modes.Global.global = [| -1 |] }
+    | _ -> `Consistent
+  ;;
+
+  let undo _ ~to_decision_level_excl:_ = ()
+  let on_new_var _ ~var:_ = ()
+end
+
+let%expect_test "a satisfied theory lemma does not mask a later conflict" =
+  let theory = { Polling_theory.polls = 0 } in
+  let solver =
+    Solver.create ~theory:(Theory.pack (module Polling_theory) theory) ()
+  in
+  ignore (Solver.add_clause solver ~clause:[| 1 |] : [ `Ok | `Unsat of _ ]);
+  (match Solver.solve solver with
+   | Sat _ -> print_s [%message "SAT" ~polls:(theory.polls : int)]
+   | Unsat _ -> print_s [%message "UNSAT" ~polls:(theory.polls : int)]);
+  [%expect {| (UNSAT (polls 2)) |}]
+;;
+
 let%expect_test "solve times out when bounded timer is exhausted" =
   let solver = Solver.create () in
   (try

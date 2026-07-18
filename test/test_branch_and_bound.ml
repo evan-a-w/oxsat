@@ -107,6 +107,29 @@ let%expect_test "integral var with non-integral relaxed solution yields a \
     |}]
 ;;
 
+let%expect_test "strict bounds around an integer produce adjacent split bounds" =
+  let t = Branch_and_bound.create () in
+  Branch_and_bound.assert_atom t ~decision_level:0 ~atom:(is_int x) ~value:true;
+  (* [not (x <= 1)] and [not (x >= 2)] force the infinitesimal relaxed
+     assignment [1 + eps]. *)
+  Branch_and_bound.assert_atom t ~decision_level:0 ~atom:(le x 1) ~value:false;
+  Branch_and_bound.assert_atom t ~decision_level:0 ~atom:(ge x 2) ~value:false;
+  print_lemma t;
+  [%expect
+    {|
+    (Lemma
+     (((Type_eq ((Var x) (Base Int))) false)
+      ((Le
+        (((coeffs ((x ((num 1) (den 1))))) (const ((num 0) (den 1))))
+         ((num 1) (den 1))))
+       true)
+      ((Le
+        (((coeffs ((x ((num -1) (den 1))))) (const ((num 0) (den 1))))
+         ((num -2) (den 1))))
+       true)))
+    |}]
+;;
+
 let%expect_test "case-split lemma is guarded on integrality, not just asserted \
                  unconditionally"
   =

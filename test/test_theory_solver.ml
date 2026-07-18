@@ -1001,5 +1001,60 @@ let%expect_test "Nelson-Oppen: no over-propagation (x <= y alone doesn't force \
     |}]
 ;;
 
+(* Regression: a satisfied theory lemma must not allow the SAT solver to declare
+   Sat before polling the theory to consistency. The first equality bridge is
+   already satisfied, while the second conflicts with [x < y]. *)
+let%expect_test "SAT/theory polling: a satisfied bridge lemma must not mask a \
+                 later conflict"
+  =
+  let solver = Solver.create () in
+  assert_ok solver (eq x y);
+  assert_ok solver (Formula.La_compare (x, `Le, y));
+  assert_ok solver (Formula.La_compare (x, `Lt, y));
+  print_result (Solver.solve solver);
+  [%expect
+    {|
+    (Unsat
+     (core
+      ((Theory_lemma
+        (Or
+         ((Not (Eq (Var x) (Var y)))
+          (La_compare
+           (La_add (La_scale_const ((num -1) (den 1)) (Var x))
+            (La_scale_const ((num 1) (den 1)) (Var y)))
+           Le (La_const ((num 0) (den 1)))))))
+       (Asserted (Eq (Var x) (Var y)))
+       (Asserted (La_compare (Var x) Lt (Var y))))))
+    |}]
+;;
+
+(* Regression: the integrality split used to round [1 + eps] (from the strict
+   bound) to [floor = ceil = 1], yielding the vacuous split [x <= 1 \/ x >= 1]
+   and a Sat answer with a non-integral Int. *)
+let%expect_test "branch and bound: strict bounds around an integer are unsat \
+                 for an Int var"
+  =
+  let solver = Solver.create () in
+  Solver.assert_type solver xv int_type;
+  assert_ok solver (Formula.La_compare (La_const Q.one, `Lt, x));
+  assert_ok solver (Formula.La_compare (x, `Lt, La_const (Q.of_int 2)));
+  print_result (Solver.solve solver);
+  [%expect
+    {|
+    (Unsat
+     (core
+      ((Theory_lemma
+        (Or
+         ((Not (Eq (Type_var x) Int))
+          (La_compare (La_scale_const ((num 1) (den 1)) (Var x)) Le
+           (La_const ((num 1) (den 1))))
+          (La_compare (La_scale_const ((num -1) (den 1)) (Var x)) Le
+           (La_const ((num -2) (den 1)))))))
+       (Asserted (Eq (Type_var x) Int))
+       (Asserted (La_compare (La_const ((num 1) (den 1))) Lt (Var x)))
+       (Asserted (La_compare (Var x) Lt (La_const ((num 2) (den 1))))))))
+    |}]
+;;
+
 (* TODO: test that shows type theory congruence closure doesn't work, then fix
    it. *)
