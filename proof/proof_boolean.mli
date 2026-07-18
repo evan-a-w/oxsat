@@ -1,4 +1,5 @@
 open! Core
+open! Theory_core
 
 (** Boolean expressions over semantic theory atoms and proof-local extension
     variables. This is deliberately separate from {!Formula.any}: extension
@@ -12,3 +13,5 @@ type t =
   | And of t list
   | Or of t list
 [@@deriving sexp, compare]
+
+val of_formula : Formula.any -> t Or_error.t

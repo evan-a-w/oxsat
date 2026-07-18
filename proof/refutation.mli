@@ -6,7 +6,11 @@ open! Theory_core
     variables or mutable clause indices. *)
 
 module Input_clause : sig
-  type t = { input : int } [@@deriving sexp, compare]
+  type t =
+    { input : int
+    ; literal : Proof_literal.t
+    }
+  [@@deriving sexp, compare]
 end
 
 module Reason : sig
@@ -36,6 +40,8 @@ type t =
   ; contradiction : Proof_id.Refutation_step.t
   }
 [@@deriving sexp, compare]
+
+val check : t -> unit Or_error.t
 
 (** [contradiction] must identify a step whose conclusion is the empty clause.
     Inputs and extension definitions are retained so a checker can validate

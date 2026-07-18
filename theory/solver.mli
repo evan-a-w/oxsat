@@ -11,7 +11,13 @@ open! Import
     while that scope (and all enclosing scopes) are active. *)
 type t
 
-val create : unit -> t
+module Config : sig
+  type t = { produce_proofs : bool } [@@deriving sexp_of]
+
+  val default : t
+end
+
+val create : ?config:Config.t -> unit -> t
 
 (** Asserts that [formula] is true. May be called between [solve] calls
     (including before the first one) to add new constraints incrementally. Any
@@ -45,9 +51,11 @@ val stats : t -> Feel.Stats.t
     [assumptions] are additional unit assumptions for this call only. On [Sat],
     [tvar_assignments] gives, for each [Tvar.t] known to some theory, whatever
     that theory determined about it in this model (type, numeric value, and/or
-    EUF equivalence-class representative). On [Unsat], [reason] is a
-    [Formula.And] of the conflicting formulas, with Tseitin auxiliary variables
-    resolved back to the original [Formula.t] that introduced them. *)
+    EUF equivalence-class representative). On [Unsat], [core] contains the
+    conflicting assertions and theory lemmas, with Tseitin variables resolved
+    back to their formulas. When proof production is enabled, [proof] contains a
+    checked proof if the contradiction is propositional over the theory atoms;
+    theory-certificate extraction is not yet available for every theory. *)
 val solve
   :  ?time_bound:Feel.Solver.time_bound
   -> ?assumptions:int array

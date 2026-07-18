@@ -76,3 +76,10 @@ type t =
   ; conclusion : Proof_id.Step.t
   }
 [@@deriving sexp, compare]
+
+val check : t -> unit Or_error.t
+
+val check_theory_certificate
+  :  clause:Clause.t
+  -> Theory_certificate.t
+  -> unit Or_error.t

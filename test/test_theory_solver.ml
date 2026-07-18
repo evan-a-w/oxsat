@@ -1029,6 +1029,44 @@ let%expect_test "SAT/theory polling: a satisfied bridge lemma must not mask a \
     |}]
 ;;
 
+let%expect_test "proof production is optional and returns checked \
+                 propositional proofs"
+  =
+  let contradiction solver =
+    Solver.push solver;
+    assert_ok solver (eq x y);
+    assert_ok solver (neq x y);
+    match Solver.solve solver with
+    | Sat _ -> print_endline "unexpected Sat"
+    | Unsat { proof; _ } ->
+      print_s
+        [%message
+          (Option.is_some proof : bool)
+            ~checks:
+              (Option.value_map proof ~default:false ~f:(fun proof ->
+                 Or_error.is_ok (Proof.check proof))
+               : bool)]
+  in
+  contradiction (Solver.create ());
+  contradiction
+    (Solver.create ~config:{ Solver.Config.produce_proofs = true } ());
+  let theory_contradiction =
+    Solver.create ~config:{ Solver.Config.produce_proofs = true } ()
+  in
+  Solver.push theory_contradiction;
+  assert_ok theory_contradiction (Formula.La_compare (x, `Lt, x));
+  (match Solver.solve theory_contradiction with
+   | Sat _ -> print_endline "unexpected Sat"
+   | Unsat { proof; _ } ->
+     print_s [%message "theory certificate pending" (proof : Proof.t option)]);
+  [%expect
+    {|
+    (("Option.is_some proof" false) (checks false))
+    (("Option.is_some proof" true) (checks true))
+    ("theory certificate pending" (proof ()))
+    |}]
+;;
+
 (* Regression: the integrality split used to round [1 + eps] (from the strict
    bound) to [floor = ceil = 1], yielding the vacuous split [x <= 1 \/ x >= 1]
    and a Sat answer with a non-integral Int. *)
