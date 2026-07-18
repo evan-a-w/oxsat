@@ -18,6 +18,7 @@ type t =
   ; sat_var_to_atom : Atom.t Int.Table.t
   ; atoms_in_order : (Atom.t * int) Vec.Value.t
   ; mutable true_var : int or_null
+  ; theory_for_tvar : Formula.Theory.Packed.t Tvar.Table.t
   }
 
 let create () =

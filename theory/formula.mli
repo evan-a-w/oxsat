@@ -35,8 +35,31 @@ type _ t =
       -> ([> `La ] as 'a) t
 [@@deriving sexp, compare, hash, equal]
 
-type any = [ `Boolean | `Uf | `Type | `La | `Term | `Atom ] t
-[@@deriving sexp, compare, hash, equal]
+type any_theory =
+  [ `Boolean
+  | `Uf
+  | `Type
+  | `La
+  | `Term
+  | `Atom
+  ]
+
+module Theory : sig
+  type _ t =
+    | Uf : [ `Uf | `Atom | `Term ] t
+    | Type : [ `Type | `Atom | `Term ] t
+    | La : [ `La | `Atom | `Term ] t
+    | Boolean : [ `Boolean | `Atom | `Term ] t
+    | Shared : any_theory t
+
+  type 'a inner = 'a t
+
+  module Packed : sig
+    type t = T : 'a inner -> t
+  end
+end
+
+type any = any_theory t [@@deriving sexp, compare, hash, equal]
 
 module Any : sig
   type t = any [@@deriving sexp, compare, hash]
