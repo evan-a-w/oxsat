@@ -37,6 +37,10 @@ let%expect_test "proof clauses normalize, sort, and deduplicate literals" =
       ]
   in
   print_clause clause;
+  [%expect {|
+    (((atom (Theory (Eq ((Var x) (Var y))))) (positive true))
+     ((atom (Extension 0)) (positive false)))
+    |}];
   (match clause with
    | `Tautology -> assert false
    | `Clause clause ->
@@ -47,16 +51,11 @@ let%expect_test "proof clauses normalize, sort, and deduplicate literals" =
            ~equal:
              (Proof.Clause.compare clause (Proof.Clause.t_of_sexp sexp) = 0
               : bool)]);
+  [%expect {| ("round trip" (equal true)) |}];
   print_clause
     (Proof.Clause.create
        [ equality_literal ~positive:true; equality_literal ~positive:false ]);
-  [%expect
-    {|
-    (((atom (Theory (Eq ((Var x) (Var y))))) (positive true))
-     ((atom (Extension 0)) (positive false)))
-    ("round trip" (equal true))
-    Tautology
-    |}]
+  [%expect {| Tautology |}]
 ;;
 
 let%expect_test "manual proofs have a stable S-expression representation" =
@@ -74,19 +73,18 @@ let%expect_test "manual proofs have a stable S-expression representation" =
   in
   let sexp = Proof.sexp_of_t proof in
   print_s sexp;
-  print_s
-    [%message
-      "round trip"
-        ~equal:(Proof.compare proof (Proof.t_of_sexp sexp) = 0 : bool)];
-  [%expect
-    {|
+  [%expect {|
     ((assumptions (((name (h)) (formula (Eq (Var x) (Var x))))))
      (steps
       (((name (same)) (conclusion (Eq (Var x) (Var x)))
         (justification (Assumption 0)))))
      (conclusion 0))
-    ("round trip" (equal true))
-    |}]
+    |}];
+  print_s
+    [%message
+      "round trip"
+        ~equal:(Proof.compare proof (Proof.t_of_sexp sexp) = 0 : bool)];
+  [%expect {| ("round trip" (equal true)) |}]
 ;;
 
 let refutation_of_false_input () =
@@ -134,6 +132,7 @@ let%expect_test "the independent checker accepts a manual by-refutation step" =
       "checks"
         ~refutation:(Or_error.is_ok (Proof.Refutation.check refutation) : bool)
         ~proof:(Or_error.is_ok (Proof.check proof) : bool)];
+  [%expect {| (checks (refutation true) (proof true)) |}];
   let invalid_refutation =
     { refutation with
       steps =
@@ -152,11 +151,7 @@ let%expect_test "the independent checker accepts a manual by-refutation step" =
       "rejects incomplete RUP"
         ~rejected:
           (Or_error.is_error (Proof.Refutation.check invalid_refutation) : bool)];
-  [%expect
-    {|
-    (checks (refutation true) (proof true))
-    ("rejects incomplete RUP" (rejected true))
-    |}]
+  [%expect {| ("rejects incomplete RUP" (rejected true)) |}]
 ;;
 
 let%expect_test "kernel equality transitivity is checked" =
