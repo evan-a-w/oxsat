@@ -6,24 +6,24 @@ let x = Tvar.of_string "x"
 let y = Tvar.of_string "y"
 
 let equality_literal ~positive =
-  Proof_literal.create
-    ~atom:(Theory (`Eq (Formula.Var y, Formula.Var x)))
+  Proof.Literal.create
+    ~atom:(Proof.Atom.Theory (`Eq (Formula.Var y, Formula.Var x)))
     ~positive
 ;;
 
 let print_clause = function
   | `Tautology -> print_endline "Tautology"
-  | `Clause clause -> print_s [%sexp (clause : Proof_clause.t)]
+  | `Clause clause -> print_s [%sexp (clause : Proof.Clause.t)]
 ;;
 
 let%expect_test "proof clauses normalize, sort, and deduplicate literals" =
   let extension =
-    Proof_literal.create
-      ~atom:(Extension (Proof_id.Extension.of_int_exn 0))
+    Proof.Literal.create
+      ~atom:(Proof.Atom.Extension (Proof.Id.Extension.of_int_exn 0))
       ~positive:false
   in
   let clause =
-    Proof_clause.create
+    Proof.Clause.create
       [ equality_literal ~positive:true
       ; extension
       ; equality_literal ~positive:true
@@ -33,15 +33,15 @@ let%expect_test "proof clauses normalize, sort, and deduplicate literals" =
   (match clause with
    | `Tautology -> assert false
    | `Clause clause ->
-     let sexp = Proof_clause.sexp_of_t clause in
+     let sexp = Proof.Clause.sexp_of_t clause in
      print_s
        [%message
          "round trip"
            ~equal:
-             (Proof_clause.compare clause (Proof_clause.t_of_sexp sexp) = 0
+             (Proof.Clause.compare clause (Proof.Clause.t_of_sexp sexp) = 0
               : bool)]);
   print_clause
-    (Proof_clause.create
+    (Proof.Clause.create
        [ equality_literal ~positive:true; equality_literal ~positive:false ]);
   [%expect
     {|
@@ -59,10 +59,10 @@ let%expect_test "manual proofs have a stable S-expression representation" =
     ; steps =
         [| { name = Some "same"
            ; conclusion = formula
-           ; justification = Assumption (Proof_id.Assumption.of_int_exn 0)
+           ; justification = Assumption (Proof.Id.Assumption.of_int_exn 0)
            }
         |]
-    ; conclusion = Proof_id.Step.of_int_exn 0
+    ; conclusion = Proof.Id.Step.of_int_exn 0
     }
   in
   let sexp = Proof.sexp_of_t proof in

@@ -1,4 +1,12 @@
 open! Core
+module Id = Proof_id
+module Atom = Proof_atom
+module Boolean = Proof_boolean
+module Literal = Proof_literal
+module Clause = Proof_clause
+module Extension = Proof_extension
+module Theory_certificate = Proof_theory_certificate
+module Refutation = Refutation
 
 (** A solver-independent, human-facing proof DAG. Every step proves a
     {!Formula.any}; step and assumption IDs are indices into the corresponding
