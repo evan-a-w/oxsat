@@ -546,24 +546,3 @@ FAIL_EG: Mean: 9.88 ms  StdDev: 0.00 ns  p50: 9.88 ms  p75: 9.88 ms  p90: 9.88 m
 SUBSETS_100: Mean: 472.53 ms  StdDev: 0.00 ns  p50: 472.53 ms  p75: 472.53 ms  p90: 472.53 ms  p95: 472.53 ms  p99: 472.53 ms  (n=1)
 
 
-Splice trick for egx parent sets: replace Hash_set with circular linked list, O(1) merge via splice
-----------------------------------------------------------------------------------------------------
-
-$ dune exec --profile=release bench/feel_bench.exe -- -bench smt -min-iterations 3 -max-iterations 10
-EUF chain UNSAT (n=50): 113.20 μs
-EUF chain UNSAT (n=200): 509.87 μs
-EUF chain UNSAT (n=1000): 4.42 ms  (was 4.52 ms; target 2.46 ms)
-EUF two-group SAT (n=50): 206.87 μs
-EUF two-group SAT (n=200): 672.10 μs
-
-
-Nelson-Oppen equality propagation for shared tvars (LA-model / egraph candidates + bridge split clauses, gated on arrangement relevance)
----------------------------------------------------------------------------------------------------------------------------------------
-
-$ dune exec --profile=release bench/feel_bench.exe -- -bench smt -min-iterations 3 -max-iterations 10
-Bin packing (items=10, bins=3): 2.23 ms  (baseline before change: 2.11 ms)
-Bin packing (items=15, bins=4): 19.77 ms  (baseline: 18.68 ms)
-Bin packing (items=20, bins=4): 42.58 ms  (baseline: 42.03 ms)
-EUF chain UNSAT (n=1000): 6.97 ms  (baseline: 6.47 ms)
-EUF two-group SAT (n=200): 785.57 μs  (baseline: 738.50 μs)
-(without the arrangement-relevance gate, bin packing items=15 was 2.57 s -- coincident same-typed int vars flooded candidate splits)

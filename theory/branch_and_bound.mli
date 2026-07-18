@@ -29,6 +29,11 @@ val maybe_get_lemma : t -> [ `Consistent | `Lemma of (Atom.t * bool) list ]
     [maybe_get_lemma] has returned [`Consistent]. *)
 val assignment : t -> tvar:Tvar.t -> Simplex.Q_eps.t option
 
+(** The currently asserted truth value of a [`Le] atom (in the normalized form
+    it was asserted with), or [None] if unasserted. Lets [Bare_var_eq] emit only
+    bridge lemmas that aren't already satisfied. *)
+val le_atom_value : t -> Atom.t -> bool option
+
 (** Registers a Nelson-Oppen shared tvar whose LA-implied equalities need
     propagating to the other theories. *)
 val add_tvar_to_check_for_equality : t -> tvar:Tvar.t -> unit
