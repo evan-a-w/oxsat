@@ -90,12 +90,11 @@ module Combined_theory = struct
             (match
                Bare_var_eq.maybe_get_lemma
                  t.bare_var_eq
-                 ~uf_equal:(fun a b ->
+                 ~eq_value:(fun a b ->
                    Formula_egraph_uf.atom_value
                      t.egraph
                      ~atom:(`Eq (Formula.Var a, Formula.Var b)))
-                 ~type_is_relevant:(fun var ->
-                   Formula_egraph_uf.mem_term t.egraph (Formula.Type_var var))
+                 ~theory_of:(Encoding.theory_for_tvar t.encoding)
                  ~get_type:(Tvar_types.get_type t.tt)
              with
              | `Consistent -> `Consistent

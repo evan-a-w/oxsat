@@ -174,8 +174,8 @@ let%expect_test "pure boolean formula (no theory atoms)" =
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ((Var x))) (numeric ()) (euf_repr ())))
-       (y ((type_ ((Var y))) (numeric ()) (euf_repr ()))))))
+      ((x ((type_ ()) (numeric ()) (euf_repr ())))
+       (y ((type_ ()) (numeric ()) (euf_repr ()))))))
     |}]
 ;;
 
@@ -244,15 +244,9 @@ let%expect_test "EUF: satisfiable case" =
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
-       (y
-        ((type_ ())
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
-         (euf_repr ((Var x)))))
-       (z
-        ((type_ ())
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ()))))))
+      ((x ((type_ ()) (numeric ()) (euf_repr ())))
+       (y ((type_ ()) (numeric ()) (euf_repr ((Var x)))))
+       (z ((type_ ()) (numeric ()) (euf_repr ()))))))
     |}]
 ;;
 
@@ -281,14 +275,8 @@ let%expect_test "incremental: asserting a contradicting formula after solve" =
     UNSAT (at assert time)
     (Sat
      (tvar_assignments
-      ((x
-        ((type_ ((Var y)))
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ())))
-       (y
-        ((type_ ())
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ((Var x))))))))
+      ((x ((type_ ()) (numeric ()) (euf_repr ())))
+       (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
     |}]
 ;;
 
@@ -346,14 +334,8 @@ let%expect_test "push/pop: retracting a contradicting constraint" =
     {|
     (Sat
      (tvar_assignments
-      ((x
-        ((type_ ((Var y)))
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ())))
-       (y
-        ((type_ ())
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ((Var x))))))))
+      ((x ((type_ ()) (numeric ()) (euf_repr ())))
+       (y ((type_ ()) (numeric ()) (euf_repr ((Var x))))))))
     |}]
 ;;
 
@@ -375,15 +357,9 @@ let%expect_test "push/pop: nested scopes" =
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ((Var y))) (numeric ()) (euf_repr ())))
-       (y
-        ((type_ ())
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
-         (euf_repr ((Var x)))))
-       (z
-        ((type_ ())
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ()))))))
+      ((x ((type_ ()) (numeric ()) (euf_repr ())))
+       (y ((type_ ()) (numeric ()) (euf_repr ((Var x)))))
+       (z ((type_ ()) (numeric ()) (euf_repr ()))))))
     |}];
   Solver.push solver;
   assert_ok solver (eq x z);
@@ -407,15 +383,9 @@ let%expect_test "push/pop: nested scopes" =
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ((Var z))) (numeric ()) (euf_repr ())))
-       (y
-        ((type_ ((Var z)))
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
-         (euf_repr ((Var x)))))
-       (z
-        ((type_ ())
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ()))))))
+      ((x ((type_ ()) (numeric ()) (euf_repr ())))
+       (y ((type_ ()) (numeric ()) (euf_repr ((Var x)))))
+       (z ((type_ ()) (numeric ()) (euf_repr ()))))))
     |}];
   Solver.pop solver;
   (* back to: x=y only -- satisfiable *)
@@ -424,15 +394,9 @@ let%expect_test "push/pop: nested scopes" =
     {|
     (Sat
      (tvar_assignments
-      ((x ((type_ ((Var z))) (numeric ()) (euf_repr ())))
-       (y
-        ((type_ ((Var z)))
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 1) (den 1))))))
-         (euf_repr ((Var x)))))
-       (z
-        ((type_ ())
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
-         (euf_repr ()))))))
+      ((x ((type_ ()) (numeric ()) (euf_repr ())))
+       (y ((type_ ()) (numeric ()) (euf_repr ((Var x)))))
+       (z ((type_ ()) (numeric ()) (euf_repr ()))))))
     |}]
 ;;
 
@@ -452,9 +416,9 @@ let%expect_test "push/pop: Tseitin-encoded Or inside scope appears in unsat \
     {|
     (Unsat
      (core
-      ((Asserted (Not (Eq (Var y) (Var z))))
-       (Asserted (Not (Eq (Var x) (Var y))))
-       (Asserted (Or ((Eq (Var x) (Var y)) (Eq (Var y) (Var z))))))))
+      ((Asserted (Not (Eq (Var x) (Var y))))
+       (Asserted (Or ((Eq (Var x) (Var y)) (Eq (Var y) (Var z)))))
+       (Asserted (Not (Eq (Var y) (Var z)))))))
     |}]
 ;;
 
@@ -739,6 +703,132 @@ let%expect_test "lazy bare-variable type equality detects incompatible types" =
         (Or ((Eq (Type_var x) (Type_var y)) (Not (Eq (Var x) (Var y))))))
        (Asserted (Eq (Var x) (Var y))) (Asserted (Eq (Type_var y) Float))
        (Asserted (Eq (Type_var x) Int)) (Asserted (Not (Eq Int Float))))))
+    |}]
+;;
+
+(* ----- Tvar theory membership ----- *)
+
+let%expect_test "theory membership: per-theory atoms record membership, mixed \
+                 occurrences promote to Shared, bare equalities record nothing"
+  =
+  let encoding = Encoding.create () in
+  let formula : Formula.any =
+    And
+      [ La_compare (x, `Le, La_const Q.zero)
+      ; La_compare (Var (Tvar.of_string "n"), `Le, La_const Q.zero)
+      ; Eq (f x, Var (Tvar.of_string "w"))
+      ; Eq (Type_var (Tvar.of_string "z"), Int)
+      ; eq x y
+      ]
+  in
+  ignore (Or_error.ok_exn (Encoding.encode encoding ~formula) : int array list);
+  print_s
+    [%sexp
+      (Encoding.tvar_theories encoding : Formula.Theory.Packed.t Tvar.Map.t)];
+  [%expect {| ((x Shared) (z Type) (f Uf) (w Uf) (n La)) |}]
+;;
+
+let%expect_test "bare-variable disequality leaves types unconstrained" =
+  let solver = Solver.create () in
+  assert_ok solver (neq x y);
+  Solver.assert_type solver xv int_type;
+  Solver.assert_type solver yv int_type;
+  print_result (Solver.solve solver);
+  [%expect
+    {|
+    (Sat
+     (tvar_assignments
+      ((x
+        ((type_ ((Base Int)))
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ())))
+       (y
+        ((type_ ((Base Int)))
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num -1) (den 1))))))
+         (euf_repr ()))))))
+    |}]
+;;
+
+let%expect_test "true bare-variable equality forces numeric equality, even \
+                 with no types known"
+  =
+  let solver = Solver.create () in
+  assert_ok solver (eq x y);
+  assert_ok solver (Formula.La_compare (x, `Ge, La_const (Q.of_int 3)));
+  assert_ok solver (Formula.La_compare (x, `Le, La_const (Q.of_int 3)));
+  assert_ok solver (Formula.La_compare (y, `Le, La_const (Q.of_int 2)));
+  print_result (Solver.solve solver);
+  [%expect
+    {|
+    (Unsat
+     (core
+      ((Theory_lemma
+        (Or
+         ((Not
+           (La_compare
+            (La_add (La_scale_const ((num 1) (den 1)) (Var x))
+             (La_scale_const ((num -1) (den 1)) (Var y)))
+            Le (La_const ((num 0) (den 1)))))
+          (Not
+           (La_compare (La_scale_const ((num 1) (den 1)) (Var y)) Le
+            (La_const ((num 2) (den 1)))))
+          (Not
+           (La_compare (La_scale_const ((num -1) (den 1)) (Var x)) Le
+            (La_const ((num -3) (den 1))))))))
+       (Theory_lemma
+        (Or
+         ((La_compare
+           (La_add (La_scale_const ((num 1) (den 1)) (Var x))
+            (La_scale_const ((num -1) (den 1)) (Var y)))
+           Le (La_const ((num 0) (den 1))))
+          (Not (Eq (Var x) (Var y))))))
+       (Asserted (Eq (Var x) (Var y)))
+       (Asserted (La_compare (Var y) Le (La_const ((num 2) (den 1)))))
+       (Asserted (La_compare (Var x) Ge (La_const ((num 3) (den 1))))))))
+    |}]
+;;
+
+let%expect_test "false bare-variable equality forces numeric disequality" =
+  let solver = Solver.create () in
+  assert_ok solver (neq x y);
+  Solver.assert_type solver xv int_type;
+  Solver.assert_type solver yv int_type;
+  List.iter [ x; y ] ~f:(fun v ->
+    assert_ok solver (Formula.La_compare (v, `Ge, La_const Q.zero));
+    assert_ok solver (Formula.La_compare (v, `Le, La_const Q.zero)));
+  print_result (Solver.solve solver);
+  [%expect
+    {|
+    (Unsat
+     (core
+      ((Theory_lemma
+        (Or
+         ((Not
+           (La_compare (La_scale_const ((num 1) (den 1)) (Var y)) Le
+            (La_const ((num 0) (den 1)))))
+          (Not
+           (La_compare (La_scale_const ((num -1) (den 1)) (Var x)) Le
+            (La_const ((num 0) (den 1)))))
+          (La_compare
+           (La_add (La_scale_const ((num -1) (den 1)) (Var x))
+            (La_scale_const ((num 1) (den 1)) (Var y)))
+           Le (La_const ((num 0) (den 1)))))))
+       (Asserted (La_compare (Var y) Le (La_const ((num 0) (den 1)))))
+       (Asserted (La_compare (Var x) Ge (La_const ((num 0) (den 1)))))
+       (Theory_lemma
+        (Or
+         ((Not
+           (La_compare
+            (La_add (La_scale_const ((num -1) (den 1)) (Var x))
+             (La_scale_const ((num 1) (den 1)) (Var y)))
+            Le (La_const ((num 0) (den 1)))))
+          (Not
+           (La_compare
+            (La_add (La_scale_const ((num 1) (den 1)) (Var x))
+             (La_scale_const ((num -1) (den 1)) (Var y)))
+            Le (La_const ((num 0) (den 1)))))
+          (Eq (Var x) (Var y)))))
+       (Asserted (Not (Eq (Var x) (Var y)))))))
     |}]
 ;;
 
