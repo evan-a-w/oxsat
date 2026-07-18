@@ -55,7 +55,15 @@ module Theory : sig
   type 'a inner = 'a t
 
   module Packed : sig
-    type t = T : 'a inner -> t
+    type t = T : 'a inner -> t [@@deriving sexp_of, equal]
+
+    (** Least upper bound: equal theories stay themselves, two different
+        theories become [Shared]. *)
+    val join : t -> t -> t
+
+    (** [includes t theory]: whether a tvar with membership [t] participates in
+        [theory]. [Shared] participates in every theory. *)
+    val includes : t -> t -> bool
   end
 end
 

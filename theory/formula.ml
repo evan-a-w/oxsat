@@ -108,6 +108,24 @@ module Theory = struct
 
   module Packed = struct
     type t = T : 'a inner -> t
+
+    let sexp_of_t (T t) =
+      match t with
+      | Uf -> Sexp.Atom "Uf"
+      | Type -> Sexp.Atom "Type"
+      | La -> Sexp.Atom "La"
+      | Boolean -> Sexp.Atom "Boolean"
+      | Shared -> Sexp.Atom "Shared"
+    ;;
+
+    let equal (T a) (T b) =
+      match a, b with
+      | Uf, Uf | Type, Type | La, La | Boolean, Boolean | Shared, Shared -> true
+      | (Uf | Type | La | Boolean | Shared), _ -> false
+    ;;
+
+    let join a b = if equal a b then a else T Shared
+    let includes t theory = equal t (T Shared) || equal t theory
   end
 end
 

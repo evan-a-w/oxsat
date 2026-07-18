@@ -27,7 +27,57 @@ let create () =
   ; sat_var_to_atom = Int.Table.create ()
   ; atoms_in_order = Vec.Value.create ()
   ; true_var = Null
+  ; theory_for_tvar = Tvar.Table.create ()
   }
+;;
+
+let record_tvar t tvar theory =
+  Hashtbl.update t.theory_for_tvar tvar ~f:(function
+    | None -> theory
+    | Some existing -> Formula.Theory.Packed.join existing theory)
+;;
+
+let rec record_uf_term_tvars t (formula : Formula.any) =
+  match formula with
+  | Var v -> record_tvar t v Formula.Theory.(Packed.T Uf)
+  | App (f, args) ->
+    record_tvar t f Formula.Theory.(Packed.T Uf);
+    List.iter args ~f:(record_uf_term_tvars t)
+  | _ -> ()
+;;
+
+let rec record_type_expr_tvars t (type_expr : Type_expr.t) =
+  match type_expr with
+  | Var v | Type_of v -> record_tvar t v Formula.Theory.(Packed.T Type)
+  | Base _ | Type -> ()
+  | Function_type (a, b) ->
+    record_type_expr_tvars t a;
+    record_type_expr_tvars t b
+  | App (f, args) ->
+    record_tvar t f Formula.Theory.(Packed.T Type);
+    List.iter args ~f:(record_type_expr_tvars t)
+;;
+
+(* A bare [Eq (Var _, Var _)] is the theory-agnostic bridge equality: it doesn't
+   by itself place its endpoints in any theory. *)
+let record_atom_tvars t (atom : Atom.t) =
+  match atom with
+  | `Eq (Var _, Var _) -> ()
+  | `Eq (a, b) ->
+    record_uf_term_tvars t a;
+    record_uf_term_tvars t b
+  | `Type_eq (a, b) ->
+    record_type_expr_tvars t a;
+    record_type_expr_tvars t b
+  | `Le (le, _) ->
+    Map.iter_keys le.coeffs ~f:(fun v ->
+      record_tvar t v Formula.Theory.(Packed.T La))
+;;
+
+let theory_for_tvar t tvar = Hashtbl.find t.theory_for_tvar tvar
+
+let tvar_theories t =
+  Hashtbl.to_alist t.theory_for_tvar |> Tvar.Map.of_alist_exn
 ;;
 
 let fresh_var t =
@@ -39,6 +89,7 @@ let fresh_var t =
 let sat_var_for_atom t atom =
   let atom = Atom.normalize atom in
   Hashtbl.find_or_add t.atom_to_sat_var atom ~default:(fun () ->
+    record_atom_tvars t atom;
     let sat_var = fresh_var t in
     Hashtbl.set t.sat_var_to_atom ~key:sat_var ~data:atom;
     Vec.Value.push t.atoms_in_order (atom, sat_var);
@@ -249,9 +300,10 @@ and eq_formula_of
     let%bind.Or_error uf_b = uf_term_of b in
     Ok (F.Atom (`Eq (uf_a, uf_b)))
 
-(* Mirrors [eq_formula_of], but conjoining the *negation* of each per-theory
-   atom, so a bare-variable disequality is "unequal in every applicable theory"
-   rather than merely "not equal in every theory at once". *)
+(* Mirrors [eq_formula_of], negating each theory's encoding. A bare-variable
+   disequality is just the negated bridge equality: numeric disequality is
+   injected lazily by [Bare_var_eq] once both endpoints are known numeric, and
+   types are left unconstrained (distinct values may share a type). *)
 and neq_formula_of
   : type a.
     a Formula.t -> a Formula.t -> Formula_with_no_shared_theories.t Or_error.t
@@ -279,19 +331,7 @@ and neq_formula_of
   | Var _, Var _ ->
     let%bind.Or_error uf_a = uf_term_of a in
     let%bind.Or_error uf_b = uf_term_of b in
-    let%bind.Or_error type_a = type_expr_of a in
-    let%bind.Or_error type_b = type_expr_of b in
-    let%bind.Or_error la_a = linear_expr_of a in
-    let%bind.Or_error la_b = linear_expr_of b in
-    Ok
-      (F.And
-         [ F.Not (F.Atom (`Eq (uf_a, uf_b)))
-         ; F.Not (F.Atom (`Type_eq (type_a, type_b)))
-         ; F.Not
-             (F.And
-                (List.map (le_atoms_of_eq la_a la_b) ~f:(fun atom ->
-                   F.Atom atom)))
-         ])
+    Ok (F.Not (F.Atom (`Eq (uf_a, uf_b))))
 ;;
 
 let rec type_expr_to_formula : Type_expr.t -> [> `Type ] Formula.t = function

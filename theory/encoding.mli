@@ -21,6 +21,15 @@ val find_sat_var_for_atom : t -> Atom.t -> int option
 val atom_for_sat_var : t -> int -> Atom.t option
 val atoms : t -> (Atom.t * int) list
 
+(** Theory membership of a tvar, accumulated as atoms are created: a tvar seen
+    in atoms of two different theories maps to [Shared]. Bare
+    [`Eq (Var _, Var _)] atoms record nothing — they are the theory-agnostic
+    bridge equalities whose cross-theory consequences [Bare_var_eq] injects
+    lazily, gated on this map. *)
+val theory_for_tvar : t -> Tvar.t -> Formula.Theory.Packed.t option
+
+val tvar_theories : t -> Formula.Theory.Packed.t Tvar.Map.t
+
 (** [encode encoding formula] elaborates the rich [formula] into flat theory
     atoms, then Tseitin-encodes the result into CNF, returning a list of clauses
     whose conjunction is satisfiable iff [formula] is, and such that any
