@@ -1,5 +1,5 @@
 open! Core
-open! Feel.Import
+open! Import
 
 module Pair = struct
   type t = Tvar.t * Tvar.t [@@deriving compare, sexp, hash]

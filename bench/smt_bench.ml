@@ -1,4 +1,5 @@
 open! Core
+open! Theory_core
 open! Theory
 
 module Instance = struct

@@ -1,5 +1,5 @@
 open! Core
-open! Feel.Import
+open! Import
 module Type = Type_expr.Base
 
 module Atom : sig

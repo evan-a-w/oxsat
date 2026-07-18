@@ -4,6 +4,6 @@
  (preprocess
   (pps ppx_jane ppx_optional))
  (inline_tests)
- (libraries core core_unix ds unboxed feel egx)
+ (libraries core core_unix ds unboxed feel egx theory_core proof)
  (flags
   (:standard -extension-universe beta)))

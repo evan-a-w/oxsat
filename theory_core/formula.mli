@@ -69,6 +69,9 @@ end
 
 type any = any_theory t [@@deriving sexp, compare, hash, equal]
 
+(** Widens the phantom theory tag without changing the formula. *)
+val widen : 'a t -> any
+
 module Any : sig
   type t = any [@@deriving sexp, compare, hash]
 

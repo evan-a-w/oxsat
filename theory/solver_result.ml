@@ -1,5 +1,5 @@
 open! Core
-open! Feel.Import
+open! Import
 
 module Core_step = struct
   type t =
@@ -10,5 +10,8 @@ end
 
 type t =
   | Sat of { tvar_assignments : Tvar_assignment.t Tvar.Map.t }
-  | Unsat of { core : Core_step.t list }
+  | Unsat of
+      { core : Core_step.t list
+      ; proof : Proof.t option [@sexp.option]
+      }
 [@@deriving sexp_of]

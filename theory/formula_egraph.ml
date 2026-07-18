@@ -1,5 +1,5 @@
 open! Core
-open! Feel.Import
+open! Import
 
 module Input = struct
   module Op = Formula.Op

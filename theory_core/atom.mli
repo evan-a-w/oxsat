@@ -12,7 +12,7 @@ type t =
   | `Le of Linear_expr.t * Q.t
   | `Type_eq of Type_expr.t * Type_expr.t
   ]
-[@@deriving sexp_of]
+[@@deriving sexp]
 
 val normalize : t -> t
 

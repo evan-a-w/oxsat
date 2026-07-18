@@ -1,5 +1,5 @@
 open! Core
-open! Feel.Import
+open! Import
 
 (** Lazy cross-theory consequences of an ambiguous [Eq (Var a, Var b)]. *)
 type t

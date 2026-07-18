@@ -1,0 +1,8 @@
+(library
+ (name proof)
+ (public_name feel_theory.proof)
+ (preprocess
+  (pps ppx_jane))
+ (libraries core feel theory_core)
+ (flags
+  (:standard -extension-universe beta)))

@@ -1,5 +1,11 @@
 open! Core
-open! Feel.Import
+open! Import
+
+module Config = struct
+  type t = { produce_proofs : bool } [@@deriving sexp_of]
+
+  let default = { produce_proofs = false }
+end
 
 let lemma_to_clause literals ~sat_var_for_atom =
   let clause =
@@ -180,9 +186,10 @@ type t =
   ; encoding : Encoding.t
   ; mutable scopes : int list (* activation literals, innermost first *)
   ; formula_by_root_lit : Formula.any Int.Table.t
+  ; proof_generation : Proof_generation.t option
   }
 
-let create () =
+let create ?(config = Config.default) () =
   let egraph = Formula_egraph_uf.create ~atoms:[] in
   let tt = Tvar_types.create () in
   let bb = Branch_and_bound.create () in
@@ -210,6 +217,10 @@ let create () =
     ; encoding
     ; scopes = []
     ; formula_by_root_lit = Int.Table.create ()
+    ; proof_generation =
+        (if config.produce_proofs
+         then Some (Proof_generation.create ())
+         else None)
     }
   in
   (* Pre-register pairwise disequalities between distinct base types. This makes
@@ -252,26 +263,35 @@ let assert_formula t (formula : Formula.any)
     | [] -> clauses
     | activation :: _ -> guard_clauses ~activation clauses
   in
-  Ok
-    (List.fold_until
-       clauses
-       ~init:`Ok
-       ~f:(fun (`Ok : [ `Ok ]) clause ->
-         match Feel.Solver.add_clause t.solver ~clause with
-         | `Ok -> Continue `Ok
-         | `Unsat _ as unsat -> Stop unsat)
-       ~finish:(fun (`Ok : [ `Ok ]) -> `Ok))
+  let result =
+    List.fold_until
+      clauses
+      ~init:`Ok
+      ~f:(fun (`Ok : [ `Ok ]) clause ->
+        match Feel.Solver.add_clause t.solver ~clause with
+        | `Ok -> Continue `Ok
+        | `Unsat _ as unsat -> Stop unsat)
+      ~finish:(fun (`Ok : [ `Ok ]) -> `Ok)
+  in
+  (match result, t.proof_generation with
+   | `Ok, Some proof_generation ->
+     Proof_generation.assert_formula proof_generation formula
+   | (`Ok | `Unsat _), None | `Unsat _, Some _ -> ());
+  Ok result
 ;;
 
 let push t =
   let activation = Encoding.fresh_var t.encoding in
-  t.scopes <- activation :: t.scopes
+  t.scopes <- activation :: t.scopes;
+  Option.iter t.proof_generation ~f:Proof_generation.push
 ;;
 
 let pop t =
   match t.scopes with
   | [] -> assert false
-  | _ :: rest -> t.scopes <- rest
+  | _ :: rest ->
+    t.scopes <- rest;
+    Option.iter t.proof_generation ~f:Proof_generation.pop
 ;;
 
 let clause_to_formula t (literals : int array) : Formula.any option =
@@ -349,7 +369,11 @@ let solve ?time_bound ?(assumptions = [||]) t : Solver_result.t =
   let assumptions = Array.append scope_assumptions assumptions in
   match Feel.Solver.solve ?time_bound ~assumptions t.solver with
   | Sat { assignments = _ } -> Sat { tvar_assignments = tvar_assignments t }
-  | Unsat { core } -> Unsat { core = make_unsat_core t core }
+  | Unsat { core } ->
+    let proof =
+      Option.bind t.proof_generation ~f:Proof_generation.unsat_proof
+    in
+    Unsat { core = make_unsat_core t core; proof }
 ;;
 
 let stats t = Feel.Solver.stats t.solver

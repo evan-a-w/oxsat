@@ -1,5 +1,5 @@
 open! Core
-open! Feel.Import
+open! Import
 
 module Maybe_bound : sig
   type 'a t =

@@ -6,7 +6,7 @@ type t =
   | `Le of Linear_expr.t * Q.t
   | `Type_eq of Type_expr.t * Type_expr.t
   ]
-[@@deriving sexp_of, compare, hash]
+[@@deriving sexp, compare, hash]
 
 let normalize = function
   | `Eq (a, b) as x ->

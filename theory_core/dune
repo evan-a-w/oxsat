@@ -1,8 +1,9 @@
 (library
- (name nod_test)
+ (name theory_core)
+ (public_name feel_theory.core)
  (preprocess
   (pps ppx_jane))
  (inline_tests)
- (libraries core core_unix feel examples theory_core theory proof)
+ (libraries core feel)
  (flags
   (:standard -extension-universe beta)))
