@@ -21,6 +21,7 @@ type t =
   ; mutable clause_act_inc : float
   ; mutable iterations : int
   ; theory : Theory.Packed.t or_null
+  ; mutable theory_reported_consistent : bool
   }
 
 type time_bound =
@@ -124,7 +125,8 @@ let pop_from_trail_exn t =
     match t.theory with
     | Null -> ()
     | This (T ((module Theory), theory)) ->
-      Theory.undo theory ~to_decision_level_excl:to_decision_level);
+      Theory.undo theory ~to_decision_level_excl:to_decision_level;
+      t.theory_reported_consistent <- false);
   undo_entry t ~trail_entry
 ;;
 
@@ -146,6 +148,7 @@ let push_trail_entry t ~(trail_entry : Trail_entry.t) =
     (match t.theory with
      | Null -> ()
      | This (T ((module Theory), theory)) ->
+       t.theory_reported_consistent <- false;
        Theory.assert_literal
          theory
          ~decision_level:trail_entry.#decision_level
@@ -409,7 +412,8 @@ let ensure_literal t ~literal =
     (match t.theory with
      | Null -> ()
      | This (T ((module Theory), theory)) ->
-       Theory.on_new_var theory ~var:(Int.abs literal));
+       Theory.on_new_var theory ~var:(Int.abs literal);
+       t.theory_reported_consistent <- false);
     Vsids.on_new_var t.vsids ~var:(Int.abs literal);
     var.exists <- true)
 ;;
@@ -519,8 +523,11 @@ let propagate_theory t = exclave_
   | Null -> `Consistent
   | This (T ((module Theory), theory)) ->
     (match Theory.maybe_get_lemma theory with
-     | `Consistent -> `Consistent
+     | `Consistent ->
+       t.theory_reported_consistent <- true;
+       `Consistent
      | `Lemma { global = clause } ->
+       t.theory_reported_consistent <- false;
        let trail_length_before = Trail_entry.Vec.length t.trail in
        (match
           add_clause
@@ -529,11 +536,10 @@ let propagate_theory t = exclave_
             ~origin:Theory
         with
         | `Ok ->
-          (* A lemma clause with more than one unassigned literal (e.g. a
-             branch-and-bound case split) doesn't propagate anything, so
-             [Theory.maybe_get_lemma] would just re-derive the same lemma
-             forever. Once the clause is registered, fall through to
-             [make_decision] instead of polling the theory again. *)
+          (* A non-unit branch-and-bound split can be re-derived until one of
+             its literals is assigned, so make a decision before polling again.
+             If no decision is available, [theory_reported_consistent] prevents
+             [make_decision] from declaring Sat and the theory is polled again. *)
           if Trail_entry.Vec.length t.trail > trail_length_before
           then `Continue
           else `Consistent
@@ -914,7 +920,10 @@ let make_decision' ~is_assumption t ~literal =
 
 let%template make_decision t : _ @ m =
   match Vsids.choose_literal t.vsids with
-  | Null -> `Done (Sat_result.Sat { assignments = assignments_array t })
+  | Null ->
+    if t.theory_reported_consistent
+    then `Done (Sat_result.Sat { assignments = assignments_array t })
+    else `Continue
   | This literal ->
     (match[@exclave_if_stack a]
        make_decision' ~is_assumption:false t ~literal
@@ -1096,6 +1105,7 @@ let create
       (match theory with
        | None -> Null
        | Some packed -> This packed)
+  ; theory_reported_consistent = Option.is_none theory
   }
 ;;
 

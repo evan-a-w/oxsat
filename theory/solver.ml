@@ -140,14 +140,6 @@ module Combined_theory = struct
                    Formula_egraph_uf.atom_value
                      t.egraph
                      ~atom:(`Eq (Formula.Var a, Formula.Var b)))
-                 ~type_eq_value:(fun a b ->
-                   Formula_egraph_uf.atom_value
-                     t.egraph
-                     ~atom:(`Eq (Formula.Type_var a, Formula.Type_var b)))
-                 ~le_value:(fun atom ->
-                   match Atom.normalize atom with
-                   | `Le _ as le -> Branch_and_bound.le_atom_value t.bb le
-                   | `Eq _ | `Type_eq _ -> None)
                  ~theory_of:(Encoding.theory_for_tvar t.encoding)
                  ~get_type:(Tvar_types.get_type t.tt)
              with

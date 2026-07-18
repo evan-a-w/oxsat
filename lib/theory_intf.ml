@@ -5,6 +5,10 @@ module type S = sig
 
   val assert_literal : t -> decision_level:int -> literal:int -> unit
 
+  (** [`Consistent] means the theory has no further lemma for the current
+      assignment. A returned lemma need not propagate or conflict; the SAT
+      solver must obtain [`Consistent] before declaring a complete assignment
+      satisfiable. *)
   val maybe_get_lemma
     :  t
     -> [ `Consistent | `Lemma of int array Modes.Global.t ] @ local

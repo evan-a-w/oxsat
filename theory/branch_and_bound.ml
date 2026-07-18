@@ -7,8 +7,6 @@ module Atom = struct
     | `Type_eq of Type_expr.t * Type_expr.t
     ]
   [@@deriving sexp, compare, hash]
-
-  include functor Hashable.Make
 end
 
 module Trail_entry = struct
@@ -39,7 +37,6 @@ type t =
   ; simplex : Simplex.t
   ; trail : Trail_entry.t Vec.Value.t
   ; atom_for_constraint : (Atom.t * bool) Simplex.Constraint.Table.t
-  ; value_by_le_atom : bool Atom.Table.t
   }
 
 let create () : t =
@@ -52,11 +49,8 @@ let create () : t =
   ; trail = Vec.Value.create ()
   ; atom_for_constraint = Simplex.Constraint.Table.create ()
   ; tvars_to_check_for_equality = Tvar.Hash_set.create ()
-  ; value_by_le_atom = Atom.Table.create ()
   }
 ;;
-
-let le_atom_value t atom = Hashtbl.find t.value_by_le_atom atom
 
 let add_tvar_to_check_for_equality t ~tvar =
   Hash_set.add t.tvars_to_check_for_equality tvar
@@ -98,9 +92,6 @@ let refresh_non_integral t ~tvar =
 let undo_entry t ({ kind; _ } : Trail_entry.t) =
   match kind with
   | Add_constraint constraint_ ->
-    (match Hashtbl.find t.atom_for_constraint constraint_ with
-     | Some ((`Le _ as atom), _) -> Hashtbl.remove t.value_by_le_atom atom
-     | Some (`Type_eq _, _) | None -> ());
     Simplex.remove_constraint t.simplex ~constraint_;
     Hashtbl.remove t.atom_for_constraint constraint_
   | Set_integral { tvar; previous } ->
@@ -205,10 +196,8 @@ let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
   | true, `Type_eq (Base Float, Type_expr.Var _) -> ()
   | true, `Type_eq (_, _) | false, `Type_eq _ -> ()
   | true, `Le (le, c) ->
-    Hashtbl.set t.value_by_le_atom ~key:atom ~data:value;
     add_constraint t ~op:`Le ~le ~c ~decision_level ~atom ~value
   | false, `Le (le, c) ->
-    Hashtbl.set t.value_by_le_atom ~key:atom ~data:value;
     (* [Not (`Le (le, c))] is [le > c]. *)
     add_constraint t ~op:`Gt ~le ~c ~decision_level ~atom ~value
 ;;

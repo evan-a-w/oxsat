@@ -1001,12 +1001,11 @@ let%expect_test "Nelson-Oppen: no over-propagation (x <= y alone doesn't force \
     |}]
 ;;
 
-(* Regression: the first forward bridge clause (eq -> x <= y) is satisfied by
-   the asserted x <= y, and returning it as a lemma used to end lemma polling
-   with the violated second clause (eq -> y <= x) still queued, wrongly
-   answering Sat. *)
-let%expect_test "bridge lemmas: satisfied forward clause must not mask the \
-                 violated one"
+(* Regression: a satisfied theory lemma must not allow the SAT solver to declare
+   Sat before polling the theory to consistency. The first equality bridge is
+   already satisfied, while the second conflicts with [x < y]. *)
+let%expect_test "SAT/theory polling: a satisfied bridge lemma must not mask a \
+                 later conflict"
   =
   let solver = Solver.create () in
   assert_ok solver (eq x y);
