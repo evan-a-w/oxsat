@@ -37,7 +37,8 @@ let%expect_test "proof clauses normalize, sort, and deduplicate literals" =
       ]
   in
   print_clause clause;
-  [%expect {|
+  [%expect
+    {|
     (((atom (Theory (Eq ((Var x) (Var y))))) (positive true))
      ((atom (Extension 0)) (positive false)))
     |}];
@@ -73,7 +74,8 @@ let%expect_test "manual proofs have a stable S-expression representation" =
   in
   let sexp = Proof.sexp_of_t proof in
   print_s sexp;
-  [%expect {|
+  [%expect
+    {|
     ((assumptions (((name (h)) (formula (Eq (Var x) (Var x))))))
      (steps
       (((name (same)) (conclusion (Eq (Var x) (Var x)))
@@ -189,6 +191,97 @@ let%expect_test "kernel equality transitivity is checked" =
   in
   print_s [%message "checks" ~valid:(Or_error.is_ok (Proof.check proof) : bool)];
   [%expect {| (checks (valid true)) |}]
+;;
+
+let%expect_test "a multi-rule proof DAG is checked" =
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let b : Formula.any = Var (Tvar.of_string "b") in
+  let c : Formula.any = Var (Tvar.of_string "c") in
+  let d : Formula.any = Var (Tvar.of_string "d") in
+  let f = Tvar.of_string "f" in
+  let app argument : Formula.any = App (f, [ argument ]) in
+  let source : Formula.any = Not (Eq (app a, d)) in
+  let rewritten : Formula.any = Not (Eq (app c, d)) in
+  let congruence : Formula.any = Eq (app a, app c) in
+  let assumptions : Proof.Assumption.t array =
+    [| { name = Some "ab"; formula = Eq (a, b) }
+     ; { name = Some "bc"; formula = Eq (b, c) }
+     ; { name = Some "source"; formula = source }
+    |]
+  in
+  let step_id i = Proof.Id.Step.of_int_exn i in
+  let assumption_id i = Proof.Id.Assumption.of_int_exn i in
+  let proof : Proof.t =
+    { assumptions
+    ; steps =
+        [| { name = None
+           ; conclusion = Eq (a, b)
+           ; justification = Assumption (assumption_id 0)
+           }
+         ; { name = None
+           ; conclusion = Eq (b, c)
+           ; justification = Assumption (assumption_id 1)
+           }
+         ; { name = Some "ac"
+           ; conclusion = Eq (a, c)
+           ; justification =
+               Kernel
+                 { rule = Equality_trans
+                 ; premises = [| step_id 0; step_id 1 |]
+                 }
+           }
+         ; { name = None
+           ; conclusion = source
+           ; justification = Assumption (assumption_id 2)
+           }
+         ; { name = Some "f_a_f_c"
+           ; conclusion = congruence
+           ; justification =
+               Kernel { rule = Congruence; premises = [| step_id 2 |] }
+           }
+         ; { name = Some "rewritten"
+           ; conclusion = rewritten
+           ; justification =
+               Kernel
+                 { rule =
+                     Rewrite { direction = Left_to_right; path = [ 0; 0; 0 ] }
+                 ; premises = [| step_id 2; step_id 3 |]
+                 }
+           }
+         ; { name = Some "combined"
+           ; conclusion = And [ congruence; rewritten ]
+           ; justification =
+               Kernel
+                 { rule = Propositional; premises = [| step_id 4; step_id 5 |] }
+           }
+        |]
+    ; conclusion = step_id 6
+    }
+  in
+  let bad_rewrite =
+    { proof with
+      steps =
+        Array.mapi proof.steps ~f:(fun index step ->
+          if index = 5
+          then
+            { step with
+              justification =
+                Kernel
+                  { rule =
+                      Rewrite { direction = Left_to_right; path = [ 0; 0 ] }
+                  ; premises = [| step_id 2; step_id 3 |]
+                  }
+            }
+          else step)
+    }
+  in
+  print_s
+    [%message
+      "checks"
+        ~valid:(Or_error.is_ok (Proof.check proof) : bool)
+        ~bad_rewrite_rejected:
+          (Or_error.is_error (Proof.check bad_rewrite) : bool)];
+  [%expect {| (checks (valid true) (bad_rewrite_rejected true)) |}]
 ;;
 
 let%expect_test "bare equality bridge and integer split certificates are \
