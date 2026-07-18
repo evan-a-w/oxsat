@@ -19,6 +19,7 @@ type t =
   ; atoms_in_order : (Atom.t * int) Vec.Value.t
   ; mutable true_var : int or_null
   ; theory_for_tvar : Formula.Theory.Packed.t Tvar.Table.t
+  ; newly_shared : Tvar.t Vec.Value.t
   }
 
 let create () =
@@ -28,13 +29,32 @@ let create () =
   ; atoms_in_order = Vec.Value.create ()
   ; true_var = Null
   ; theory_for_tvar = Tvar.Table.create ()
+  ; newly_shared = Vec.Value.create ()
   }
 ;;
 
 let record_tvar t tvar theory =
-  Hashtbl.update t.theory_for_tvar tvar ~f:(function
-    | None -> theory
-    | Some existing -> Formula.Theory.Packed.join existing theory)
+  let shared = Formula.Theory.(Packed.T Shared) in
+  Hashtbl.update t.theory_for_tvar tvar ~f:(fun existing ->
+    let updated =
+      match existing with
+      | None -> theory
+      | Some existing -> Formula.Theory.Packed.join existing theory
+    in
+    let was_shared =
+      match existing with
+      | None -> false
+      | Some existing -> Formula.Theory.Packed.equal existing shared
+    in
+    if (not was_shared) && Formula.Theory.Packed.equal updated shared
+    then Vec.Value.push t.newly_shared tvar;
+    updated)
+;;
+
+let drain_newly_shared t =
+  let tvars = Vec.Value.to_list t.newly_shared in
+  Vec.Value.clear t.newly_shared;
+  tvars
 ;;
 
 let rec record_uf_term_tvars t (formula : Formula.any) =

@@ -740,11 +740,11 @@ let%expect_test "bare-variable disequality leaves types unconstrained" =
      (tvar_assignments
       ((x
         ((type_ ((Base Int)))
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (numeric (((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1))))))
          (euf_repr ())))
        (y
         ((type_ ((Base Int)))
-         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num -1) (den 1))))))
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
          (euf_repr ()))))))
     |}]
 ;;
@@ -829,6 +829,175 @@ let%expect_test "false bare-variable equality forces numeric disequality" =
             Le (La_const ((num 0) (den 1)))))
           (Eq (Var x) (Var y)))))
        (Asserted (Not (Eq (Var x) (Var y)))))))
+    |}]
+;;
+
+(* ----- Nelson-Oppen equality propagation between theories ----- *)
+
+let%expect_test "Nelson-Oppen: LA-implied equality reaches EUF" =
+  let solver = Solver.create () in
+  assert_ok solver (Formula.La_compare (x, `Le, y));
+  assert_ok solver (Formula.La_compare (y, `Le, x));
+  assert_ok solver (neq (f x) (f y));
+  print_result (Solver.solve solver);
+  [%expect
+    {|
+    (Unsat
+     (core
+      ((Theory_lemma
+        (Or
+         ((Not (Eq (Var x) (Var y))) (Eq (App f ((Var x))) (App f ((Var y)))))))
+       (Theory_lemma
+        (Or
+         ((Eq (Var x) (Var y))
+          (Not
+           (La_compare
+            (La_add (La_scale_const ((num 1) (den 1)) (Var x))
+             (La_scale_const ((num -1) (den 1)) (Var y)))
+            Le (La_const ((num 0) (den 1)))))
+          (Not
+           (La_compare
+            (La_add (La_scale_const ((num -1) (den 1)) (Var x))
+             (La_scale_const ((num 1) (den 1)) (Var y)))
+            Le (La_const ((num 0) (den 1))))))))
+       (Asserted (La_compare (Var x) Le (Var y)))
+       (Asserted (La_compare (Var y) Le (Var x)))
+       (Asserted (Not (Eq (App f ((Var x))) (App f ((Var y)))))))))
+    |}]
+;;
+
+let%expect_test "Nelson-Oppen: EUF-derived equality reaches LA" =
+  let solver = Solver.create () in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let b : Formula.any = Var (Tvar.of_string "b") in
+  assert_ok solver (eq x (f a));
+  assert_ok solver (eq y (f b));
+  assert_ok solver (eq a b);
+  assert_ok solver (Formula.La_compare (x, `Le, La_const Q.zero));
+  assert_ok solver (Formula.La_compare (y, `Ge, La_const Q.one));
+  print_result (Solver.solve solver);
+  [%expect
+    {|
+    (Unsat
+     (core
+      ((Theory_lemma
+        (Or
+         ((Not (Eq (Var x) (Var y)))
+          (La_compare
+           (La_add (La_scale_const ((num -1) (den 1)) (Var x))
+            (La_scale_const ((num 1) (den 1)) (Var y)))
+           Le (La_const ((num 0) (den 1)))))))
+       (Theory_lemma (Or ((Eq (Var x) (Var y))))))))
+    |}]
+;;
+
+let%expect_test "Nelson-Oppen: non-convex integer case needs a disjunction of \
+                 equalities"
+  =
+  (* x:Int, 1 <= x <= 2, y = 1, z = 2 implies x=y \/ x=z but neither alone, so
+     propagating single implied equalities cannot catch this. *)
+  let solver = Solver.create () in
+  Solver.assert_type solver xv int_type;
+  let assert_le a b = assert_ok solver (Formula.La_compare (a, `Le, b)) in
+  assert_le (La_const Q.one) x;
+  assert_le x (La_const (Q.of_int 2));
+  assert_le y (La_const Q.one);
+  assert_le (La_const Q.one) y;
+  assert_le z (La_const (Q.of_int 2));
+  assert_le (La_const (Q.of_int 2)) z;
+  assert_ok solver (neq (f x) (f y));
+  assert_ok solver (neq (f x) (f z));
+  print_result (Solver.solve solver);
+  [%expect
+    {|
+    (Unsat
+     (core
+      ((Theory_lemma
+        (Or
+         ((Not
+           (La_compare (La_scale_const ((num 1) (den 1)) (Var y)) Le
+            (La_const ((num 1) (den 1)))))
+          (Not
+           (La_compare (La_scale_const ((num -1) (den 1)) (Var x)) Le
+            (La_const ((num -1) (den 1)))))
+          (La_compare
+           (La_add (La_scale_const ((num -1) (den 1)) (Var x))
+            (La_scale_const ((num 1) (den 1)) (Var y)))
+           Le (La_const ((num 0) (den 1)))))))
+       (Asserted (La_compare (Var y) Le (La_const ((num 1) (den 1)))))
+       (Asserted (La_compare (La_const ((num 1) (den 1))) Le (Var x)))
+       (Theory_lemma
+        (Or
+         ((Not
+           (La_compare
+            (La_add (La_scale_const ((num -1) (den 1)) (Var x))
+             (La_scale_const ((num 1) (den 1)) (Var y)))
+            Le (La_const ((num 0) (den 1)))))
+          (Not
+           (La_compare
+            (La_add (La_scale_const ((num 1) (den 1)) (Var x))
+             (La_scale_const ((num -1) (den 1)) (Var y)))
+            Le (La_const ((num 0) (den 1)))))
+          (Eq (Var x) (Var y))))))))
+    |}]
+;;
+
+let%expect_test "Nelson-Oppen: LA-implied equality with conflicting types" =
+  let solver = Solver.create () in
+  assert_ok solver (Formula.La_compare (x, `Le, y));
+  assert_ok solver (Formula.La_compare (y, `Le, x));
+  Solver.assert_type solver xv int_type;
+  Solver.assert_type solver yv float_type;
+  print_result (Solver.solve solver);
+  [%expect
+    {|
+    (Unsat
+     (core
+      ((Theory_lemma
+        (Or
+         ((Not (Eq (Type_var x) (Type_var y))) (Not (Eq (Type_var y) Float))
+          (Not (Eq (Type_var x) Int)) (Eq Int Float))))
+       (Theory_lemma
+        (Or ((Eq (Type_var x) (Type_var y)) (Not (Eq (Var x) (Var y))))))
+       (Theory_lemma
+        (Or
+         ((Eq (Var x) (Var y))
+          (Not
+           (La_compare
+            (La_add (La_scale_const ((num 1) (den 1)) (Var x))
+             (La_scale_const ((num -1) (den 1)) (Var y)))
+            Le (La_const ((num 0) (den 1)))))
+          (Not
+           (La_compare
+            (La_add (La_scale_const ((num -1) (den 1)) (Var x))
+             (La_scale_const ((num 1) (den 1)) (Var y)))
+            Le (La_const ((num 0) (den 1))))))))
+       (Asserted (La_compare (Var x) Le (Var y)))
+       (Asserted (La_compare (Var y) Le (Var x)))
+       (Asserted (Eq (Type_var y) Float)) (Asserted (Eq (Type_var x) Int))
+       (Asserted (Not (Eq Int Float))))))
+    |}]
+;;
+
+let%expect_test "Nelson-Oppen: no over-propagation (x <= y alone doesn't force \
+                 x = y)"
+  =
+  let solver = Solver.create () in
+  assert_ok solver (Formula.La_compare (x, `Le, y));
+  assert_ok solver (neq (f x) (f y));
+  print_result (Solver.solve solver);
+  [%expect
+    {|
+    (Sat
+     (tvar_assignments
+      ((x
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num -1) (den 1))))))
+         (euf_repr ())))
+       (y
+        ((type_ ())
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ()))))))
     |}]
 ;;
 

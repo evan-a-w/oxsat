@@ -29,6 +29,18 @@ val maybe_get_lemma : t -> [ `Consistent | `Lemma of (Atom.t * bool) list ]
     [maybe_get_lemma] has returned [`Consistent]. *)
 val assignment : t -> tvar:Tvar.t -> Simplex.Q_eps.t option
 
-(* we will try to propagate equalities for such variables *)
+(** Registers a Nelson-Oppen shared tvar whose LA-implied equalities need
+    propagating to the other theories. *)
 val add_tvar_to_check_for_equality : t -> tvar:Tvar.t -> unit
+
+(** Pairs of registered shared tvars whose assignments coincide in the current
+    simplex model. Only meaningful right after {!maybe_get_lemma} returned
+    [`Consistent]. Coincidence is a model-based heuristic, not an implied
+    equality: pairs can coincide spuriously (e.g. fresh simplex vars default to
+    zero), in which case the bridge clauses injected for them (see
+    [Bare_var_eq]) cost clauses and search but not correctness, since each pair
+    is bridged at most once. A refinement would be to probe the implication in
+    simplex first and only case-split for integer vars. *)
+val equality_candidates : t -> (Tvar.t * Tvar.t) list
+
 val all_numeric_vars : t -> Tvar.t list

@@ -27,7 +27,7 @@ end
 
 type t =
   { simplex_var_by_tvar : int Tvar.Table.t
-  ; tvars_to_check_for_equality : Tvar.t Vec.Value.t
+  ; tvars_to_check_for_equality : Tvar.Hash_set.t
   ; tvar_by_simplex_var : Tvar.t Int.Table.t
   ; integral_tvars : Tvar.Hash_set.t
   ; (* The [`Type_eq] atom (and its value) that most recently made a tvar
@@ -48,12 +48,25 @@ let create () : t =
   ; simplex = Simplex.create ()
   ; trail = Vec.Value.create ()
   ; atom_for_constraint = Simplex.Constraint.Table.create ()
-  ; tvars_to_check_for_equality = Vec.Value.create ()
+  ; tvars_to_check_for_equality = Tvar.Hash_set.create ()
   }
 ;;
 
 let add_tvar_to_check_for_equality t ~tvar =
-  Vec.Value.push t.tvars_to_check_for_equality tvar
+  Hash_set.add t.tvars_to_check_for_equality tvar
+;;
+
+let equality_candidates t : (Tvar.t * Tvar.t) list =
+  Hash_set.to_list t.tvars_to_check_for_equality
+  |> List.filter_map ~f:(fun tvar ->
+    Hashtbl.find t.simplex_var_by_tvar tvar
+    |> Option.map ~f:(fun var -> Simplex.assignment t.simplex ~var, tvar))
+  |> List.sort_and_group ~compare:(fun (q1, _) (q2, _) ->
+    [%compare: Simplex.Q_eps.t] q1 q2)
+  |> List.concat_map ~f:(fun group ->
+    match List.map group ~f:snd |> List.sort ~compare:Tvar.compare with
+    | [] | [ _ ] -> []
+    | first :: rest -> List.map rest ~f:(fun tvar -> first, tvar))
 ;;
 
 (* Brings [non_integral_ints] membership for [tvar] in line with whether it's
@@ -216,7 +229,7 @@ let maybe_get_lemma t =
          atom, not value))
   | `Sat ->
     (match Hash_queue.first_with_key t.non_integral_ints with
-     | None -> (* TODO: infer equalities *) `Consistent
+     | None -> `Consistent
      | Some (tvar, ()) ->
        (* either <= floor value or >= ceil value, but only while [tvar] is
           actually integral -- guard on the negation of the atom that asserted
@@ -224,9 +237,19 @@ let maybe_get_lemma t =
        let integral_atom, integral_value =
          Hashtbl.find_exn t.integral_atom_by_tvar tvar
        in
-       let assignment =
-         (Simplex.assignment t.simplex ~var:(simplex_var_for_tvar t ~tvar))
-           .value
+       let { Simplex.Q_eps.value; eps_coeff } =
+         Simplex.assignment t.simplex ~var:(simplex_var_for_tvar t ~tvar)
+       in
+       let floor, ceil =
+         if Q.is_integral value
+         then
+           (* The fractionality is only the symbolic infinitesimal (from a
+              strict bound), so [value + eps] rounds down to [value] and up to
+              [value + 1] (symmetrically for negative [eps]). *)
+           if Q.sign' eps_coeff > 0
+           then value, Q.(value + one)
+           else Q.(value - one), value
+         else Q.floor value, Q.ceil value
        in
        (* this is NOT a unit clause, and doesn't depend on the current
           assignments / constraints etc. However, this is always true for
@@ -239,7 +262,7 @@ let maybe_get_lemma t =
                   ; coeffs = Tvar.Map.of_alist_exn [ tvar, Q.one ]
                   }
                   : Linear_expr.t)
-               , Q.floor assignment )
+               , floor )
            , true )
          ; ( `Le
                ( Linear_expr.neg
@@ -247,7 +270,7 @@ let maybe_get_lemma t =
                     ; coeffs = Tvar.Map.of_alist_exn [ tvar, Q.one ]
                     }
                     : Linear_expr.t)
-               , Q.(ceil assignment |> neg) )
+               , Q.neg ceil )
            , true )
          ])
 ;;
