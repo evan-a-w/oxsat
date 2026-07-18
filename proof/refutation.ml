@@ -38,7 +38,7 @@ let error message = Or_error.error_string message
 
 let clause_is_singleton clause literal =
   match Proof_clause.literals clause with
-  | [| actual |] -> Proof_literal.compare actual literal = 0
+  | [| actual |] -> [%compare.equal: Proof_literal.t] actual literal
   | _ -> false
 ;;
 
@@ -108,7 +108,7 @@ let check_extension_clause t clause id =
 ;;
 
 let assignment_find assignment atom =
-  List.Assoc.find assignment atom ~equal:(fun a b -> Proof_atom.compare a b = 0)
+  List.Assoc.find assignment atom ~equal:[%compare.equal: Proof_atom.t]
 ;;
 
 let assign assignment atom value =
