@@ -50,7 +50,7 @@
 (library
  (name smt_bench)
  (modules smt_bench)
- (libraries core theory benchmark)
+ (libraries core theory_core theory benchmark)
  (preprocess
   (pps ppx_jane))
  (flags

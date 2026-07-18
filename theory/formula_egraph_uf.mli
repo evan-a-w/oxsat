@@ -1,5 +1,5 @@
 open! Core
-open! Feel.Import
+open! Import
 
 (** Congruence closure over the whole [Formula.any] type (not just the
     [Var]/[App] slice {!Uninterpreted_functions} uses), built directly on

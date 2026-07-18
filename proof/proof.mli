@@ -1,4 +1,5 @@
 open! Core
+open! Theory_core
 module Id = Proof_id
 module Atom = Proof_atom
 module Boolean = Proof_boolean

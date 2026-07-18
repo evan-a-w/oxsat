@@ -1,5 +1,6 @@
 open! Core
 open! Feel.Import
+open! Theory_core
 
 module Euf = struct
   module Equality = struct

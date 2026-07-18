@@ -1,4 +1,5 @@
 open! Core
+open! Theory_core
 
 (** A solver-independent clause refutation. Clauses refer to semantic theory
     atoms and proof-local extension variables, never the SAT solver's integer

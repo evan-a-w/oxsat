@@ -1,5 +1,5 @@
 open! Core
-open! Feel.Import
+open! Import
 
 (** Decision procedure for linear arithmetic over [Tvar.t] variables, combining
     {!Simplex} (for the rationals) with a branch-and-bound search (for [Tvar.t]s

@@ -1,5 +1,5 @@
 open! Core
-open! Feel.Import
+open! Import
 
 (** What each theory has determined about a single [Tvar.t] in a satisfying
     model. A tvar may be constrained by more than one theory at once (e.g. its

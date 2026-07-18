@@ -1,5 +1,5 @@
 open! Core
-open! Feel.Import
+open! Import
 
 (** An incremental SMT solver combining the SAT core ({!Feel.Solver}) with the
     theory of uninterpreted functions ({!Uninterpreted_functions}).

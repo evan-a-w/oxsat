@@ -5,4 +5,4 @@
   (pps ppx_jane))
  (libraries core feel theory_core)
  (flags
-  (:standard -extension-universe beta -open Theory_core)))
+  (:standard -extension-universe beta)))

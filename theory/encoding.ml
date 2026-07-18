@@ -1,5 +1,5 @@
 open! Core
-open! Feel.Import
+open! Import
 
 module Formula_with_no_shared_theories = struct
   type t =

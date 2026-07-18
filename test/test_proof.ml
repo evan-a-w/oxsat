@@ -1,5 +1,6 @@
 open! Core
 open! Feel.Import
+open! Theory_core
 open! Theory
 
 let x = Tvar.of_string "x"

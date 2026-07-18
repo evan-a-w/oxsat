@@ -1,4 +1,5 @@
 open! Core
+open! Theory_core
 
 module Input_clause = struct
   type t = { input : int } [@@deriving sexp, compare]

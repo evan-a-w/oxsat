@@ -1,5 +1,5 @@
 open! Core
-open! Feel.Import
+open! Import
 
 module Op = struct
   type t =

@@ -1,5 +1,5 @@
 open! Core
-open! Feel.Import
+open! Import
 
 type t =
   { type_ : Type_expr.t option

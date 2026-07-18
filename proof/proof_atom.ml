@@ -1,4 +1,5 @@
 open! Core
+open! Theory_core
 
 type t =
   | Theory of Atom.t

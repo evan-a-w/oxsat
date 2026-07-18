@@ -1,5 +1,5 @@
 open! Core
-open! Feel.Import
+open! Import
 
 let lemma_to_clause literals ~sat_var_for_atom =
   let clause =

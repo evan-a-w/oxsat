@@ -1,5 +1,5 @@
 open! Core
-open! Feel.Import
+open! Import
 
 module Atom = struct
   type t = [ `Eq of Formula.any * Formula.any ] [@@deriving sexp, compare, hash]

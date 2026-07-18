@@ -1,5 +1,6 @@
 open! Core
 open! Feel.Import
+open! Theory_core
 
 (** Data needed to check a theory lemma without running its originating theory
     solver. Literal indices refer to the clause certified by the value. *)

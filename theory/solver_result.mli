@@ -1,5 +1,5 @@
 open! Core
-open! Feel.Import
+open! Import
 
 module Core_step : sig
   type t =

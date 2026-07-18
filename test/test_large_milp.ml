@@ -1,5 +1,6 @@
 open! Core
 open! Feel.Import
+open! Theory_core
 open! Theory
 
 (* Bin packing: assign n items to bins of fixed capacity. Each item i has a
