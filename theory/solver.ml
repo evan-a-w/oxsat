@@ -19,6 +19,7 @@ module Combined_theory = struct
     ; bb : Branch_and_bound.t
     ; encoding : Encoding.t
     ; bare_var_eq : Bare_var_eq.t
+    ; shared_tvars : Tvar.Hash_set.t
     }
 
   (* Converts a lemma atom coming back from [Formula_egraph_uf] (a bare
@@ -67,6 +68,50 @@ module Combined_theory = struct
     | None -> ()
   ;;
 
+  (* Nelson-Oppen equality discovery for shared tvars: pairs a theory considers
+     possibly equal (coincident in the LA model, or merged in the egraph) are
+     handed to [Bare_var_eq], which bridges them with clauses that force the SAT
+     solver to decide their arrangement. *)
+
+  (* LA-model coincidence only matters if the pair's arrangement is observable
+     by another theory: both endpoints are egraph terms (EUF/congruence can tell
+     them apart), or their types aren't known to agree (a forced value equality
+     would force a type conflict). Same-typed pairs outside the egraph -- e.g.
+     the many coincident int vars of a MILP -- need no arrangement, and bridging
+     them floods the search with useless splits. *)
+  let arrangement_matters t a b =
+    let in_egraph v = Formula_egraph_uf.mem_term t.egraph (Formula.Var v) in
+    (in_egraph a && in_egraph b)
+    ||
+    match Tvar_types.get_type t.tt a, Tvar_types.get_type t.tt b with
+    | Some type_a, Some type_b ->
+      not ([%compare.equal: Type_expr.t] type_a type_b)
+    | None, _ | _, None -> true
+  ;;
+
+  let register_shared_candidates t =
+    List.iter (Encoding.drain_newly_shared t.encoding) ~f:(fun tvar ->
+      Hash_set.add t.shared_tvars tvar;
+      Branch_and_bound.add_tvar_to_check_for_equality t.bb ~tvar);
+    List.iter (Branch_and_bound.equality_candidates t.bb) ~f:(fun (a, b) ->
+      if arrangement_matters t a b
+      then Bare_var_eq.register_candidate t.bare_var_eq a b);
+    Hash_set.to_list t.shared_tvars
+    |> List.filter_map ~f:(fun tvar ->
+      let term : Formula.any = Var tvar in
+      if Formula_egraph_uf.mem_term t.egraph term
+      then Some (Formula_egraph_uf.canonical_term t.egraph ~term, tvar)
+      else None)
+    |> List.sort_and_group ~compare:(fun (repr1, _) (repr2, _) ->
+      Formula.compare_any repr1 repr2)
+    |> List.iter ~f:(fun group ->
+      match List.map group ~f:snd |> List.sort ~compare:Tvar.compare with
+      | [] | [ _ ] -> ()
+      | first :: rest ->
+        List.iter rest ~f:(fun tvar ->
+          Bare_var_eq.register_candidate t.bare_var_eq first tvar))
+  ;;
+
   let maybe_get_lemma t = exclave_
     match Formula_egraph_uf.maybe_get_lemma t.egraph [@nontail] with
     | `Lemma literals ->
@@ -87,6 +132,7 @@ module Combined_theory = struct
               ~sat_var_for_atom:(fun (atom : Branch_and_bound.Atom.t) ->
                 Encoding.sat_var_for_atom t.encoding (atom :> Atom.t))
           | `Consistent ->
+            register_shared_candidates t;
             (match
                Bare_var_eq.maybe_get_lemma
                  t.bare_var_eq
@@ -142,7 +188,15 @@ let create () =
   let bb = Branch_and_bound.create () in
   let encoding = Encoding.create () in
   let bare_var_eq = Bare_var_eq.create () in
-  let combined = { Combined_theory.egraph; tt; bb; encoding; bare_var_eq } in
+  let combined =
+    { Combined_theory.egraph
+    ; tt
+    ; bb
+    ; encoding
+    ; bare_var_eq
+    ; shared_tvars = Tvar.Hash_set.create ()
+    }
+  in
   let solver =
     Feel.Solver.create
       ~theory:(Feel.Theory.pack (module Combined_theory) combined)

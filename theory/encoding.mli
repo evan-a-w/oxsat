@@ -30,6 +30,11 @@ val theory_for_tvar : t -> Tvar.t -> Formula.Theory.Packed.t option
 
 val tvar_theories : t -> Formula.Theory.Packed.t Tvar.Map.t
 
+(** Tvars whose membership became [Shared] since the last drain — i.e. the
+    Nelson-Oppen shared variables, for which theories must agree on an
+    arrangement (see [Bare_var_eq]). *)
+val drain_newly_shared : t -> Tvar.t list
+
 (** [encode encoding formula] elaborates the rich [formula] into flat theory
     atoms, then Tseitin-encodes the result into CNF, returning a list of clauses
     whose conjunction is satisfiable iff [formula] is, and such that any

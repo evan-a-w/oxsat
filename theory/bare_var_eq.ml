@@ -12,6 +12,8 @@ let normalize (a, b) = if Tvar.compare a b <= 0 then a, b else b, a
 
 type t =
   { registered : Pair.Hash_set.t
+  ; candidates : Pair.Hash_set.t
+  ; candidate_injected : Pair.Hash_set.t
   ; type_forward_injected : Pair.Hash_set.t
   ; la_forward_injected : Pair.Hash_set.t
   ; la_reverse_injected : Pair.Hash_set.t
@@ -20,6 +22,8 @@ type t =
 
 let create () =
   { registered = Pair.Hash_set.create ()
+  ; candidates = Pair.Hash_set.create ()
+  ; candidate_injected = Pair.Hash_set.create ()
   ; type_forward_injected = Pair.Hash_set.create ()
   ; la_forward_injected = Pair.Hash_set.create ()
   ; la_reverse_injected = Pair.Hash_set.create ()
@@ -28,6 +32,13 @@ let create () =
 ;;
 
 let register t a b = Hash_set.add t.registered (normalize (a, b))
+
+let register_candidate t a b =
+  let pair = normalize (a, b) in
+  Hash_set.add t.registered pair;
+  Hash_set.add t.candidates pair
+;;
+
 let uf_atom a b : Atom.t = `Eq (Formula.Var a, Formula.Var b)
 let type_atom a b : Atom.t = `Type_eq (Type_expr.Var a, Type_expr.Var b)
 
@@ -87,8 +98,34 @@ let maybe_get_lemma t ~eq_value ~theory_of ~get_type =
            List.iter rest ~f:(fun lemma -> Queue.enqueue t.pending lemma);
            Some first)
     in
+    (* A theory-discovered shared pair gets the reverse/split clause
+       [eq \/ ~le1 \/ ~le2] regardless of the eq atom's value (it typically
+       doesn't exist yet -- this clause is what creates it), so the SAT solver
+       is forced to decide the pair's arrangement -- delayed theory combination.
+       The forward clauses then follow from the value-gated attempts below once
+       the eq atom is assigned. Emitting just this one clause matters: the host
+       solver stops polling for lemmas after a clause that doesn't propagate, so
+       a queued-up satisfied clause could leave the split clause undelivered;
+       this clause always introduces a fresh atom, keeping the search (and hence
+       polling) alive. Sound even for pairs that merely coincided in a theory's
+       model by chance; see [Branch_and_bound.equality_candidates]. *)
+    let candidate_attempt () =
+      match
+        Hash_set.find t.candidates ~f:(fun pair ->
+          not (Hash_set.mem t.candidate_injected pair))
+      with
+      | None -> None
+      | Some ((a, b) as pair) ->
+        Hash_set.add t.candidate_injected pair;
+        if la_member a && la_member b
+        then (
+          Hash_set.add t.la_reverse_injected pair;
+          List.hd (la_reverse_clauses pair))
+        else None
+    in
     let attempts =
-      [ (fun () ->
+      [ candidate_attempt
+      ; (fun () ->
           fire
             ~injected:t.type_forward_injected
             ~is_ready:(fun ((a, b) as pair) ->
