@@ -1048,8 +1048,10 @@ let%expect_test "proof production is optional and returns checked \
                : bool)]
   in
   contradiction (Solver.create ());
+  [%expect {| (("Option.is_some proof" false) (checks false)) |}];
   contradiction
     (Solver.create ~config:{ Solver.Config.produce_proofs = true } ());
+  [%expect {| (("Option.is_some proof" true) (checks true)) |}];
   let theory_contradiction =
     Solver.create ~config:{ Solver.Config.produce_proofs = true } ()
   in
@@ -1059,12 +1061,7 @@ let%expect_test "proof production is optional and returns checked \
    | Sat _ -> print_endline "unexpected Sat"
    | Unsat { proof; _ } ->
      print_s [%message "theory certificate pending" (proof : Proof.t option)]);
-  [%expect
-    {|
-    (("Option.is_some proof" false) (checks false))
-    (("Option.is_some proof" true) (checks true))
-    ("theory certificate pending" (proof ()))
-    |}]
+  [%expect {| ("theory certificate pending" (proof ())) |}]
 ;;
 
 (* Regression: the integrality split used to round [1 + eps] (from the strict
