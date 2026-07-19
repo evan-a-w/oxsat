@@ -13,7 +13,10 @@ type t =
 let rec of_core : Boolean_formula.t -> t = function
   | True -> True
   | False -> False
-  | Atom atom -> Atom (Proof_atom.Theory atom)
+  (* Normalize so structurally-distinct-but-equal atoms (e.g. [x - 3 <= 0] and
+     [x <= 3], or a flipped equality) unify with the normalized atoms carried by
+     proof literals. *)
+  | Atom atom -> Atom (Proof_atom.Theory (Atom.normalize atom))
   | Not formula -> Not (of_core formula)
   | And formulas -> And (List.map formulas ~f:of_core)
   | Or formulas -> Or (List.map formulas ~f:of_core)

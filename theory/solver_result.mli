@@ -9,7 +9,7 @@ module Core_step : sig
 end
 
 type t =
-  | Sat of { tvar_assignments : Tvar_assignment.t Tvar.Map.t }
+  | Sat of { model : Model.t }
   | Unsat of
       { core : Core_step.t list
       ; proof : Proof.t option [@sexp.option]

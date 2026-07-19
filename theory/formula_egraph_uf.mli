@@ -24,6 +24,13 @@ val create : atoms:Atom.t list -> t
 val add_atom : t -> atom:Atom.t -> unit
 val assert_atom : t -> decision_level:int -> atom:Atom.t -> value:bool -> unit
 val maybe_get_lemma : t -> [ `Consistent | `Lemma of (Atom.t * bool) list ]
+
+(** The EUF proof certificate for the [`Lemma] most recently returned by
+    {!maybe_get_lemma}, or [None] if that call returned [`Consistent]. Used by
+    proof production; the returned certificate justifies the lemma clause over
+    its constituent equality atoms. *)
+val last_certificate : t -> Lemma_certificate.Euf.t option
+
 val undo : t -> to_decision_level_excl:int -> unit
 
 (** The current truth value of [atom], if it has been assigned one (via
@@ -42,6 +49,11 @@ val canonical_term : t -> term:Formula.any -> Formula.any
 (** All terms registered so far (via [create] or [add_atom]), including
     subterms. *)
 val registered_terms : t -> Formula.any list
+
+(** Every registered term paired with the canonical representative of its
+    equivalence class, so a model checker can decide any equality/disequality
+    over registered terms without re-running congruence closure. *)
+val classes : t -> (Formula.any * Formula.any) list
 
 (** The underlying e-graph, for e-matching (see {!Formula_egraph.Pattern}) or
     other queries over the shape of registered terms — e.g. for instantiating

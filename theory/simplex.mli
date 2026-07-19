@@ -62,6 +62,13 @@ val add_var : t -> int
 val add_constraint : t -> (Q.t * int) list * Op.t * Q.t -> Constraint.t
 val remove_constraint : t -> constraint_:Constraint.t -> unit
 val solve : t -> [ `Sat | `Unsat of Constraint.t list ]
+
+(** Farkas certificate of the most recent [`Unsat] returned by {!solve}:
+    [(constraint, coefficient)] pairs with strictly positive coefficients whose
+    non-negative combination of the constraints' bounds is contradictory. Only
+    meaningful immediately after {!solve} returned [`Unsat]. *)
+val last_conflict_farkas : t -> (Constraint.t * Q.t) list
+
 val snapshot_assignments : t -> Snapshot.t
 
 (** if [solve] returned [`Unsat], may restore to a snapshot before calling

@@ -2,6 +2,33 @@ open! Core
 open! Import
 open! Stdlib_stable
 
+(* Records just enough to reconstruct a resolution/RUP refutation after an
+   [Unsat]. Only allocated when [~produce_proofs:true]; every hook is guarded by
+   [match t.proof_log with None -> () | Some log -> ...] so proof-free solving
+   pays nothing. Clauses are identified by their stable index into [t.clauses];
+   for each learned clause we remember the clause indices resolved to derive it
+   (in conflict-analysis visitation order), which serve as RUP hints. *)
+module Proof_log = struct
+  type t =
+    { antecedents_by_clause_idx : (int, int list) Hashtbl.t
+    ; mutable last_conflict_clause_idx : int option
+    }
+
+  let create () =
+    { antecedents_by_clause_idx = Hashtbl.create (module Core.Int)
+    ; last_conflict_clause_idx = None
+    }
+  ;;
+
+  let record_learned t ~clause_idx ~antecedents =
+    Hashtbl.set t.antecedents_by_clause_idx ~key:clause_idx ~data:antecedents
+  ;;
+
+  let antecedents t ~clause_idx =
+    Hashtbl.find t.antecedents_by_clause_idx clause_idx
+  ;;
+end
+
 type t =
   { trail : Trail_entry.Vec.t
   ; mutable trail_processed_till : int
@@ -13,6 +40,10 @@ type t =
   ; mutable stats : Stats.t
   ; analyze_conflict_stamp_set : Stamp_set.t
   ; analyze_conflict_scratch_literals : int Vec.Value.t
+      (* Clause indices resolved during the most recent [analyze_conflict], in
+         visitation order, for use as RUP hints. Only populated when [proof_log]
+         is set; [backtrack] reads it right after [analyze_conflict]. *)
+  ; analyze_conflict_antecedents : int Vec.Value.t
   ; debug : bool
   ; vsids : Vsids.t
   ; mutable luby_index : int
@@ -22,6 +53,7 @@ type t =
   ; mutable iterations : int
   ; theory : Theory.Packed.t or_null
   ; mutable theory_reported_consistent : bool
+  ; proof_log : Proof_log.t option
   }
 
 type time_bound =
@@ -460,6 +492,10 @@ let add_clause t ~literals ~origin =
   in
   let clause_idx = Vec.Value.length t.clauses in
   Vec.Value.push t.clauses clause;
+  if len = 0
+  then
+    Option.iter t.proof_log ~f:(fun proof_log ->
+      proof_log.last_conflict_clause_idx <- Some clause_idx);
   if len >= 2 then register_watchers_for_new_clause t ~literals ~clause_idx;
   if (not !satisfied) && !num_unassigned = 0 && len > 0
   then `Conflict clause_idx
@@ -576,11 +612,13 @@ let rec propagate t =
      | `Continue -> propagate t)
 ;;
 
-let simplify_learned_clause t ~learned_literals ~uip_literal ~seen =
+let simplify_learned_clause t ~learned_literals ~uip_literal ~seen ~minimize =
   (* just don't add redundant literals
 
      redundant if the learned clause is implied by the literals we've already
-     seen *)
+     seen. Minimization is skipped under proof production: a dropped literal's
+     reason clause is a resolution antecedent that [analyze_conflict] did not
+     record, so keeping the clause unminimized preserves the exact RUP hint set. *)
   let backjump_level = ref 0 in
   let new_learned_literals =
     Vec.Value.of_array_taking_ownership [| uip_literal |]
@@ -595,6 +633,8 @@ let simplify_learned_clause t ~learned_literals ~uip_literal ~seen =
       | None -> go (i + 1)
       | Some trail_entry ->
         let skip =
+          minimize
+          &&
           match trail_entry.#reason with
           | T #(Decision, ()) -> false
           | T #(Clause_idx, clause_idx) ->
@@ -630,6 +670,12 @@ let analyze_conflict t ~(failed_clause : Clause.t) ~failed_clause_idx =
   Stamp_set.reset seen;
   let learned_literals = t.analyze_conflict_scratch_literals in
   Vec.Value.clear learned_literals;
+  let record_antecedents = Option.is_some t.proof_log in
+  Vec.Value.clear t.analyze_conflict_antecedents;
+  let record_antecedent clause_idx =
+    if record_antecedents
+    then Vec.Value.push t.analyze_conflict_antecedents clause_idx
+  in
   let path_count = stack_ (ref 0) in
   let needs_rescale = ref false in
   let mark_literal literal =
@@ -637,6 +683,7 @@ let analyze_conflict t ~(failed_clause : Clause.t) ~failed_clause_idx =
   in
   needs_rescale
   := add_clause_activity t ~clause_idx:failed_clause_idx || !needs_rescale;
+  record_antecedent failed_clause_idx;
   Vec.Value.iter failed_clause.clause ~f:mark_literal;
   let failed_clause_with_assignments =
     clause_with_assignments t ~clause:failed_clause
@@ -676,7 +723,12 @@ let analyze_conflict t ~(failed_clause : Clause.t) ~failed_clause_idx =
     let uip_literal = -uip_trail_literal in
     Vec.Value.swap learned_literals 0 !best_idx;
     Vec.Value.set learned_literals 0 uip_literal;
-    simplify_learned_clause ~learned_literals ~uip_literal ~seen t
+    simplify_learned_clause
+      ~learned_literals
+      ~uip_literal
+      ~seen
+      ~minimize:(not record_antecedents)
+      t
   | false ->
     let found_uip = ref false in
     let uip_literal = ref 0 in
@@ -698,6 +750,7 @@ let analyze_conflict t ~(failed_clause : Clause.t) ~failed_clause_idx =
           | T #(Decision, ()) -> failwith "found decision before reaching UIP"
           | T #(Clause_idx, clause_idx) ->
             needs_rescale := add_clause_activity t ~clause_idx || !needs_rescale;
+            record_antecedent clause_idx;
             let clause = Vec.Value.get t.clauses clause_idx in
             if t.debug
             then
@@ -721,7 +774,12 @@ let analyze_conflict t ~(failed_clause : Clause.t) ~failed_clause_idx =
     else (
       Vec.Value.push learned_literals (Vec.Value.get learned_literals 0);
       Vec.Value.set learned_literals 0 uip_literal);
-    simplify_learned_clause ~learned_literals ~uip_literal ~seen t
+    simplify_learned_clause
+      ~learned_literals
+      ~uip_literal
+      ~seen
+      ~minimize:(not record_antecedents)
+      t
 ;;
 
 let rec luby_value i =
@@ -821,7 +879,13 @@ let backtrack t ~failed_clause ~failed_clause_idx =
   t.conflicts_since_restart <- t.conflicts_since_restart + 1;
   Vsids.decay t.vsids;
   remove_greater_than_decision_level t ~decision_level:backjump_level;
+  let learned_clause_idx = Vec.Value.length t.clauses in
   let result = add_clause t ~literals:learned_literals ~origin:Learned in
+  Option.iter t.proof_log ~f:(fun proof_log ->
+    Proof_log.record_learned
+      proof_log
+      ~clause_idx:learned_clause_idx
+      ~antecedents:(Vec.Value.to_list t.analyze_conflict_antecedents));
   (match result with
    | `Ok ->
      let clause = Vec.Value.get t.clauses (Vec.Value.length t.clauses - 1) in
@@ -882,7 +946,87 @@ let extract_unsat_core t failed_clause_idx : Sat_result.Core_clause.t list =
   Vec.Value.to_list result
 ;;
 
+module Refutation_clause = struct
+  module Reason = struct
+    type t =
+      | Input
+      | Theory
+      (* A learned clause, or the final empty clause: derivable by reverse unit
+         propagation over the earlier clauses. Hints are recomputed downstream. *)
+      | Rup
+  end
+
+  type t =
+    { clause_idx : int
+    ; literals : int array
+    ; reason : Reason.t
+    }
+end
+
+(* Collects the clauses transitively responsible for the last [Unsat] and
+   returns them ordered by clause index, followed by a final empty-clause step.
+   Ordering by clause index is a valid topological order: a learned clause is
+   created after -- so has a larger index than -- every clause it resolves, and
+   inputs/theory lemmas it depends on predate it too. Returns [None] when proofs
+   were not enabled or no conflict has occurred. The reason graph is intact here
+   because [pop_trail_after_conflict] preserves every assignment feeding the
+   conflict (see [conflict_keep_trail_len]). *)
+let last_refutation t : Refutation_clause.t list option =
+  let%bind.Option proof_log = t.proof_log in
+  let%map.Option failed_clause_idx = proof_log.last_conflict_clause_idx in
+  let reachable = Hash_set.create (module Core.Int) in
+  let reason_clause_idx literal =
+    let var_obj = literal_var t ~literal in
+    match%optional_u (var_obj.trail_entry : Trail_entry.Option_u.t) with
+    | None -> -1
+    | Some trail_entry ->
+      (match trail_entry.#reason with
+       | T #(Decision, ()) -> -1
+       | T #(Clause_idx, reason_clause_idx) -> reason_clause_idx)
+  in
+  (* Explore both a clause's recorded resolution antecedents (for learned
+     clauses) and its literals' trail reasons, so every clause needed to
+     re-derive the conflict is collected. *)
+  let rec explore clause_idx =
+    if not (Hash_set.mem reachable clause_idx)
+    then (
+      Hash_set.add reachable clause_idx;
+      let clause = Vec.Value.get t.clauses clause_idx in
+      (match Proof_log.antecedents proof_log ~clause_idx with
+       | Some antecedents -> List.iter antecedents ~f:explore
+       | None -> ());
+      Vec.Value.iter clause.clause ~f:(fun literal ->
+        let reason_idx = reason_clause_idx literal in
+        if reason_idx >= 0 then explore reason_idx))
+  in
+  explore failed_clause_idx;
+  let ordered =
+    Hash_set.to_list reachable
+    |> List.sort ~compare:Int.compare
+    |> List.map ~f:(fun clause_idx ->
+      let clause = Vec.Value.get t.clauses clause_idx in
+      let reason : Refutation_clause.Reason.t =
+        match clause.origin with
+        | User -> Input
+        | Theory -> Theory
+        | Learned -> Rup
+      in
+      { Refutation_clause.clause_idx
+      ; literals = Vec.Value.to_array clause.clause
+      ; reason
+      })
+  in
+  let failed_clause = Vec.Value.get t.clauses failed_clause_idx in
+  if Vec.Value.length failed_clause.clause = 0
+  then ordered
+  else
+    ordered
+    @ [ { Refutation_clause.clause_idx = -1; literals = [||]; reason = Rup } ]
+;;
+
 let%template unsat t failed_clause_idx : Sat_result.t @ m =
+  Option.iter t.proof_log ~f:(fun proof_log ->
+    proof_log.last_conflict_clause_idx <- Some failed_clause_idx);
   let core = extract_unsat_core t failed_clause_idx in
   Unsat { core } [@exclave_if_stack a]
 [@@alloc a @ m = (stack_local, heap_global)]
@@ -1081,6 +1225,7 @@ let create
   ?theory
   ?(random_state = Random.State.make [| 1; 2; 3 |])
   ?(debug = false)
+  ?(produce_proofs = false)
   ()
   =
   let _ = random_state in
@@ -1094,6 +1239,7 @@ let create
   ; stats = Stats.empty ()
   ; analyze_conflict_stamp_set = Stamp_set.create ()
   ; analyze_conflict_scratch_literals = Vec.Value.create ()
+  ; analyze_conflict_antecedents = Vec.Value.create ()
   ; debug
   ; vsids = Vsids.create ()
   ; luby_index = 1
@@ -1106,6 +1252,7 @@ let create
        | None -> Null
        | Some packed -> This packed)
   ; theory_reported_consistent = Option.is_none theory
+  ; proof_log = (if produce_proofs then Some (Proof_log.create ()) else None)
   }
 ;;
 
@@ -1119,6 +1266,8 @@ let add_clause t ~clause =
   with
   | `Ok -> `Ok
   | `Conflict failed_clause_idx ->
+    Option.iter t.proof_log ~f:(fun proof_log ->
+      proof_log.last_conflict_clause_idx <- Some failed_clause_idx);
     `Unsat (extract_unsat_core t failed_clause_idx)
 ;;
 

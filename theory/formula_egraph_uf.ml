@@ -95,6 +95,7 @@ type t =
   ; trail : Trail_entry.t list ref
   ; falsehoods : Atom.Hash_set.t
   ; current_decision_level : int ref
+  ; mutable last_certificate : Lemma_certificate.Euf.t option
   }
 
 let add_explanation_edge t ~x ~y ~justification ~decision_level =
@@ -177,6 +178,7 @@ let create ~atoms =
     ; trail = ref []
     ; falsehoods = Atom.Hash_set.create ()
     ; current_decision_level = ref 0
+    ; last_certificate = None
     }
   in
   List.iter atoms ~f:(fun atom -> register_atom t ~atom);
@@ -194,6 +196,11 @@ let canonical_term t ~term =
 
 let registered_terms t = Hashtbl.keys t.id_by_term
 let egraph t = t.egraph
+
+let classes t =
+  Hashtbl.keys t.id_by_term
+  |> List.map ~f:(fun term -> term, canonical_term t ~term)
+;;
 
 let assert_true_atom t ~decision_level ~(atom : Atom.t) =
   match Hashtbl.find_or_null t.atoms atom with
@@ -327,6 +334,157 @@ let rec explain t ~(id1 : G.Id.t) ~(id2 : G.Id.t) ~seen ~facts =
             explain t ~id1:a ~id2:b ~seen ~facts))
 ;;
 
+(* Like [explanation_path], but keeps each edge's endpoint ids so a structured
+   proof can name the terms an [Asserted]/[Congruence] step equates. *)
+let explanation_path_with_endpoints t ~from ~to_ =
+  match from = to_ with
+  | true -> []
+  | false ->
+    let visited = Int.Hash_set.create () in
+    let came_from : (int * Justification.t) Int.Table.t = Int.Table.create () in
+    let queue = Queue.create () in
+    Hash_set.add visited from;
+    Queue.enqueue queue from;
+    let rec bfs () =
+      match Queue.dequeue queue with
+      | None -> ()
+      | Some node ->
+        List.iter
+          (Explanation_forest.neighbors t.explanation_forest node)
+          ~f:(fun (neighbor, justification) ->
+            match Hash_set.mem visited neighbor with
+            | true -> ()
+            | false ->
+              Hash_set.add visited neighbor;
+              Hashtbl.set came_from ~key:neighbor ~data:(node, justification);
+              Queue.enqueue queue neighbor);
+        bfs ()
+    in
+    bfs ();
+    let rec build acc node =
+      match node = from with
+      | true -> acc
+      | false ->
+        let prev, justification = Hashtbl.find_exn came_from node in
+        build ((prev, node, justification) :: acc) prev
+    in
+    build [] to_
+;;
+
+module Certificate = struct
+  module Pc = Proof.Theory_certificate.Euf
+  module Lc = Lemma_certificate.Euf
+
+  (* [term_by_id] is keyed by [G.Id.t], but the explanation forest works in raw
+     [int] node ids; build the [int -> term] view on demand (proof production is
+     off the hot path). *)
+  let term_by_int t =
+    let table = Int.Table.create () in
+    Hashtbl.iteri t.term_by_id ~f:(fun ~key ~data ->
+      Hashtbl.set table ~key:(G.Id.to_int key) ~data);
+    table
+  ;;
+
+  let equality a b : Pc.Equality.t = { left = a; right = b }
+
+  (* Flattened proof that [term_of_id from = term_of_id to_]. The checker
+     ([check_equality_proof]) requires each congruence step's argument
+     equalities to be established by justifications appearing earlier in the
+     path, so a congruence edge's sub-proofs are spliced in before the
+     congruence justification itself. [seen] deduplicates argument-pair
+     sub-proofs, mirroring the flat [explain]. *)
+  let equality_proof t ~term_of_id ~from ~to_ : Lc.Equality_proof.t =
+    let seen = Id_pair.Hash_set.create () in
+    let justifications = ref [] in
+    let emit j = justifications := j :: !justifications in
+    let rec go ~from ~to_ =
+      let path = explanation_path_with_endpoints t ~from ~to_ in
+      List.iter path ~f:(fun (x, y, justification) ->
+        match justification with
+        | Justification.Asserted atom ->
+          emit
+            (Lc.Justification.Asserted { disequality = (atom :> Import.Atom.t) })
+        | Justification.Congruence _ ->
+          (* Derive the argument pairs from the edge's actual endpoint terms
+             (rather than the justification's stored winner/loser children),
+             since the path may traverse the edge in either direction. The
+             checker requires [argument_equalities] to be exactly
+             [zip (args left) (args right)]. *)
+          let left = term_of_id x in
+          let right = term_of_id y in
+          let left_args = Formula.args left in
+          let right_args = Formula.args right in
+          List.iter2_exn left_args right_args ~f:(fun a b ->
+            let ida = Hashtbl.find_exn t.id_by_term a in
+            let idb = Hashtbl.find_exn t.id_by_term b in
+            let key : Id_pair.t =
+              if G.Id.to_int ida <= G.Id.to_int idb then ida, idb else idb, ida
+            in
+            if not (Hash_set.mem seen key)
+            then (
+              Hash_set.add seen key;
+              go ~from:(G.Id.to_int ida) ~to_:(G.Id.to_int idb)));
+          let argument_equalities =
+            List.map2_exn left_args right_args ~f:equality
+          in
+          emit
+            (Lc.Justification.Congruence { left; right; argument_equalities }))
+    in
+    go ~from ~to_;
+    { conclusion = equality (term_of_id from) (term_of_id to_)
+    ; path = List.rev !justifications
+    }
+  ;;
+
+  let of_conflict t ~(main_atom_data : Atom_data.t) : Lc.t =
+    let terms = term_by_int t in
+    let term_of_id = Hashtbl.find_exn terms in
+    Equality
+      (equality_proof
+         t
+         ~term_of_id
+         ~from:(G.Id.to_int main_atom_data.id_a)
+         ~to_:(G.Id.to_int main_atom_data.id_b))
+  ;;
+
+  let of_disequality
+    t
+    ~(main_atom_data : Atom_data.t)
+    ~(false_data : Atom_data.t)
+    : Lc.t
+    =
+    let terms = term_by_int t in
+    let term_of_id = Hashtbl.find_exn terms in
+    let proof ~from ~to_ = equality_proof t ~term_of_id ~from ~to_ in
+    let ca = G.canonical t.egraph main_atom_data.id_a in
+    let cx = G.canonical t.egraph false_data.id_a in
+    let left_path, right_path =
+      match G.Id.equal ca cx with
+      | true ->
+        ( proof
+            ~from:(G.Id.to_int main_atom_data.id_a)
+            ~to_:(G.Id.to_int false_data.id_a)
+        , proof
+            ~from:(G.Id.to_int main_atom_data.id_b)
+            ~to_:(G.Id.to_int false_data.id_b) )
+      | false ->
+        ( proof
+            ~from:(G.Id.to_int main_atom_data.id_a)
+            ~to_:(G.Id.to_int false_data.id_b)
+        , proof
+            ~from:(G.Id.to_int main_atom_data.id_b)
+            ~to_:(G.Id.to_int false_data.id_a) )
+    in
+    let (`Eq (a, b)) = main_atom_data.atom in
+    Disequality
+      { conclusion = equality a b
+      ; asserted_disequality = (false_data.atom :> Import.Atom.t)
+      ; left_path
+      ; right_path
+      }
+  ;;
+end
+
 let build_lemma t ~(main_literal : Atom.t * bool) ~(facts : Atom.Hash_set.t) =
   let other_literals =
     Hash_set.to_list facts
@@ -374,12 +532,15 @@ let maybe_get_lemma t =
                 then Some (`Propagate_false (atom_data, false_atom))
                 else None))))
   in
+  t.last_certificate <- None;
   match find_conflict () with
   | Some atom ->
     let atom_data = Hashtbl.find_exn t.atoms atom in
     let facts = Atom.Hash_set.create () in
     let seen = Id_pair.Hash_set.create () in
     explain t ~id1:atom_data.id_a ~id2:atom_data.id_b ~seen ~facts;
+    t.last_certificate
+    <- Some (Certificate.of_conflict t ~main_atom_data:atom_data);
     build_lemma t ~main_literal:(atom_data.atom, true) ~facts
   | None ->
     (match find_propagation () with
@@ -388,6 +549,8 @@ let maybe_get_lemma t =
        let facts = Atom.Hash_set.create () in
        let seen = Id_pair.Hash_set.create () in
        explain t ~id1:atom_data.id_a ~id2:atom_data.id_b ~seen ~facts;
+       t.last_certificate
+       <- Some (Certificate.of_conflict t ~main_atom_data:atom_data);
        build_lemma t ~main_literal:(atom_data.atom, true) ~facts
      | Some (`Propagate_false (atom_data, false_atom)) ->
        let facts = Atom.Hash_set.create () in
@@ -403,5 +566,10 @@ let maybe_get_lemma t =
         | false ->
           explain t ~id1:atom_data.id_a ~id2:false_data.id_b ~seen ~facts;
           explain t ~id1:atom_data.id_b ~id2:false_data.id_a ~seen ~facts);
+       t.last_certificate
+       <- Some
+            (Certificate.of_disequality t ~main_atom_data:atom_data ~false_data);
        build_lemma t ~main_literal:(atom_data.atom, false) ~facts)
 ;;
+
+let last_certificate t = t.last_certificate

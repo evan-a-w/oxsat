@@ -49,17 +49,23 @@ val stats : t -> Feel.Stats.t
 
 (** Checks satisfiability of all formulas asserted in currently active scopes.
     [assumptions] are additional unit assumptions for this call only. On [Sat],
-    [tvar_assignments] gives, for each [Tvar.t] known to some theory, whatever
-    that theory determined about it in this model (type, numeric value, and/or
-    EUF equivalence-class representative). On [Unsat], [core] contains the
-    conflicting assertions and theory lemmas, with Tseitin variables resolved
-    back to their formulas. When proof production is enabled, [proof] contains a
-    checked proof if the contradiction is propositional over the theory atoms. *)
+    [model] carries the boolean value assigned to each theory atom together
+    with, for each [Tvar.t] known to some theory, whatever that theory
+    determined about it (type, numeric value, and/or EUF equivalence-class
+    representative) -- enough for {!check_model} to re-verify it. On [Unsat],
+    [core] contains the conflicting assertions and theory lemmas, with Tseitin
+    variables resolved back to their formulas. When proof production is enabled,
+    [proof] contains a checked refutation proof. *)
 val solve
   :  ?time_bound:Feel.Solver.time_bound
   -> ?assumptions:int array
   -> t
   -> Solver_result.t
+
+(** Independently verifies a [Sat] model against the currently asserted formulas
+    (see {!Model.check}). Errors if any asserted formula is not forced true by
+    the model or an atom value contradicts its numeric/type witness. *)
+val check_model : t -> Model.t -> unit Or_error.t
 
 val assert_type : t -> Tvar.t -> Type_expr.t -> unit
 val get_type : t -> Tvar.t -> Type_expr.t option

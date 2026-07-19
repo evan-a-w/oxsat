@@ -181,6 +181,11 @@ type t =
       (* Number of basic vars whose assignment currently violates their bounds.
          When zero, [solve] can return [Sat] immediately without scanning. *)
   ; mutable n_infeasible : int
+      (* Farkas certificate of the most recent [`Unsat] from [solve]:
+         [(constraint, positive coefficient)] whose combination is
+         contradictory. Only recorded to serve proof production; consumed via
+         [last_conflict_farkas]. *)
+  ; mutable last_conflict_farkas : (int * Q.t) list
   }
 [@@deriving sexp_of, fields]
 
@@ -365,6 +370,7 @@ let%expect_test "pivot example" =
     ; decision_var_ids = Vec.Value.create ()
     ; n_tombstoned = 0
     ; n_infeasible = 2
+    ; last_conflict_farkas = []
     }
   in
   print_s [%sexp (t : t)];
@@ -423,7 +429,7 @@ let%expect_test "pivot example" =
         (bound ((le Unbounded) (ge Unbounded))) (id 4) (where (Nonbasic 1)))))
      (new_assignments ()) (next_constraint_id 0) (live_constraints ())
      (var_for_constraint ()) (constraint_for_var ()) (decision_var_ids ())
-     (n_tombstoned 0) (n_infeasible 2))
+     (n_tombstoned 0) (n_infeasible 2) (last_conflict_farkas ()))
     |}];
   pivot t ~row:0 ~col:0 ~diff_to_col:Q_eps.zero;
   print_s [%sexp (t : t)];
@@ -485,7 +491,7 @@ let%expect_test "pivot example" =
        (1 ((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1)))))))
      (next_constraint_id 0) (live_constraints ()) (var_for_constraint ())
      (constraint_for_var ()) (decision_var_ids ()) (n_tombstoned 0)
-     (n_infeasible 2))
+     (n_infeasible 2) (last_conflict_farkas ()))
     |}]
 ;;
 
@@ -497,6 +503,22 @@ let get_conflicting_constraints t ~row ~basic_var =
     if not (Q.is_zero coeff)
     then conflicting := to_constraint_id nonbasic_var.Var.id :: !conflicting);
   !conflicting
+;;
+
+(* Farkas certificate for the conflict at [row]: a set of [(constraint, coeff)]
+   with strictly positive [coeff] such that the non-negative combination of the
+   constraints' violated/pinning bounds is contradictory. The basic var's own
+   bound gets coefficient 1; each nonbasic var in the row gets the absolute
+   value of its tableau coefficient. Signs are handled by the caller, which
+   knows each constraint's [`Le]/[`Gt] orientation. *)
+let get_conflict_farkas t ~row ~basic_var =
+  let to_constraint_id var_id = Hashtbl.find_exn t.constraint_for_var var_id in
+  let terms = ref [ to_constraint_id basic_var.Var.id, Q.one ] in
+  Vec.Value.iteri t.nonbasic_vars ~f:(fun col nonbasic_var ->
+    let coeff = get_tableau t ~row ~col in
+    if not (Q.is_zero coeff)
+    then terms := (to_constraint_id nonbasic_var.Var.id, Q.abs coeff) :: !terms);
+  !terms
 ;;
 
 let rec solve t =
@@ -525,7 +547,9 @@ let rec solve t =
              | true -> Some (col, nonbasic_var, need_apply)))
       in
       (match candidate_nonbasic with
-       | None -> `Unsat (get_conflicting_constraints t ~row ~basic_var)
+       | None ->
+         t.last_conflict_farkas <- get_conflict_farkas t ~row ~basic_var;
+         `Unsat (get_conflicting_constraints t ~row ~basic_var)
        | Some (col, nonbasic_var, need_apply) ->
          assign
            t
@@ -580,6 +604,7 @@ let%expect_test "example simplex" =
     ; decision_var_ids = Vec.Value.create ()
     ; n_tombstoned = 0
     ; n_infeasible = 2
+    ; last_conflict_farkas = []
     }
   in
   print_s [%sexp (t : t)];
@@ -638,7 +663,7 @@ let%expect_test "example simplex" =
         (id 4) (where (Basic 2)))))
      (new_assignments ()) (next_constraint_id 0) (live_constraints ())
      (var_for_constraint ()) (constraint_for_var ()) (decision_var_ids ())
-     (n_tombstoned 0) (n_infeasible 2))
+     (n_tombstoned 0) (n_infeasible 2) (last_conflict_farkas ()))
     |}];
   (match solve t with
    | `Sat -> print_endline "sat"
@@ -706,7 +731,7 @@ let%expect_test "example simplex" =
        (0 ((value ((num 1) (den 1))) (eps_coeff ((num 0) (den 1)))))))
      (next_constraint_id 0) (live_constraints ()) (var_for_constraint ())
      (constraint_for_var ()) (decision_var_ids ()) (n_tombstoned 0)
-     (n_infeasible 0))
+     (n_infeasible 0) (last_conflict_farkas ()))
     |}]
 ;;
 
@@ -741,8 +766,11 @@ let create () =
   ; decision_var_ids = Vec.Value.create ()
   ; n_tombstoned = 0
   ; n_infeasible = 0
+  ; last_conflict_farkas = []
   }
 ;;
+
+let last_conflict_farkas t = t.last_conflict_farkas
 
 let add_var t =
   let var = add_nonbasic t in

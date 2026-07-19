@@ -24,6 +24,23 @@ val undo : t -> to_decision_level_excl:int -> unit
     one [(atom, not value)] must hold. *)
 val maybe_get_lemma : t -> [ `Consistent | `Lemma of (Atom.t * bool) list ]
 
+(* Describes the most recent [`Lemma] from {!maybe_get_lemma} in enough detail
+   to reconstruct its proof certificate: for a linear-arithmetic conflict, the
+   Farkas coefficient on each cited atom; for an integer split, the branch
+   variable and its adjacent bounds. *)
+module Last_lemma : sig
+  type t =
+    | None
+    | Linear_arithmetic of (Atom.t * Q.t) list
+    | Integer_split of
+        { variable : Tvar.t
+        ; floor : Q.t
+        ; ceil : Q.t
+        }
+end
+
+val last_lemma : t -> Last_lemma.t
+
 (** The solved simplex assignment for [tvar], if it has been registered (i.e.
     appears in some asserted [`Le] atom). Only meaningful after
     [maybe_get_lemma] has returned [`Consistent]. *)

@@ -27,5 +27,10 @@ include Hashable.S with type t := t
 
 val split_function : t -> (Tvar.t * t list) option
 
+(** Widens a type expression to the [Formula.any] term the egraph and proof
+    checker reason over, mapping [Var] to [Type_var] so it stays distinct from a
+    UF-role [Var]. *)
+val to_formula : t -> Formula.any
+
 (** for vec *)
 val garbage_for_vec : t

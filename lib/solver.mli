@@ -21,8 +21,34 @@ val create
   :  ?theory:Theory.Packed.t
   -> ?random_state:Random.State.t
   -> ?debug:bool @ local
+  -> ?produce_proofs:bool
   -> unit
   -> t
+
+(** A clause participating in a resolution/RUP refutation of the most recent
+    [Unsat]. [clause_idx] is the clause's stable index (or [-1] for the
+    synthesized final empty clause). [Rup] marks a clause derived by reverse
+    unit propagation (a learned clause, or the final empty clause). Only
+    populated when [~produce_proofs:true] was passed to {!create}. *)
+module Refutation_clause : sig
+  module Reason : sig
+    type t =
+      | Input
+      | Theory
+      | Rup
+  end
+
+  type t =
+    { clause_idx : int
+    ; literals : int array
+    ; reason : Reason.t
+    }
+end
+
+(** The clauses transitively responsible for the last [Unsat], topologically
+    ordered (antecedents before dependents), ending in the empty clause. [None]
+    when proofs were not enabled or no [Unsat] has occurred. *)
+val last_refutation : t -> Refutation_clause.t list option
 
 val create_with_formula
   :  ?theory:Theory.Packed.t
