@@ -756,3 +756,173 @@ let%expect_test "propositional-over-atoms conflict" =
      (conclusion 6))
     |}]
 ;;
+
+(* A worked, human-followable multi-step refutation combining a boolean
+   case-split, Nelson-Oppen theory combination, and a Farkas argument.
+
+   Assertions: [x = y \/ x = z], [x <> y], [x >= 5], [z <= 3].
+
+   The disjunction can only hold via [x = z] (since [x <> y]); but [x = z]
+   forces [x - z <= 0], which with [x >= 5] and [z <= 3] is arithmetically
+   impossible. Reading the refutation's [steps] top to bottom:
+
+   - step 0: the Tseitin definition of the [Or] (extension variable 0).
+   - steps 1-2: the disjunction holds (ext 0 true) and [x <> y].
+     Unit-propagation over these forces the [x = z] disjunct.
+   - steps 3-4: the input bounds [x >= 5] and [z <= 3], as [`Le] atoms.
+   - step 5: a [Bare_var_eq] lemma -- [x = z] implies [x - z <= 0].
+   - step 6: a [Linear_arithmetic] (Farkas) lemma -- the non-negative
+     combination [1*(x>=5) + 1*(x-z<=0) + 1*(z<=3)] yields [5 <= 3], false.
+   - step 7: the empty clause by reverse unit propagation over the above. *)
+let%expect_test "case-split with Nelson-Oppen + Farkas reasoning" =
+  let solver = Solver.create ~config () in
+  assert_ok solver (Or [ eq x y; eq x z ]);
+  assert_ok solver (neq x y);
+  assert_ok solver (Formula.La_compare (x, `Ge, La_const (Q.of_int 5)));
+  assert_ok solver (Formula.La_compare (z, `Le, La_const (Q.of_int 3)));
+  check_proof (Solver.solve solver);
+  [%expect {|
+    ((assumptions
+      (((name ()) (formula (Not (Eq Bool Int))))
+       ((name ()) (formula (Not (Eq Bool Float))))
+       ((name ()) (formula (Not (Eq Int Float))))
+       ((name ()) (formula (Or ((Eq (Var x) (Var y)) (Eq (Var x) (Var z))))))
+       ((name ()) (formula (Not (Eq (Var x) (Var y)))))
+       ((name ()) (formula (La_compare (Var x) Ge (La_const ((num 5) (den 1))))))
+       ((name ()) (formula (La_compare (Var z) Le (La_const ((num 3) (den 1))))))))
+     (steps
+      (((name ()) (conclusion (Not (Eq Bool Int)))
+        (justification (Assumption 0)))
+       ((name ()) (conclusion (Not (Eq Bool Float)))
+        (justification (Assumption 1)))
+       ((name ()) (conclusion (Not (Eq Int Float)))
+        (justification (Assumption 2)))
+       ((name ()) (conclusion (Or ((Eq (Var x) (Var y)) (Eq (Var x) (Var z)))))
+        (justification (Assumption 3)))
+       ((name ()) (conclusion (Not (Eq (Var x) (Var y))))
+        (justification (Assumption 4)))
+       ((name ())
+        (conclusion (La_compare (Var x) Ge (La_const ((num 5) (den 1)))))
+        (justification (Assumption 5)))
+       ((name ())
+        (conclusion (La_compare (Var z) Le (La_const ((num 3) (den 1)))))
+        (justification (Assumption 6)))
+       ((name ()) (conclusion False)
+        (justification
+         (By_refutation (premises (0 1 2 3 4 5 6))
+          (refutation
+           ((inputs
+             ((Not (Eq Bool Int)) (Not (Eq Bool Float)) (Not (Eq Int Float))
+              (Or ((Eq (Var x) (Var y)) (Eq (Var x) (Var z))))
+              (Not (Eq (Var x) (Var y)))
+              (La_compare (Var x) Ge (La_const ((num 5) (den 1))))
+              (La_compare (Var z) Le (La_const ((num 3) (den 1)))) (Not False)))
+            (extensions
+             (((id 0)
+               (definition
+                (Or
+                 ((Atom (Theory (Eq ((Var x) (Var y)))))
+                  (Atom (Theory (Eq ((Var x) (Var z)))))))))))
+            (steps
+             (((clause
+                (((atom (Theory (Eq ((Var x) (Var y))))) (positive true))
+                 ((atom (Theory (Eq ((Var x) (Var z))))) (positive true))
+                 ((atom (Extension 0)) (positive false))))
+               (reason (Extension_definition 0)))
+              ((clause (((atom (Extension 0)) (positive true))))
+               (reason
+                (Input_clause
+                 ((input 3) (literal ((atom (Extension 0)) (positive true)))))))
+              ((clause
+                (((atom (Theory (Eq ((Var x) (Var y))))) (positive false))))
+               (reason
+                (Input_clause
+                 ((input 4)
+                  (literal
+                   ((atom (Theory (Eq ((Var x) (Var y))))) (positive false)))))))
+              ((clause
+                (((atom
+                   (Theory
+                    (Le
+                     (((coeffs ((x ((num -1) (den 1)))))
+                       (const ((num 0) (den 1))))
+                      ((num -5) (den 1))))))
+                  (positive true))))
+               (reason
+                (Input_clause
+                 ((input 5)
+                  (literal
+                   ((atom
+                     (Theory
+                      (Le
+                       (((coeffs ((x ((num -1) (den 1)))))
+                         (const ((num 0) (den 1))))
+                        ((num -5) (den 1))))))
+                    (positive true)))))))
+              ((clause
+                (((atom
+                   (Theory
+                    (Le
+                     (((coeffs ((z ((num 1) (den 1)))))
+                       (const ((num 0) (den 1))))
+                      ((num 3) (den 1))))))
+                  (positive true))))
+               (reason
+                (Input_clause
+                 ((input 6)
+                  (literal
+                   ((atom
+                     (Theory
+                      (Le
+                       (((coeffs ((z ((num 1) (den 1)))))
+                         (const ((num 0) (den 1))))
+                        ((num 3) (den 1))))))
+                    (positive true)))))))
+              ((clause
+                (((atom (Theory (Eq ((Var x) (Var z))))) (positive false))
+                 ((atom
+                   (Theory
+                    (Le
+                     (((coeffs ((x ((num 1) (den 1))) (z ((num -1) (den 1)))))
+                       (const ((num 0) (den 1))))
+                      ((num 0) (den 1))))))
+                  (positive true))))
+               (reason
+                (Theory_lemma
+                 (Bare_var_eq
+                  (Equality_implies_le (left x) (right z)
+                   (direction Left_le_right))))))
+              ((clause
+                (((atom
+                   (Theory
+                    (Le
+                     (((coeffs ((x ((num -1) (den 1)))))
+                       (const ((num 0) (den 1))))
+                      ((num -5) (den 1))))))
+                  (positive false))
+                 ((atom
+                   (Theory
+                    (Le
+                     (((coeffs ((x ((num 1) (den 1))) (z ((num -1) (den 1)))))
+                       (const ((num 0) (den 1))))
+                      ((num 0) (den 1))))))
+                  (positive false))
+                 ((atom
+                   (Theory
+                    (Le
+                     (((coeffs ((z ((num 1) (den 1)))))
+                       (const ((num 0) (den 1))))
+                      ((num 3) (den 1))))))
+                  (positive false))))
+               (reason
+                (Theory_lemma
+                 (Linear_arithmetic
+                  ((combination
+                    (((clause_literal 1) (coefficient ((num 1) (den 1))))
+                     ((clause_literal 0) (coefficient ((num 1) (den 1))))
+                     ((clause_literal 2) (coefficient ((num 1) (den 1)))))))))))
+              ((clause ()) (reason (Rup (hints (1 2 3 4 6 0 5)))))))
+            (contradiction 7))))))))
+     (conclusion 7))
+    |}]
+;;
