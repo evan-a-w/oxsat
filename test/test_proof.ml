@@ -156,6 +156,111 @@ let%expect_test "the independent checker accepts a manual by-refutation step" =
   [%expect {| ("rejects incomplete RUP" (rejected true)) |}]
 ;;
 
+let%expect_test "RUP propagates through input and extension clauses" =
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let b : Formula.any = Var (Tvar.of_string "b") in
+  let c : Formula.any = Var (Tvar.of_string "c") in
+  let d : Formula.any = Var (Tvar.of_string "d") in
+  let p : Formula.any = Eq (a, b) in
+  let q : Formula.any = Eq (c, d) in
+  let p_atom = Proof.Atom.Theory (`Eq (a, b)) in
+  let q_atom = Proof.Atom.Theory (`Eq (c, d)) in
+  let literal atom ~positive = Proof.Literal.create ~atom ~positive in
+  let p_positive = literal p_atom ~positive:true in
+  let p_negative = literal p_atom ~positive:false in
+  let q_positive = literal q_atom ~positive:true in
+  let q_negative = literal q_atom ~positive:false in
+  let extension_id i = Proof.Id.Extension.of_int_exn i in
+  let extension_literal i ~positive =
+    literal (Proof.Atom.Extension (extension_id i)) ~positive
+  in
+  let extension i definition : Proof.Extension.t =
+    { id = extension_id i; definition }
+  in
+  let input_step input =
+    let literal = extension_literal input ~positive:true in
+    ({ clause = clause_exn [ literal ]
+     ; reason = Input_clause { input; literal }
+     }
+     : Proof.Refutation.Step.t)
+  in
+  let extension_step id literals : Proof.Refutation.Step.t =
+    { clause = clause_exn literals
+    ; reason = Extension_definition (extension_id id)
+    }
+  in
+  let step_id i = Proof.Id.Refutation_step.of_int_exn i in
+  let steps : Proof.Refutation.Step.t array =
+    [| input_step 0
+     ; extension_step 0 [ extension_literal 0 ~positive:false; p_positive ]
+     ; input_step 1
+     ; extension_step
+         1
+         [ extension_literal 1 ~positive:false; p_negative; q_positive ]
+     ; input_step 2
+     ; extension_step 2 [ extension_literal 2 ~positive:false; q_negative ]
+     ; { clause = Proof.Clause.empty
+       ; reason =
+           Rup
+             { hints =
+                 [| step_id 0
+                  ; step_id 1
+                  ; step_id 2
+                  ; step_id 3
+                  ; step_id 4
+                  ; step_id 5
+                 |]
+             }
+       }
+    |]
+  in
+  let refutation : Proof.Refutation.t =
+    { inputs = [| p; Or [ Not p; q ]; Not q |]
+    ; extensions =
+        [| extension 0 (Atom p_atom)
+         ; extension 1 (Or [ Not (Atom p_atom); Atom q_atom ])
+         ; extension 2 (Not (Atom q_atom))
+        |]
+    ; steps
+    ; contradiction = step_id 6
+    }
+  in
+  let badly_ordered_hints =
+    { refutation with
+      steps =
+        Array.mapi refutation.steps ~f:(fun index step ->
+          if index = 6
+          then
+            { step with
+              reason =
+                Rup
+                  { hints =
+                      [| step_id 0
+                       ; step_id 1
+                       ; step_id 3
+                       ; step_id 2
+                       ; step_id 4
+                       ; step_id 5
+                      |]
+                  }
+            }
+          else step)
+    }
+  in
+  print_s
+    [%message
+      "checks"
+        ~propagation_chain:
+          (Or_error.is_ok (Proof.Refutation.check refutation) : bool)
+        ~bad_hint_order_rejected:
+          (Or_error.is_error (Proof.Refutation.check badly_ordered_hints)
+           : bool)];
+  [%expect
+    {|
+    (checks (propagation_chain true) (bad_hint_order_rejected true))
+    |}]
+;;
+
 let%expect_test "kernel equality transitivity is checked" =
   let a : Formula.any = Var (Tvar.of_string "a") in
   let b : Formula.any = Var (Tvar.of_string "b") in
