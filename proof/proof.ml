@@ -274,3 +274,55 @@ let check proof =
 ;;
 
 let check_theory_certificate = Proof_theory_certificate_check.check
+
+let justification_to_string (j : Justification.t) =
+  let refs prefix ids =
+    Array.to_list ids |> List.map ~f:(fun p -> prefix ^ Int.to_string p)
+  in
+  match j with
+  | Assumption id -> sprintf "assumption a%d" (Id.Assumption.to_int id)
+  | Kernel { rule; premises } ->
+    sprintf
+      "%s over [%s]"
+      (Sexp.to_string (Kernel_rule.sexp_of_t rule))
+      (String.concat
+         ~sep:", "
+         (refs "s" (Array.map premises ~f:Id.Step.to_int)))
+  | By_refutation { premises; refutation = _ } ->
+    sprintf
+      "refutation of [%s]"
+      (String.concat
+         ~sep:", "
+         (refs "s" (Array.map premises ~f:Id.Step.to_int)))
+;;
+
+let to_string_hum (proof : t) =
+  let out = Proof_to_string.Buffer_out.create () in
+  let open Proof_to_string.Buffer_out in
+  line out "Assumptions:";
+  indented out ~f:(fun () ->
+    Array.iteri proof.assumptions ~f:(fun index assumption ->
+      line
+        out
+        (sprintf
+           "a%d: %s"
+           index
+           (Proof_to_string.formula_to_string assumption.Assumption.formula))));
+  line out "Steps:";
+  indented out ~f:(fun () ->
+    Array.iteri proof.steps ~f:(fun index step ->
+      line
+        out
+        (sprintf
+           "s%d: %s   [%s]"
+           index
+           (Proof_to_string.formula_to_string step.Step.conclusion)
+           (justification_to_string step.justification));
+      match step.justification with
+      | By_refutation { refutation; _ } ->
+        indented out ~f:(fun () ->
+          Proof_to_string.render_refutation out refutation)
+      | Assumption _ | Kernel _ -> ()));
+  line out (sprintf "Conclusion: s%d" (Id.Step.to_int proof.conclusion));
+  contents out
+;;

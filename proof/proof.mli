@@ -79,6 +79,12 @@ type t =
 
 val check : t -> unit Or_error.t
 
+(** Renders the proof as an indented, human-readable listing: assumptions and
+    steps in mathematical notation, with each refutation's extension
+    definitions, clauses, and per-step reasons (theory certificates spelled
+    out). For reading and expect tests, not machine consumption. *)
+val to_string_hum : t -> string
+
 val check_theory_certificate
   :  clause:Clause.t
   -> Theory_certificate.t
