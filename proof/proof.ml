@@ -321,7 +321,10 @@ let to_string_hum (proof : t) =
       match step.justification with
       | By_refutation { refutation; _ } ->
         indented out ~f:(fun () ->
-          Proof_to_string.render_refutation out refutation)
+          Proof_to_string.render_refutation
+            out
+            ~num_assumptions:(Array.length proof.assumptions)
+            refutation)
       | Assumption _ | Kernel _ -> ()));
   line out (sprintf "Conclusion: s%d" (Id.Step.to_int proof.conclusion));
   contents out
