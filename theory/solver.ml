@@ -524,6 +524,8 @@ let solve ?time_bound ?(assumptions = [||]) t : Solver_result.t =
     let model =
       { Model.atom_values = atom_values t ~assignments
       ; tvar_assignments = tvar_assignments t
+      ; euf_classes =
+          Formula_egraph_uf.classes t.egraph |> Formula.Any.Map.of_alist_exn
       }
     in
     Sat { model }

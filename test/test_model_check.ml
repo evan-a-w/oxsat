@@ -47,6 +47,16 @@ let%expect_test "EUF model checks" =
   [%expect {| (Ok ()) |}]
 ;;
 
+let%expect_test "EUF disequality and congruence model checks" =
+  let solver = Solver.create () in
+  assert_ok solver (eq x y);
+  (* x = y forces f(x) = f(y) by congruence; z is kept distinct. *)
+  assert_ok solver (neq (f x) z);
+  assert_ok solver (eq (f x) (f y));
+  check solver;
+  [%expect {| (Ok ()) |}]
+;;
+
 let%expect_test "linear-arithmetic model checks" =
   let solver = Solver.create () in
   assert_ok solver (Formula.La_compare (x, `Ge, La_const (Q.of_int 3)));
@@ -133,5 +143,60 @@ let%expect_test "numeric witness inconsistent with atom value is rejected" =
      ("linear atom value disagrees with its model truth value"
       (expression ((coeffs ((x ((num -1) (den 1))))) (const ((num 0) (den 1)))))
       (bound ((num -3) (den 1))) (expected true) (holds false)))
+    |}]
+;;
+
+(* Splitting the EUF classes (so a true equality's sides land in different
+   classes) is caught by the per-atom EUF check. *)
+let%expect_test "EUF class map inconsistent with a true equality is rejected" =
+  let solver = Solver.create () in
+  assert_ok solver (eq x y);
+  (match Solver.solve solver with
+   | Unsat _ -> print_endline "unexpectedly unsat"
+   | Sat { model } ->
+     (* Make every term its own representative, breaking x = y. *)
+     let corrupted =
+       { model with
+         Model.euf_classes =
+           Map.mapi model.euf_classes ~f:(fun ~key ~data:_ -> key)
+       }
+     in
+     print_s [%sexp (Solver.check_model solver corrupted : unit Or_error.t)]);
+  [%expect
+    {|
+    (Error
+     ("EUF equality value disagrees with the equivalence classes" (a (Var x))
+      (b (Var y)) (expected true) (classes_agree false)))
+    |}]
+;;
+
+(* A satisfiable type disequality between differently-typed variables checks;
+   corrupting a witness so the two share a type makes the checker reject it. *)
+let%expect_test "type disequality checks; corrupted type witness is rejected" =
+  let solver = Solver.create () in
+  Solver.assert_type solver xv (Base Int);
+  Solver.assert_type solver yv (Base Float);
+  assert_ok solver (neq (Type_var xv) (Type_var yv));
+  (match Solver.solve solver with
+   | Unsat _ -> print_endline "unexpectedly unsat"
+   | Sat { model } ->
+     print_s [%sexp (Solver.check_model solver model : unit Or_error.t)];
+     (* Force y's type to Int too: now the false type equality x <> y is
+        contradicted by both being Int. *)
+     let corrupted =
+       { model with
+         Model.tvar_assignments =
+           Map.update model.tvar_assignments yv ~f:(function
+             | None -> assert false
+             | Some a -> { a with type_ = Some (Base Int) })
+       }
+     in
+     print_s [%sexp (Solver.check_model solver corrupted : unit Or_error.t)]);
+  [%expect
+    {|
+    (Ok ())
+    (Error
+     ("type equality value disagrees with the assigned ground types"
+      (ta (Base Int)) (tb (Base Int)) (expected false) (types_equal true)))
     |}]
 ;;

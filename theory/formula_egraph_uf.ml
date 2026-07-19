@@ -197,6 +197,11 @@ let canonical_term t ~term =
 let registered_terms t = Hashtbl.keys t.id_by_term
 let egraph t = t.egraph
 
+let classes t =
+  Hashtbl.keys t.id_by_term
+  |> List.map ~f:(fun term -> term, canonical_term t ~term)
+;;
+
 let assert_true_atom t ~decision_level ~(atom : Atom.t) =
   match Hashtbl.find_or_null t.atoms atom with
   | Null -> ()

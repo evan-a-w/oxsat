@@ -10,6 +10,10 @@ open! Import
 type t =
   { atom_values : bool Atom.Map.t
   ; tvar_assignments : Tvar_assignment.t Tvar.Map.t
+  ; (* Every EUF-registered term mapped to its equivalence-class representative,
+       so equalities, disequalities, and congruence are all decidable from the
+       model alone. *)
+    euf_classes : Formula.any Formula.Any.Map.t
   }
 [@@deriving sexp_of]
 
@@ -97,37 +101,113 @@ let check_linear_atom t ~expression ~bound ~expected =
             (holds : bool)]
 ;;
 
+(* A type expression with no variables left to instantiate: fully determined. *)
+let rec is_ground (type_expr : Type_expr.t) =
+  match type_expr with
+  | Var _ | Type_of _ -> false
+  | Base _ | Type -> true
+  | App (_, args) -> List.for_all args ~f:is_ground
+  | Function_type (a, b) -> is_ground a && is_ground b
+;;
+
+(* Resolves a type expression to its assigned type when it is a variable with a
+   known type; concrete constructors are their own witness. *)
+let resolved_type t (type_expr : Type_expr.t) =
+  match type_expr with
+  | Var v -> Option.bind (Map.find t.tvar_assignments v) ~f:(fun a -> a.type_)
+  | ty -> Some ty
+;;
+
+(* A type equality [a = b] is checkable when both sides resolve to *ground*
+   witness types: [true] requires them equal, [false] requires them distinct. If
+   a side is unconstrained (no witness / non-ground), the atom's truth is a free
+   choice and not a model error. *)
 let check_type_atom t ~a ~b ~expected =
-  (* Only a true type equality between two ground-typed variables is checkable
-     from [tvar_assignments]: their assigned types must then be equal. *)
-  match a, b, expected with
-  | Type_expr.Var va, Type_expr.Var vb, true ->
-    let type_of v =
-      Option.bind (Map.find t.tvar_assignments v) ~f:(fun a -> a.type_)
-    in
-    (match type_of va, type_of vb with
-     | Some ta, Some tb when not ([%compare.equal: Type_expr.t] ta tb) ->
-       error
-         [%message
-           "true type equality relates variables of different types"
-             (va : Tvar.t)
-             (ta : Type_expr.t)
-             (vb : Tvar.t)
-             (tb : Type_expr.t)]
-     | _ -> Ok ())
+  match resolved_type t a, resolved_type t b with
+  | Some ta, Some tb when is_ground ta && is_ground tb ->
+    let equal = [%compare.equal: Type_expr.t] ta tb in
+    if Bool.equal equal expected
+    then Ok ()
+    else
+      error
+        [%message
+          "type equality value disagrees with the assigned ground types"
+            (ta : Type_expr.t)
+            (tb : Type_expr.t)
+            (expected : bool)
+            ~types_equal:(equal : bool)]
   | _ -> Ok ()
 ;;
 
+let repr t term = Map.find t.euf_classes term
+
+(* An EUF equality atom is checkable iff both sides are registered terms with a
+   known representative; then [true] requires equal reprs and [false] distinct
+   reprs. *)
+let check_euf_atom t ~a ~b ~expected =
+  match repr t a, repr t b with
+  | Some ra, Some rb ->
+    let equal = Formula.compare_any ra rb = 0 in
+    if Bool.equal equal expected
+    then Ok ()
+    else
+      error
+        [%message
+          "EUF equality value disagrees with the equivalence classes"
+            (a : Formula.any)
+            (b : Formula.any)
+            (expected : bool)
+            ~classes_agree:(equal : bool)]
+  | _ ->
+    error
+      [%message
+        "EUF equality references a term with no class representative"
+          (a : Formula.any)
+          (b : Formula.any)]
+;;
+
 (* Per-atom theory consistency: each assigned atom's truth value must agree with
-   the numeric/type witnesses in [tvar_assignments]. EUF equalities are checked
-   at the boolean level (via [eval]); a deeper congruence check would require
-   re-running the theory. *)
+   the numeric/type/EUF witnesses. *)
 let check_atom_consistency t ~atom ~value =
   match (atom : Atom.t) with
   | `Le (expression, bound) ->
     check_linear_atom t ~expression ~bound ~expected:value
   | `Type_eq (a, b) -> check_type_atom t ~a ~b ~expected:value
-  | `Eq _ -> Ok ()
+  | `Eq (a, b) -> check_euf_atom t ~a ~b ~expected:value
+;;
+
+(* Congruence: two registered terms with the same operator and pairwise
+   class-equal arguments must be in the same class. Checked over all registered
+   terms so the equivalence classes constitute a genuine congruence, not just an
+   arbitrary partition consistent with the asserted (dis)equalities. *)
+let check_congruence t =
+  let terms = Map.keys t.euf_classes in
+  let args_class_equal xs ys =
+    match
+      List.for_all2 xs ys ~f:(fun x y ->
+        match repr t x, repr t y with
+        | Some rx, Some ry -> Formula.compare_any rx ry = 0
+        | _ -> false)
+    with
+    | Ok all_equal -> all_equal
+    | Unequal_lengths -> false
+  in
+  List.fold_result terms ~init:() ~f:(fun () left ->
+    List.fold_result terms ~init:() ~f:(fun () right ->
+      if Formula.Op.compare (Formula.op left) (Formula.op right) = 0
+         && args_class_equal (Formula.args left) (Formula.args right)
+         && not
+              (Formula.compare_any
+                 (Map.find_exn t.euf_classes left)
+                 (Map.find_exn t.euf_classes right)
+               = 0)
+      then
+        error
+          [%message
+            "congruent terms are in different classes"
+              (left : Formula.any)
+              (right : Formula.any)]
+      else Ok ()))
 ;;
 
 let check t ~asserted_formulas =
@@ -148,7 +228,10 @@ let check t ~asserted_formulas =
             "asserted formula is not determined true by the model's atom values"
               (formula : Formula.any)])
   in
-  Map.fold t.atom_values ~init:(Ok ()) ~f:(fun ~key:atom ~data:value acc ->
-    let%bind.Or_error () = acc in
-    check_atom_consistency t ~atom ~value)
+  let%bind.Or_error () =
+    Map.fold t.atom_values ~init:(Ok ()) ~f:(fun ~key:atom ~data:value acc ->
+      let%bind.Or_error () = acc in
+      check_atom_consistency t ~atom ~value)
+  in
+  check_congruence t
 ;;

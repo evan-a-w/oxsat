@@ -50,6 +50,11 @@ val canonical_term : t -> term:Formula.any -> Formula.any
     subterms. *)
 val registered_terms : t -> Formula.any list
 
+(** Every registered term paired with the canonical representative of its
+    equivalence class, so a model checker can decide any equality/disequality
+    over registered terms without re-running congruence closure. *)
+val classes : t -> (Formula.any * Formula.any) list
+
 (** The underlying e-graph, for e-matching (see {!Formula_egraph.Pattern}) or
     other queries over the shape of registered terms — e.g. for instantiating
     axioms whose trigger pattern currently exists in the graph. *)
