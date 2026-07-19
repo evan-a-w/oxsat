@@ -18,6 +18,22 @@ let lemma_to_clause literals ~sat_var_for_atom =
   `Lemma { Modes.Global.global = clause }
 ;;
 
+(* Key for the table of lemma certificates: the lemma clause's atoms, normalized
+   and sorted so a clause looked up during proof assembly matches the lemma that
+   produced it regardless of literal order or polarity. *)
+module Atoms_key = struct
+  module T = struct
+    type t = Atom.t list [@@deriving compare, hash, sexp]
+  end
+
+  include T
+  include functor Hashable.Make
+
+  let of_atoms atoms =
+    List.map atoms ~f:Atom.normalize |> List.sort ~compare:Atom.compare
+  ;;
+end
+
 module Combined_theory = struct
   type t =
     { egraph : Formula_egraph_uf.t
@@ -26,6 +42,8 @@ module Combined_theory = struct
     ; encoding : Encoding.t
     ; bare_var_eq : Bare_var_eq.t
     ; shared_tvars : Tvar.Hash_set.t
+    ; produce_proofs : bool
+    ; certificate_by_atoms : Lemma_certificate.t Atoms_key.Table.t
     }
 
   (* Converts a lemma atom coming back from [Formula_egraph_uf] (a bare
@@ -118,14 +136,105 @@ module Combined_theory = struct
           Bare_var_eq.register_candidate t.bare_var_eq first tvar))
   ;;
 
+  (* Reconstruct the [Type_theory] certificate from the lemma clause, which is
+     [(Type_eq (Var v, type1), false); (Type_eq (Var v, type2), false)] with
+     [type1]/[type2] structurally incompatible. *)
+  let type_theory_certificate (literals : (Tvar_types.Atom.t * bool) list)
+    : Lemma_certificate.t
+    =
+    match literals with
+    | [ ((`Type_eq (_, type1) as a1), _); ((`Type_eq (_, type2) as a2), _) ] ->
+      Type_theory
+        { left = type1
+        ; right = type2
+        ; premises = [ (a1 :> Atom.t); (a2 :> Atom.t) ]
+        }
+    | _ -> raise_s [%message "unexpected type-theory lemma shape"]
+  ;;
+
+  let bb_certificate t : Lemma_certificate.t =
+    match Branch_and_bound.last_lemma t.bb with
+    | Linear_arithmetic combination ->
+      Linear_arithmetic
+        { combination =
+            List.map combination ~f:(fun (atom, coeff) ->
+              (atom :> Atom.t), coeff)
+        }
+    | Integer_split { variable; floor; ceil } ->
+      Integer_split { variable; floor; ceil }
+    | None -> raise_s [%message "branch-and-bound produced no lemma to explain"]
+  ;;
+
+  (* Reconstruct the [Bare_var_eq] certificate from the lemma clause, whose
+     shape identifies which cross-theory consequence fired (see
+     [check_bare_var_eq]). *)
+  let bare_var_eq_certificate (literals : (Atom.t * bool) list)
+    : Lemma_certificate.t
+    =
+    let var_of_uf = function
+      | `Eq (Formula.Var a, Formula.Var b) -> Some (a, b)
+      | _ -> None
+    in
+    match literals with
+    | [ (`Type_eq (Type_expr.Var a, Type_expr.Var b), true); (uf, false) ]
+      when Option.is_some (var_of_uf uf) ->
+      ignore (var_of_uf uf);
+      Bare_var_eq (Equality_implies_type_equality (a, b))
+    | [ (`Le (le, bound), true); (uf, false) ]
+      when Option.is_some (var_of_uf uf) ->
+      let left, right = Option.value_exn (var_of_uf uf) in
+      let forward = Linear_expr.(var left - var right) in
+      let direction : Proof.Theory_certificate.Bare_var_eq.Le_direction.t =
+        if [%compare.equal: Linear_expr.t * Q.t] (le, bound) (forward, Q.zero)
+        then Left_le_right
+        else Right_le_left
+      in
+      Bare_var_eq (Equality_implies_le { left; right; direction })
+    | (uf, true) :: rest when Option.is_some (var_of_uf uf) ->
+      ignore rest;
+      let a, b = Option.value_exn (var_of_uf uf) in
+      Bare_var_eq (Numeric_coincidence_implies_equality (a, b))
+    | _ -> raise_s [%message "unexpected bare-var-eq lemma shape"]
+  ;;
+
+  let record_certificate t ~atoms ~certificate =
+    if t.produce_proofs
+    then
+      Hashtbl.set
+        t.certificate_by_atoms
+        ~key:(Atoms_key.of_atoms atoms)
+        ~data:certificate
+  ;;
+
   let maybe_get_lemma t = exclave_
     match Formula_egraph_uf.maybe_get_lemma t.egraph [@nontail] with
     | `Lemma literals ->
+      let atoms =
+        List.map literals ~f:(fun (atom, _) -> egraph_atom_to_atom atom)
+      in
+      if t.produce_proofs
+      then (
+        match Formula_egraph_uf.last_certificate t.egraph with
+        | Some euf ->
+          (* The certificate's atoms are the egraph's bare [`Eq] over the
+             (possibly type-role) endpoints; convert them to the same [Atom.t]
+             form the clause literals use so index resolution finds them. *)
+          let euf =
+            Lemma_certificate.Euf_map.map_atoms euf ~f:(function
+              | `Eq (a, b) -> egraph_atom_to_atom (`Eq (a, b))
+              | (`Le _ | `Type_eq _) as atom -> atom)
+          in
+          record_certificate t ~atoms ~certificate:(Euf euf)
+        | None -> raise_s [%message "egraph lemma without a certificate"]);
       lemma_to_clause literals ~sat_var_for_atom:(fun atom ->
         Encoding.sat_var_for_atom t.encoding (egraph_atom_to_atom atom))
     | `Consistent ->
       (match Tvar_types.maybe_get_lemma t.tt [@nontail] with
        | `Lemma literals ->
+         record_certificate
+           t
+           ~atoms:(List.map literals ~f:(fun (atom, _) -> (atom :> Atom.t)))
+           ~certificate:(type_theory_certificate literals);
          lemma_to_clause
            literals
            ~sat_var_for_atom:(fun (`Type_eq (a, b) : Tvar_types.Atom.t) ->
@@ -133,6 +242,10 @@ module Combined_theory = struct
        | `Consistent ->
          (match Branch_and_bound.maybe_get_lemma t.bb [@nontail] with
           | `Lemma literals ->
+            record_certificate
+              t
+              ~atoms:(List.map literals ~f:(fun (atom, _) -> (atom :> Atom.t)))
+              ~certificate:(bb_certificate t);
             lemma_to_clause
               literals
               ~sat_var_for_atom:(fun (atom : Branch_and_bound.Atom.t) ->
@@ -151,8 +264,16 @@ module Combined_theory = struct
              with
              | `Consistent -> `Consistent
              | `Lemma literals ->
+               record_certificate
+                 t
+                 ~atoms:(List.map literals ~f:fst)
+                 ~certificate:(bare_var_eq_certificate literals);
                lemma_to_clause literals ~sat_var_for_atom:(fun atom ->
                  Encoding.sat_var_for_atom t.encoding atom))))
+  ;;
+
+  let certificate_for_atoms t atoms =
+    Hashtbl.find t.certificate_by_atoms (Atoms_key.of_atoms atoms)
   ;;
 
   let undo t ~to_decision_level_excl =
@@ -184,7 +305,11 @@ type t =
   ; tt : Tvar_types.t
   ; bb : Branch_and_bound.t
   ; encoding : Encoding.t
+  ; combined : Combined_theory.t
   ; mutable scopes : int list (* activation literals, innermost first *)
+  ; (* Formulas asserted in each active scope, innermost first, for evaluating a
+       returned model. Mirrors [scopes] but retains the rich formulas. *)
+    mutable asserted_scopes : Formula.any list list
   ; formula_by_root_lit : Formula.any Int.Table.t
   ; proof_generation : Proof_generation.t option
   }
@@ -193,7 +318,7 @@ let create ?(config = Config.default) () =
   let egraph = Formula_egraph_uf.create ~atoms:[] in
   let tt = Tvar_types.create () in
   let bb = Branch_and_bound.create () in
-  let encoding = Encoding.create () in
+  let encoding = Encoding.create ~produce_proofs:config.produce_proofs () in
   let bare_var_eq = Bare_var_eq.create () in
   let combined =
     { Combined_theory.egraph
@@ -202,10 +327,13 @@ let create ?(config = Config.default) () =
     ; encoding
     ; bare_var_eq
     ; shared_tvars = Tvar.Hash_set.create ()
+    ; produce_proofs = config.produce_proofs
+    ; certificate_by_atoms = Atoms_key.Table.create ()
     }
   in
   let solver =
     Feel.Solver.create
+      ~produce_proofs:config.produce_proofs
       ~theory:(Feel.Theory.pack (module Combined_theory) combined)
       ()
   in
@@ -215,7 +343,9 @@ let create ?(config = Config.default) () =
     ; tt
     ; bb
     ; encoding
+    ; combined
     ; scopes = []
+    ; asserted_scopes = [ [] ]
     ; formula_by_root_lit = Int.Table.create ()
     ; proof_generation =
         (if config.produce_proofs
@@ -236,10 +366,13 @@ let create ?(config = Config.default) () =
         in
         let atom : Atom.t = `Type_eq (a, b) in
         let sat_var = Encoding.sat_var_for_atom t.encoding atom in
-        Hashtbl.set
-          t.formula_by_root_lit
-          ~key:(-sat_var)
-          ~data:(Formula.Not (Encoding.atom_to_formula atom));
+        let axiom = Formula.Not (Encoding.atom_to_formula atom) in
+        Hashtbl.set t.formula_by_root_lit ~key:(-sat_var) ~data:axiom;
+        (* These base-type disequalities are axioms, not user assertions, but a
+           conflict may cite them; register them as proof premises so proof
+           production can name them. *)
+        Option.iter t.proof_generation ~f:(fun proof_generation ->
+          Proof_generation.assert_formula proof_generation axiom);
         ignore
           (Feel.Solver.add_clause t.solver ~clause:[| -sat_var |]
            : [ `Ok | `Unsat of _ ]))));
@@ -258,6 +391,9 @@ let assert_formula t (formula : Formula.any)
   let%bind.Or_error clauses = Encoding.encode t.encoding ~formula in
   let root_lit = (List.last_exn clauses).(0) in
   Hashtbl.set t.formula_by_root_lit ~key:root_lit ~data:formula;
+  (match t.asserted_scopes with
+   | current :: outer -> t.asserted_scopes <- (formula :: current) :: outer
+   | [] -> assert false);
   let clauses =
     match t.scopes with
     | [] -> clauses
@@ -283,14 +419,16 @@ let assert_formula t (formula : Formula.any)
 let push t =
   let activation = Encoding.fresh_var t.encoding in
   t.scopes <- activation :: t.scopes;
+  t.asserted_scopes <- [] :: t.asserted_scopes;
   Option.iter t.proof_generation ~f:Proof_generation.push
 ;;
 
 let pop t =
-  match t.scopes with
-  | [] -> assert false
-  | _ :: rest ->
+  match t.scopes, t.asserted_scopes with
+  | [], _ | _, ([] | [ _ ]) -> assert false
+  | _ :: rest, _ :: asserted_rest ->
     t.scopes <- rest;
+    t.asserted_scopes <- asserted_rest;
     Option.iter t.proof_generation ~f:Proof_generation.pop
 ;;
 
@@ -364,19 +502,67 @@ let tvar_assignments t : Tvar_assignment.t Tvar.Map.t =
   |> Tvar.Map.of_alist_exn
 ;;
 
+(* The boolean value the solver assigned to each registered theory atom,
+   resolving atoms via the encoding's atom<->sat-var table and skipping atoms
+   the solver left unassigned. *)
+let atom_values t ~(assignments : bool option array) : bool Atom.Map.t =
+  Encoding.atoms t.encoding
+  |> List.filter_map ~f:(fun (atom, sat_var) ->
+    if sat_var >= 0 && sat_var < Array.length assignments
+    then
+      Option.map assignments.(sat_var) ~f:(fun value ->
+        Atom.normalize atom, value)
+    else None)
+  |> Atom.Map.of_alist_reduce ~f:(fun _ v -> v)
+;;
+
 let solve ?time_bound ?(assumptions = [||]) t : Solver_result.t =
   let scope_assumptions = Array.of_list t.scopes in
   let assumptions = Array.append scope_assumptions assumptions in
   match Feel.Solver.solve ?time_bound ~assumptions t.solver with
-  | Sat { assignments = _ } -> Sat { tvar_assignments = tvar_assignments t }
+  | Sat { assignments } ->
+    let model =
+      { Model.atom_values = atom_values t ~assignments
+      ; tvar_assignments = tvar_assignments t
+      }
+    in
+    Sat { model }
   | Unsat { core } ->
     let proof =
-      Option.bind t.proof_generation ~f:Proof_generation.unsat_proof
+      Option.bind t.proof_generation ~f:(fun proof_generation ->
+        let refutation_clauses =
+          Option.value_exn (Feel.Solver.last_refutation t.solver)
+        in
+        Proof_generation.unsat_proof
+          proof_generation
+          ~encoding:t.encoding
+          ~certificate_for_atoms:
+            (Combined_theory.certificate_for_atoms t.combined)
+          ~formula_by_root_lit:t.formula_by_root_lit
+          ~scope_vars:t.scopes
+          ~refutation_clauses)
     in
     Unsat { core = make_unsat_core t core; proof }
 ;;
 
 let stats t = Feel.Solver.stats t.solver
+
+(* Formulas asserted in the currently active scopes, which a returned model must
+   satisfy. Includes the base-type disequality axioms registered at [create]. *)
+let active_asserted_formulas t =
+  let asserted = List.concat_map t.asserted_scopes ~f:Fn.id in
+  let axioms =
+    Hashtbl.data t.formula_by_root_lit
+    |> List.filter ~f:(function
+      | Formula.Not (Eq ((Bool | Int | Float), (Bool | Int | Float))) -> true
+      | _ -> false)
+  in
+  axioms @ asserted
+;;
+
+let check_model t (model : Model.t) =
+  Model.check model ~asserted_formulas:(active_asserted_formulas t)
+;;
 
 let assert_type t var type_expr =
   ignore

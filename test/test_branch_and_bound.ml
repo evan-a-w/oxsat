@@ -215,7 +215,7 @@ let solver_is_int tvar : Formula.any = Eq (Var tvar, Int)
 let print_result (result : Solver_result.t) =
   match result with
   | Unsat _ -> print_s [%sexp (result : Solver_result.t)]
-  | Sat { tvar_assignments } ->
+  | Sat { model = { tvar_assignments; atom_values = _ } } ->
     print_s [%message "Sat" (tvar_assignments : Tvar_assignment.t Tvar.Map.t)]
 ;;
 

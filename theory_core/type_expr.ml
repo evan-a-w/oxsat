@@ -29,4 +29,15 @@ let split_function = function
   | Base _ | Var _ | Type_of _ | Function_type _ | Type -> None
 ;;
 
+let rec to_formula : t -> Formula.any = function
+  | Var v -> Type_var v
+  | Base Bool -> Bool
+  | Base Int -> Int
+  | Base Float -> Float
+  | Type_of v -> Type_of (Var v)
+  | App (f, args) -> Type_app (f, List.map args ~f:to_formula)
+  | Type -> Formula.Type
+  | Function_type (a, b) -> Function_type (to_formula a, to_formula b)
+;;
+
 let garbage_for_vec = Var (Tvar.of_string "")

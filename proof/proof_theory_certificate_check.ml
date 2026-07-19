@@ -204,6 +204,18 @@ let connected edges left right =
   formula_equal left right || visit Formula.Any.Set.empty [ left ]
 ;;
 
+(* An equality atom as a pair of [Formula.any] endpoints. A [`Type_eq] is the
+   equality of its type expressions widened to formulas, so the EUF checker can
+   reason over the type-level congruence closure with [`Type_eq] clause literals
+   (which the encoding uses for type-role equalities). *)
+let equality_endpoints : Proof_atom.t -> (Formula.any * Formula.any) option
+  = function
+  | Theory (`Eq (left, right)) -> Some (left, right)
+  | Theory (`Type_eq (left, right)) ->
+    Some (Type_expr.to_formula left, Type_expr.to_formula right)
+  | Theory (`Le _) | Extension _ -> None
+;;
+
 let check_equality_proof
   clause
   ({ conclusion; path } : Proof_theory_certificate.Euf.Equality_proof.t)
@@ -212,12 +224,10 @@ let check_equality_proof
     List.fold_result path ~init:[] ~f:(fun edges justification ->
       match justification with
       | Asserted { clause_literal } ->
-        let%bind.Or_error atom, positive =
-          theory_literal_at clause clause_literal
-        in
-        (match atom, positive with
-         | `Eq (left, right), false -> Ok ((left, right) :: edges)
-         | `Eq _, true | `Le _, _ | `Type_eq _, _ ->
+        let%bind.Or_error literal = literal_at clause clause_literal in
+        (match equality_endpoints literal.atom, literal.positive with
+         | Some (left, right), false -> Ok ((left, right) :: edges)
+         | Some _, true | None, _ ->
            error "EUF asserted edge is not an assumed equality")
       | Congruence { left; right; argument_equalities } ->
         let left_args = Formula.args left in
@@ -256,12 +266,12 @@ let clause_has_equality clause equality ~positive =
   |> Array.exists ~f:(fun literal ->
     Bool.equal literal.positive positive
     &&
-    match literal.atom with
-    | Theory (`Eq (left, right)) ->
+    match equality_endpoints literal.atom with
+    | Some (left, right) ->
       equality_equal
         equality
         { Proof_theory_certificate.Euf.Equality.left; right }
-    | Theory (`Le _ | `Type_eq _) | Extension _ -> false)
+    | None -> false)
 ;;
 
 let check_euf clause certificate =
@@ -274,11 +284,9 @@ let check_euf clause certificate =
     if not (clause_has_equality clause conclusion ~positive:false)
     then error "EUF disequality conclusion is not a negative clause literal"
     else (
-      let%bind.Or_error atom, positive =
-        theory_literal_at clause asserted_disequality
-      in
-      match atom, positive with
-      | `Eq (asserted_left, asserted_right), true ->
+      let%bind.Or_error literal = literal_at clause asserted_disequality in
+      match equality_endpoints literal.atom, literal.positive with
+      | Some (asserted_left, asserted_right), true ->
         let direct =
           equality_equal
             left_path.conclusion
@@ -301,7 +309,7 @@ let check_euf clause certificate =
         else (
           let%bind.Or_error () = check_equality_proof clause left_path in
           check_equality_proof clause right_path)
-      | `Eq _, false | `Le _, _ | `Type_eq _, _ ->
+      | Some _, false | None, _ ->
         error "EUF disequality premise is not an assumed disequality")
 ;;
 

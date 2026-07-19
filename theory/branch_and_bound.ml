@@ -9,6 +9,19 @@ module Atom = struct
   [@@deriving sexp, compare, hash]
 end
 
+(* Records what the most recent [maybe_get_lemma] produced, so proof production
+   can reconstruct its certificate. Only meaningful right after a [`Lemma]. *)
+module Last_lemma = struct
+  type t =
+    | None
+    | Linear_arithmetic of (Atom.t * Q.t) list
+    | Integer_split of
+        { variable : Tvar.t
+        ; floor : Q.t
+        ; ceil : Q.t
+        }
+end
+
 module Trail_entry = struct
   module Kind = struct
     type t =
@@ -37,6 +50,7 @@ type t =
   ; simplex : Simplex.t
   ; trail : Trail_entry.t Vec.Value.t
   ; atom_for_constraint : (Atom.t * bool) Simplex.Constraint.Table.t
+  ; mutable last_lemma : Last_lemma.t
   }
 
 let create () : t =
@@ -49,8 +63,11 @@ let create () : t =
   ; trail = Vec.Value.create ()
   ; atom_for_constraint = Simplex.Constraint.Table.create ()
   ; tvars_to_check_for_equality = Tvar.Hash_set.create ()
+  ; last_lemma = None
   }
 ;;
+
+let last_lemma t = t.last_lemma
 
 let add_tvar_to_check_for_equality t ~tvar =
   Hash_set.add t.tvars_to_check_for_equality tvar
@@ -223,6 +240,15 @@ let simplex_solve t =
 let maybe_get_lemma t =
   match simplex_solve t with
   | `Unsat conflicting_constraints ->
+    t.last_lemma
+    <- Linear_arithmetic
+         (List.map
+            (Simplex.last_conflict_farkas t.simplex)
+            ~f:(fun (constraint_, coeff) ->
+              let atom, _ =
+                Hashtbl.find_exn t.atom_for_constraint constraint_
+              in
+              atom, coeff));
     `Lemma
       (List.map conflicting_constraints ~f:(fun constraint_ ->
          let atom, value = Hashtbl.find_exn t.atom_for_constraint constraint_ in
@@ -251,6 +277,7 @@ let maybe_get_lemma t =
            else Q.(value - one), value
          else Q.floor value, Q.ceil value
        in
+       t.last_lemma <- Integer_split { variable = tvar; floor; ceil };
        (* this is NOT a unit clause, and doesn't depend on the current
           assignments / constraints etc. However, this is always true for
           integers. We do need to depend on the type of the var being an

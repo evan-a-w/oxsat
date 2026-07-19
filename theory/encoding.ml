@@ -12,6 +12,13 @@ module Formula_with_no_shared_theories = struct
   [@@deriving sexp_of]
 end
 
+module Tseitin_def = struct
+  type t =
+    | And of int list
+    | Or of int list
+  [@@deriving sexp_of]
+end
+
 type t =
   { mutable next_var : int
   ; atom_to_sat_var : int Atom.Table.t
@@ -20,9 +27,13 @@ type t =
   ; mutable true_var : int or_null
   ; theory_for_tvar : Formula.Theory.Packed.t Tvar.Table.t
   ; newly_shared : Tvar.t Vec.Value.t
+      (* Tseitin auxiliary var -> its definition over sub-literals, recorded
+         only when [produce_proofs] so proof assembly can emit the extension. *)
+  ; produce_proofs : bool
+  ; tseitin_defs : Tseitin_def.t Int.Table.t
   }
 
-let create () =
+let create ?(produce_proofs = false) () =
   { next_var = 1
   ; atom_to_sat_var = Atom.Table.create ()
   ; sat_var_to_atom = Int.Table.create ()
@@ -30,8 +41,12 @@ let create () =
   ; true_var = Null
   ; theory_for_tvar = Tvar.Table.create ()
   ; newly_shared = Vec.Value.create ()
+  ; produce_proofs
+  ; tseitin_defs = Int.Table.create ()
   }
 ;;
+
+let tseitin_def t var = Hashtbl.find t.tseitin_defs var
 
 let record_tvar t tvar theory =
   let shared = Formula.Theory.(Packed.T Shared) in
@@ -151,6 +166,8 @@ let rec literal_of t ~clauses ~(formula : Formula_with_no_shared_theories.t)
       List.map fs ~f:(fun formula -> literal_of t ~clauses ~formula)
     in
     let d = fresh_var t in
+    if t.produce_proofs
+    then Hashtbl.set t.tseitin_defs ~key:d ~data:(And literals);
     (* d -> l_i, for each i *)
     List.iter literals ~f:(fun l -> Vec.Value.push clauses [| -d; l |]);
     (* (l_1 /\ ... /\ l_n) -> d *)
@@ -161,6 +178,8 @@ let rec literal_of t ~clauses ~(formula : Formula_with_no_shared_theories.t)
       List.map fs ~f:(fun formula -> literal_of t ~clauses ~formula)
     in
     let d = fresh_var t in
+    if t.produce_proofs
+    then Hashtbl.set t.tseitin_defs ~key:d ~data:(Or literals);
     (* l_i -> d, for each i *)
     List.iter literals ~f:(fun l -> Vec.Value.push clauses [| -l; d |]);
     (* d -> (l_1 \/ ... \/ l_n) *)

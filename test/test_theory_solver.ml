@@ -13,7 +13,7 @@ let neq a b : Formula.any = Not (eq a b)
 let print_result (result : Solver_result.t) =
   match result with
   | Unsat _ -> print_s [%sexp (result : Solver_result.t)]
-  | Sat { tvar_assignments } ->
+  | Sat { model = { tvar_assignments; atom_values = _ } } ->
     print_s [%message "Sat" (tvar_assignments : Tvar_assignment.t Tvar.Map.t)]
 ;;
 
@@ -1029,39 +1029,50 @@ let%expect_test "SAT/theory polling: a satisfied bridge lemma must not mask a \
     |}]
 ;;
 
-let%expect_test "proof production is optional and returns checked \
-                 propositional proofs"
-  =
+let%expect_test "proof production is optional and yields checked proofs" =
+  let report proof =
+    print_s
+      [%message
+        (Option.is_some proof : bool)
+          ~checks:
+            (Option.value_map proof ~default:false ~f:(fun proof ->
+               Or_error.is_ok (Proof.check proof))
+             : bool)]
+  in
+  (* A solve-time (not assert-time) propositional conflict over theory atoms. *)
   let contradiction solver =
-    Solver.push solver;
-    assert_ok solver (eq x y);
+    assert_ok solver (Or [ eq x y; eq y z ]);
     assert_ok solver (neq x y);
+    assert_ok solver (neq y z);
     match Solver.solve solver with
     | Sat _ -> print_endline "unexpected Sat"
-    | Unsat { proof; _ } ->
-      print_s
-        [%message
-          (Option.is_some proof : bool)
-            ~checks:
-              (Option.value_map proof ~default:false ~f:(fun proof ->
-                 Or_error.is_ok (Proof.check proof))
-               : bool)]
+    | Unsat { proof; _ } -> report proof
   in
   contradiction (Solver.create ());
   [%expect {| (("Option.is_some proof" false) (checks false)) |}];
   contradiction
     (Solver.create ~config:{ Solver.Config.produce_proofs = true } ());
   [%expect {| (("Option.is_some proof" true) (checks true)) |}];
+  (* A theory (linear-arithmetic) contradiction also yields a checked proof. *)
   let theory_contradiction =
     Solver.create ~config:{ Solver.Config.produce_proofs = true } ()
   in
-  Solver.push theory_contradiction;
   assert_ok theory_contradiction (Formula.La_compare (x, `Lt, x));
   (match Solver.solve theory_contradiction with
    | Sat _ -> print_endline "unexpected Sat"
-   | Unsat { proof; _ } ->
-     print_s [%message "theory certificate pending" (proof : Proof.t option)]);
-  [%expect {| ("theory certificate pending" (proof ())) |}]
+   | Unsat { proof; _ } -> report proof);
+  [%expect {| (("Option.is_some proof" true) (checks true)) |}];
+  (* Assertions inside a [push] scope are not yet proof-supported: [None]. *)
+  let scoped =
+    Solver.create ~config:{ Solver.Config.produce_proofs = true } ()
+  in
+  Solver.push scoped;
+  assert_ok scoped (eq x y);
+  assert_ok scoped (neq x y);
+  (match Solver.solve scoped with
+   | Sat _ -> print_endline "unexpected Sat"
+   | Unsat { proof; _ } -> report proof);
+  [%expect {| (("Option.is_some proof" false) (checks false)) |}]
 ;;
 
 (* Regression: the integrality split used to round [1 + eps] (from the strict

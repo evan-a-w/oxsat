@@ -1,3 +1,19 @@
+full theory-solver proof generation (opt-in; all hooks option-guarded, zero
+cost when produce_proofs=false)
+
+$ dune exec --profile=release bench/feel_bench.exe -- -bench sat -sat-max-n 80
+SAT solver benchmarks up to n=80 variables
+Hard 3-SAT (n=50, m=213): Mean: 507.80 μs  p50: 507.64 μs  (n=5)
+Hard 3-SAT (n=80, m=340): Mean: 81.19 μs  p50: 81.51 μs  (n=5)
+Uniform 3-SAT (n=50, m=210): Mean: 292.80 μs  p50: 293.13 μs  (n=5)
+Uniform 3-SAT (n=80, m=336): Mean: 79.33 μs  p50: 78.80 μs  (n=5)
+Planted 3-SAT (n=50, m=175): Mean: 29.34 μs  p50: 29.32 μs  (n=5)
+Scale-free 3-SAT (n=50, m=185): Mean: 55.58 μs  p50: 55.37 μs  (n=5)
+Planted 4-SAT (n=50, m=225): Mean: 45.74 μs  p50: 45.93 μs  (n=5)
+Random k-CNF (n=50, m=200, max_k=5): Mean: 27.25 μs  p50: 27.25 μs  (n=5)
+(no regression vs the baseline below; off-path adds no measurable cost.)
+
+
 remove unused literal_set stuff
 
 $ time dune exec --profile=release bench/feel_bench.exe -- -bench dimacs -min-iterations 1 -max-iterations 1 -sample-runs 1  && time dune exec --profile=release bench/feel_bench.exe -- -bench sat -sat-max-n 80

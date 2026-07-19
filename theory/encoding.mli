@@ -12,14 +12,28 @@ module Formula_with_no_shared_theories : sig
   [@@deriving sexp_of]
 end
 
+module Tseitin_def : sig
+  (** The Boolean definition of a Tseitin auxiliary variable, over its
+      sub-literals (signed SAT variables). *)
+  type t =
+    | And of int list
+    | Or of int list
+  [@@deriving sexp_of]
+end
+
 type t
 
-val create : unit -> t
+val create : ?produce_proofs:bool -> unit -> t
 val fresh_var : t -> int
 val sat_var_for_atom : t -> Atom.t -> int
 val find_sat_var_for_atom : t -> Atom.t -> int option
 val atom_for_sat_var : t -> int -> Atom.t option
 val atoms : t -> (Atom.t * int) list
+
+(** The Tseitin definition of [var] if [var] is a clausification auxiliary
+    introduced while [~produce_proofs:true] was set, else [None] (including for
+    atom variables and scope-activation variables). *)
+val tseitin_def : t -> int -> Tseitin_def.t option
 
 (** Theory membership of a tvar, accumulated as atoms are created: a tvar seen
     in atoms of two different theories maps to [Shared]. Bare

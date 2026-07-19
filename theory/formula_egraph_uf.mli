@@ -24,6 +24,13 @@ val create : atoms:Atom.t list -> t
 val add_atom : t -> atom:Atom.t -> unit
 val assert_atom : t -> decision_level:int -> atom:Atom.t -> value:bool -> unit
 val maybe_get_lemma : t -> [ `Consistent | `Lemma of (Atom.t * bool) list ]
+
+(** The EUF proof certificate for the [`Lemma] most recently returned by
+    {!maybe_get_lemma}, or [None] if that call returned [`Consistent]. Used by
+    proof production; the returned certificate justifies the lemma clause over
+    its constituent equality atoms. *)
+val last_certificate : t -> Lemma_certificate.Euf.t option
+
 val undo : t -> to_decision_level_excl:int -> unit
 
 (** The current truth value of [atom], if it has been assigned one (via
