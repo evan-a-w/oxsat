@@ -34,12 +34,6 @@ module Euf : sig
         }
 end
 
-module Euf_map : sig
-  (** Rewrites the atoms a EUF certificate references by clause index, leaving
-      structural terms untouched. *)
-  val map_atoms : f:(Atom.t -> Atom.t) -> Euf.t -> Euf.t
-end
-
 module Linear_arithmetic : sig
   type t = { combination : (Atom.t * Q.t) list }
 end

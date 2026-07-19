@@ -46,23 +46,6 @@ module Combined_theory = struct
     ; certificate_by_atoms : Lemma_certificate.t Atoms_key.Table.t
     }
 
-  (* Converts a lemma atom coming back from [Formula_egraph_uf] (a bare
-     [Formula.any] equality) to the [Atom.t] its originating shape used, so it
-     can be looked up in [Encoding]'s atom<->sat-var table. A bare [Var]/[App]
-     is (per the [Type_var] tag added specifically to disambiguate this) always
-     the UF role; anything else is the type role. *)
-  let egraph_atom_to_atom (`Eq (a, _) as atom : Formula_egraph_uf.Atom.t)
-    : Atom.t
-    =
-    match Formula.op a with
-    | Var _ | App _ -> (atom :> Atom.t)
-    | _ ->
-      let (`Eq (a, b)) = atom in
-      `Type_eq
-        ( Or_error.ok_exn (Encoding.type_expr_of a)
-        , Or_error.ok_exn (Encoding.type_expr_of b) )
-  ;;
-
   let assert_literal t ~decision_level ~literal =
     let var = Int.abs literal in
     let value = literal > 0 in
@@ -77,9 +60,7 @@ module Combined_theory = struct
       Formula_egraph_uf.assert_atom
         t.egraph
         ~decision_level
-        ~atom:
-          (`Eq
-            (Encoding.type_expr_to_formula a, Encoding.type_expr_to_formula b))
+        ~atom:(`Type_eq (a, b))
         ~value;
       Tvar_types.assert_atom t.tt ~decision_level ~atom:(`Type_eq (a, b)) ~value;
       Branch_and_bound.assert_atom
@@ -104,7 +85,9 @@ module Combined_theory = struct
      the many coincident int vars of a MILP -- need no arrangement, and bridging
      them floods the search with useless splits. *)
   let arrangement_matters t a b =
-    let in_egraph v = Formula_egraph_uf.mem_term t.egraph (Formula.Var v) in
+    let in_egraph v =
+      Formula_egraph_uf.mem_atom_term t.egraph (Formula.Var v)
+    in
     (in_egraph a && in_egraph b)
     ||
     match Tvar_types.get_type t.tt a, Tvar_types.get_type t.tt b with
@@ -209,25 +192,14 @@ module Combined_theory = struct
   let maybe_get_lemma t = exclave_
     match Formula_egraph_uf.maybe_get_lemma t.egraph [@nontail] with
     | `Lemma literals ->
-      let atoms =
-        List.map literals ~f:(fun (atom, _) -> egraph_atom_to_atom atom)
-      in
+      let atoms = List.map literals ~f:(fun (atom, _) -> (atom :> Atom.t)) in
       if t.produce_proofs
       then (
         match Formula_egraph_uf.last_certificate t.egraph with
-        | Some euf ->
-          (* The certificate's atoms are the egraph's bare [`Eq] over the
-             (possibly type-role) endpoints; convert them to the same [Atom.t]
-             form the clause literals use so index resolution finds them. *)
-          let euf =
-            Lemma_certificate.Euf_map.map_atoms euf ~f:(function
-              | `Eq (a, b) -> egraph_atom_to_atom (`Eq (a, b))
-              | (`Le _ | `Type_eq _) as atom -> atom)
-          in
-          record_certificate t ~atoms ~certificate:(Euf euf)
+        | Some euf -> record_certificate t ~atoms ~certificate:(Euf euf)
         | None -> raise_s [%message "egraph lemma without a certificate"]);
       lemma_to_clause literals ~sat_var_for_atom:(fun atom ->
-        Encoding.sat_var_for_atom t.encoding (egraph_atom_to_atom atom))
+        Encoding.sat_var_for_atom t.encoding (atom :> Atom.t))
     | `Consistent ->
       (match Tvar_types.maybe_get_lemma t.tt [@nontail] with
        | `Lemma literals ->
@@ -291,11 +263,7 @@ module Combined_theory = struct
        | Formula.Var a, Formula.Var b -> Bare_var_eq.register t.bare_var_eq a b
        | _ -> ())
     | Some (`Type_eq (a, b)) ->
-      Formula_egraph_uf.add_atom
-        t.egraph
-        ~atom:
-          (`Eq
-            (Encoding.type_expr_to_formula a, Encoding.type_expr_to_formula b))
+      Formula_egraph_uf.add_atom t.egraph ~atom:(`Type_eq (a, b))
   ;;
 end
 
@@ -312,6 +280,11 @@ type t =
     mutable asserted_scopes : Formula.any list list
   ; formula_by_root_lit : Formula.any Int.Table.t
   ; proof_generation : Proof_generation.t option
+  ; (* Asserted formulas not yet registered in the egraph for e-matching.
+       Registration walks the whole formula tree and adds every node to the
+       congruence closure, which is pure overhead for solving, so it's deferred
+       until [egraph] is called. *)
+    pending_egraph_terms : Formula.any Vec.Value.t
   }
 
 let create ?(config = Config.default) () =
@@ -351,6 +324,7 @@ let create ?(config = Config.default) () =
         (if config.produce_proofs
          then Some (Proof_generation.create ())
          else None)
+    ; pending_egraph_terms = Vec.Value.create ()
     }
   in
   (* Pre-register pairwise disequalities between distinct base types. This makes
@@ -389,6 +363,7 @@ let assert_formula t (formula : Formula.any)
   : [ `Ok | `Unsat of Feel.Sat_result.Core_clause.t list ] Or_error.t
   =
   let%bind.Or_error clauses = Encoding.encode t.encoding ~formula in
+  Vec.Value.push t.pending_egraph_terms formula;
   let root_lit = (List.last_exn clauses).(0) in
   Hashtbl.set t.formula_by_root_lit ~key:root_lit ~data:formula;
   (match t.asserted_scopes with
@@ -564,6 +539,13 @@ let active_asserted_formulas t =
 
 let check_model t (model : Model.t) =
   Model.check model ~asserted_formulas:(active_asserted_formulas t)
+;;
+
+let egraph t =
+  Vec.Value.to_list t.pending_egraph_terms
+  |> List.iter ~f:(fun term -> Formula_egraph_uf.add_term t.egraph ~term);
+  Vec.Value.clear t.pending_egraph_terms;
+  t.egraph
 ;;
 
 let assert_type t var type_expr =
