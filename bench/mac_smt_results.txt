@@ -1,3 +1,16 @@
+lazy raw-formula egraph registration (restores plain solving performance; raw
+formula trees are registered only when Solver.egraph is requested)
+
+$ dune exec --profile=release bench/feel_bench.exe -- -bench smt -min-iterations 3 -max-iterations 10
+LP feasible (n=10, m=30): 264.73 μs
+LP feasible (n=20, m=60): 628.47 μs
+LP feasible (n=50, m=150): 1.34 ms
+EUF chain UNSAT (n=50): 147.63 μs
+EUF chain UNSAT (n=200): 788.70 μs
+EUF chain UNSAT (n=1000): 7.98 ms
+EUF two-group SAT (n=200): 919.20 μs
+
+
 Nelson-Oppen equality propagation for shared tvars (LA-model / egraph candidates + bridge split clauses, gated on arrangement relevance)
 
 $ dune exec --profile=release bench/feel_bench.exe -- -bench smt -min-iterations 3 -max-iterations 10
@@ -117,5 +130,4 @@ EUF two-group SAT (n=200): Mean: 418.53 μs  StdDev: 764.64 ns  p50: 418.33 μs 
 EUF web (n=20, f=3): Mean: 71.44 μs  StdDev: 67.76 ns  p50: 71.45 μs  p75: 71.52 μs  p90: 71.52 μs  p95: 71.52 μs  p99: 71.52 μs  (n=3)
 EUF web (n=50, f=5): Mean: 205.28 μs  StdDev: 473.64 ns  p50: 205.09 μs  p75: 205.93 μs  p90: 205.93 μs  p95: 205.93 μs  p99: 205.93 μs  (n=3)
 dune exec --profile=release bench/feel_bench.exe -- -bench smt  87.75s user 0.79s system 77% cpu 1:54.15 total
-
 
