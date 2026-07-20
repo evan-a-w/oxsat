@@ -40,7 +40,8 @@ let%expect_test "EUF transitivity conflict" =
   assert_ok solver (neq y z);
   assert_ok solver (eq x z);
   check_proof (Solver.solve solver);
-  [%expect {|
+  [%expect
+    {|
     Assumptions:
       a0: bool ≠ int
       a1: bool ≠ float
@@ -72,7 +73,8 @@ let%expect_test "EUF congruence conflict" =
   assert_ok solver (eq x y);
   assert_ok solver (neq (f x) (f y));
   check_proof (Solver.solve solver);
-  [%expect {|
+  [%expect
+    {|
     Assumptions:
       a0: bool ≠ int
       a1: bool ≠ float
@@ -101,7 +103,8 @@ let%expect_test "type-theory conflict (Int vs Float)" =
   Solver.assert_type solver xv int_type;
   Solver.assert_type solver xv (Base Float);
   check_proof (Solver.solve solver);
-  [%expect {|
+  [%expect
+    {|
     Assumptions:
       a0: bool ≠ int
       a1: bool ≠ float
@@ -131,7 +134,8 @@ let%expect_test "linear-arithmetic (Farkas) conflict" =
   assert_ok solver (Formula.La_compare (x, `Ge, La_const (Q.of_int 5)));
   assert_ok solver (Formula.La_compare (x, `Le, La_const (Q.of_int 3)));
   check_proof (Solver.solve solver);
-  [%expect {|
+  [%expect
+    {|
     Assumptions:
       a0: bool ≠ int
       a1: bool ≠ float
@@ -168,7 +172,8 @@ let%expect_test "integer variable with no feasible integer point" =
     (Formula.La_compare
        (La_scale_const (Q.of_int 3, x), `Le, La_const (Q.of_int 2)));
   check_proof (Solver.solve solver);
-  [%expect {|
+  [%expect
+    {|
     Assumptions:
       a0: bool ≠ int
       a1: bool ≠ float
@@ -205,7 +210,8 @@ let%expect_test "Nelson-Oppen bridge (bare-var-eq + LA)" =
   assert_ok solver (Formula.La_compare (x, `Le, La_const (Q.of_int 3)));
   assert_ok solver (Formula.La_compare (y, `Le, La_const (Q.of_int 2)));
   check_proof (Solver.solve solver);
-  [%expect {|
+  [%expect
+    {|
     Assumptions:
       a0: bool ≠ int
       a1: bool ≠ float
@@ -243,7 +249,8 @@ let%expect_test "propositional-over-atoms conflict" =
   assert_ok solver (Not a);
   assert_ok solver (Not b);
   check_proof (Solver.solve solver);
-  [%expect {|
+  [%expect
+    {|
     Assumptions:
       a0: bool ≠ int
       a1: bool ≠ float
@@ -296,7 +303,8 @@ let%expect_test "case-split with Nelson-Oppen + Farkas reasoning" =
   assert_ok solver (Formula.La_compare (x, `Ge, La_const (Q.of_int 5)));
   assert_ok solver (Formula.La_compare (z, `Le, La_const (Q.of_int 3)));
   check_proof (Solver.solve solver);
-  [%expect {|
+  [%expect
+    {|
     Assumptions:
       a0: bool ≠ int
       a1: bool ≠ float

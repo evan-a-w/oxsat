@@ -1,8 +1,9 @@
 open! Core
 open! Import
 
-(** An incremental SMT solver combining the SAT core ({!Feel.Solver}) with the
-    theory of uninterpreted functions ({!Uninterpreted_functions}).
+(** An incremental SMT solver combining the SAT core ({!Feel.Solver}) with
+    congruence closure over terms and types ({!Formula_egraph_uf}), linear
+    arithmetic ({!Branch_and_bound}), and the type theory ({!Tvar_types}).
 
     Formulas are asserted via {!assert_formula} and Tseitin-encoded into CNF
     using a shared {!Encoding.t}, so atoms keep a stable mapping to SAT
@@ -69,3 +70,11 @@ val check_model : t -> Model.t -> unit Or_error.t
 
 val assert_type : t -> Tvar.t -> Type_expr.t -> unit
 val get_type : t -> Tvar.t -> Type_expr.t option
+
+(** The theory egraph, e.g. for e-matching quantified axioms' trigger patterns
+    against the current ground terms and asserting the resulting instances via
+    {!assert_formula}. Every asserted formula's whole shape is registered (see
+    {!Formula_egraph_uf.add_term}) — lazily, on this call, so solving doesn't
+    pay for the extra congruence-closure nodes; call again after new assertions
+    to index them. *)
+val egraph : t -> Formula_egraph_uf.t

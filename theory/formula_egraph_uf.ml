@@ -1,20 +1,6 @@
 open! Core
 open! Import
-
-module Atom = struct
-  type t = [ `Eq of Formula.any * Formula.any ] [@@deriving sexp, compare, hash]
-
-  let normalize = function
-    | `Eq (a, b) as x ->
-      (match Ordering.of_int (Formula.compare_any a b) with
-       | Equal | Less -> x
-       | Greater -> `Eq (b, a))
-  ;;
-
-  include functor Comparable.Make
-  include functor Hashable.Make
-end
-
+module Atom = Import.Atom.Equality
 module G = Formula_egraph.Graph
 
 module Atom_data = struct
@@ -91,6 +77,10 @@ type t =
   ; node_by_id : G.Node.t G.Id.Table.t
   ; egraph : G.t
   ; atoms : Atom_data.t Atom.Table.t
+  ; (* Terms (including subterms) that occur in some registered atom, as opposed
+       to terms merely registered via [add_term] for e-matching. Only these can
+       influence an atom's truth, so only their arrangement matters to EUF. *)
+    atom_terms : Formula.Any.Hash_set.t
   ; explanation_forest : Explanation_forest.t
   ; trail : Trail_entry.t list ref
   ; falsehoods : Atom.Hash_set.t
@@ -159,11 +149,20 @@ let rec register_term t ~(term : Formula.any) : G.Id.t =
     id
 ;;
 
+let rec mark_atom_term t (term : Formula.any) =
+  if not (Hash_set.mem t.atom_terms term)
+  then (
+    Hash_set.add t.atom_terms term;
+    List.iter (Formula.args term) ~f:(mark_atom_term t))
+;;
+
 let register_atom t ~(atom : Atom.t) =
   let atom = Atom.normalize atom in
-  let (`Eq (a, b)) = atom in
+  let a, b = Atom.endpoints atom in
   let id_a = register_term t ~term:a in
   let id_b = register_term t ~term:b in
+  mark_atom_term t a;
+  mark_atom_term t b;
   Hashtbl.set t.atoms ~key:atom ~data:{ atom; id_a; id_b; assignment = Null }
 ;;
 
@@ -174,6 +173,7 @@ let create ~atoms =
     ; node_by_id = G.Id.Table.create ()
     ; egraph = G.create ()
     ; atoms = Atom.Table.create ()
+    ; atom_terms = Formula.Any.Hash_set.create ()
     ; explanation_forest = Explanation_forest.create ()
     ; trail = ref []
     ; falsehoods = Atom.Hash_set.create ()
@@ -186,7 +186,9 @@ let create ~atoms =
 ;;
 
 let add_atom t ~atom = register_atom t ~atom
+let add_term t ~term = ignore (register_term t ~term : G.Id.t)
 let mem_term t term = Hashtbl.mem t.id_by_term term
+let mem_atom_term t term = Hash_set.mem t.atom_terms term
 
 let canonical_term t ~term =
   let id = Hashtbl.find_exn t.id_by_term term in
@@ -196,6 +198,7 @@ let canonical_term t ~term =
 
 let registered_terms t = Hashtbl.keys t.id_by_term
 let egraph t = t.egraph
+let term_of_id t id = Hashtbl.find t.term_by_id id
 
 let classes t =
   Hashtbl.keys t.id_by_term
@@ -475,7 +478,7 @@ module Certificate = struct
             ~from:(G.Id.to_int main_atom_data.id_b)
             ~to_:(G.Id.to_int false_data.id_a) )
     in
-    let (`Eq (a, b)) = main_atom_data.atom in
+    let a, b = Import.Atom.Equality.endpoints main_atom_data.atom in
     Disequality
       { conclusion = equality a b
       ; asserted_disequality = (false_data.atom :> Import.Atom.t)

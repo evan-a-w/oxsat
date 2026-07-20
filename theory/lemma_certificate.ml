@@ -36,36 +36,6 @@ module Euf = struct
         }
 end
 
-module Euf_map = struct
-  open Euf
-
-  let justification ~f : Justification.t -> Justification.t = function
-    | Asserted { disequality } -> Asserted { disequality = f disequality }
-    | Congruence _ as c -> c
-  ;;
-
-  let equality_proof ~f ({ conclusion; path } : Equality_proof.t)
-    : Equality_proof.t
-    =
-    { conclusion; path = List.map path ~f:(justification ~f) }
-  ;;
-
-  (* Rewrites the atom references a EUF certificate looks up by clause index
-     ([disequality]/[asserted_disequality]), leaving structural [Formula.any]
-     terms untouched. Used to translate the egraph's bare-[`Eq] atoms into the
-     [`Type_eq] atoms the type-role clause literals use. *)
-  let map_atoms ~f : Euf.t -> Euf.t = function
-    | Equality proof -> Equality (equality_proof ~f proof)
-    | Disequality { conclusion; asserted_disequality; left_path; right_path } ->
-      Disequality
-        { conclusion
-        ; asserted_disequality = f asserted_disequality
-        ; left_path = equality_proof ~f left_path
-        ; right_path = equality_proof ~f right_path
-        }
-  ;;
-end
-
 module Linear_arithmetic = struct
   (* Farkas coefficient on each cited [`Le] atom. *)
   type t = { combination : (Atom.t * Q.t) list }

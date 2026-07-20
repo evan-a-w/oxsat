@@ -1105,3 +1105,35 @@ let%expect_test "branch and bound: strict bounds around an integer are unsat \
 
 (* TODO: test that shows type theory congruence closure doesn't work, then fix
    it. *)
+
+(* ----- E-matching over asserted formulas ----- *)
+
+let%expect_test "asserted formulas' shapes are e-matchable via Solver.egraph" =
+  let solver = Solver.create () in
+  assert_ok solver (eq (f x) y);
+  let egraph = Solver.egraph solver in
+  let graph = Formula_egraph_uf.egraph egraph in
+  (* The [Eq] node itself is only in the egraph because whole asserted formulas
+     are registered, not just their equality atoms' endpoints. *)
+  let pattern : Formula_egraph.Pattern.Query.t =
+    App
+      ( Formula.Op.Eq
+      , [ App (Formula.Op.App (Tvar.of_string "f"), [ Var "arg" ]); Var "rhs" ]
+      )
+  in
+  let matches = Formula_egraph.Pattern.Query.search pattern ~graph in
+  List.iter
+    matches
+    ~f:(fun ({ eclass = _; subst } : Formula_egraph.Pattern.Match.t) ->
+      let term v =
+        Option.bind
+          (Formula_egraph.Pattern.Subst.find subst v)
+          ~f:(Formula_egraph_uf.term_of_id egraph)
+      in
+      print_s
+        [%message
+          ""
+            ~arg:(term "arg" : Formula.any option)
+            ~rhs:(term "rhs" : Formula.any option)]);
+  [%expect {| ((arg ((Var x))) (rhs ((Var y)))) |}]
+;;

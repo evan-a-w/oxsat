@@ -373,18 +373,6 @@ and neq_formula_of
     Ok (F.Not (F.Atom (`Eq (uf_a, uf_b))))
 ;;
 
-let rec type_expr_to_formula : Type_expr.t -> [> `Type ] Formula.t = function
-  | Var v -> Type_var v
-  | Base Bool -> Bool
-  | Base Int -> Int
-  | Base Float -> Float
-  | Type_of v -> Type_of (Var v)
-  | App (f, args) -> Type_app (f, List.map args ~f:type_expr_to_formula)
-  | Type_expr.Type -> Formula.Type
-  | Function_type (a, b) ->
-    Function_type (type_expr_to_formula a, type_expr_to_formula b)
-;;
-
 let linear_expr_to_formula (le : Linear_expr.t) : [> `La | `Term ] Formula.t =
   let term_summands =
     Map.to_alist le.coeffs
@@ -403,7 +391,7 @@ let linear_expr_to_formula (le : Linear_expr.t) : [> `La | `Term ] Formula.t =
 
 let atom_to_formula : Atom.t -> Formula.any = function
   | `Eq (a, b) -> Eq (a, b)
-  | `Type_eq (a, b) -> Eq (type_expr_to_formula a, type_expr_to_formula b)
+  | `Type_eq (a, b) -> Eq (Type_expr.to_formula a, Type_expr.to_formula b)
   | `Le (le, c) -> La_compare (linear_expr_to_formula le, `Le, La_const c)
 ;;
 
