@@ -279,26 +279,18 @@ let%expect_test "max_rounds bounds an axiom whose instances keep matching \
   [%expect {| (term_count 16) |}]
 ;;
 
-(* Deliberately not a bare unit-vs-unit clash (see the discussion above about
-   [Solver.assert_formula]'s "not enforced" assert-time-conflict case, which
-   [Quantifier_solver.solve] can only report with [proof = None]): [h a = a] and
-   [h b = b] (both from instantiating the axiom) are each consistent on their
-   own, and only conflict with the separately-asserted [a = b] / [h a <> h b]
-   via EUF congruence/transitivity -- reasoning that only happens inside an
-   actual [Solver.solve] call, so this exercises the normal, fully-proved
-   [Unsat] path. *)
 let%expect_test "produce_proofs: a quantifier-driven unsat yields a checked \
                  proof, with zero special-casing needed for instances"
   =
   let qs =
     Quantifier_solver.create ~config:{ Solver.Config.produce_proofs = true } ()
   in
-  let h_sym = Tvar.of_string "h" in
-  let h arg : Formula.any = App (h_sym, [ arg ]) in
+  let f_sym = Tvar.of_string "f" in
+  let f arg : Formula.any = App (f_sym, [ arg ]) in
   ignore
     (Quantifier_solver.assert_formula
        qs
-       (forall_axiom ~trigger:h ~body:(fun x -> Eq (h x, x)))
+       (forall_axiom ~trigger:f ~body:(fun x -> Eq (f x, x)))
      : _ Or_error.t);
   let a : Formula.any = Var (Tvar.of_string "a") in
   let b : Formula.any = Var (Tvar.of_string "b") in
@@ -308,12 +300,45 @@ let%expect_test "produce_proofs: a quantifier-driven unsat yields a checked \
   ignore
     (Quantifier_solver.assert_formula
        qs
-       (Formula.widen_quantified (Not (Eq (h a, h b))))
+       (Formula.widen_quantified (Not (Eq (f a, b))))
      : _ Or_error.t);
   (match Quantifier_solver.solve qs ~max_rounds:2 with
    | Sat _ | Unknown_but_possibly_sat _ -> print_endline "unexpected sat"
    | Unsat { proof = None; _ } -> print_endline "no proof produced"
    | Unsat { proof = Some proof; _ } ->
-     print_s [%message "" ~checked:(Or_error.is_ok (Proof.check proof) : bool)]);
-  [%expect {| (checked true) |}]
+     print_s [%message "" ~checked:(Or_error.is_ok (Proof.check proof) : bool)];
+     print_endline (Proof.to_string_hum proof));
+  [%expect
+    {|
+    (checked true)
+    Assumptions:
+      a0: bool ≠ int
+      a1: bool ≠ float
+      a2: int ≠ float
+      a3: %guard.28 = %guard.27
+      a4: a = b
+      a5: f(a) ≠ b
+      a6: %guard.28 ≠ %guard.27 ∨ f(a) = a
+    Steps:
+      s0: bool ≠ int   [assumption a0]
+      s1: bool ≠ float   [assumption a1]
+      s2: int ≠ float   [assumption a2]
+      s3: %guard.28 = %guard.27   [assumption a3]
+      s4: a = b   [assumption a4]
+      s5: f(a) ≠ b   [assumption a5]
+      s6: %guard.28 ≠ %guard.27 ∨ f(a) = a   [assumption a6]
+      s7: false   [refutation of [s0, s1, s2, s3, s4, s5, s6]]
+        refutation:
+          extensions:
+            e0 := (¬(%guard.27 = %guard.28) ∨ a = f(a))
+          steps:
+            r0: %guard.27 = %guard.28   [assumption a3]
+            r1: a = b   [assumption a4]
+            r2: b ≠ f(a)   [assumption a5]
+            r3: a = f(a) ∨ %guard.27 ≠ %guard.28 ∨ ¬(e0)   [definition of e0]
+            r4: e0   [assumption a6]
+            r5: a ≠ b ∨ a ≠ f(a) ∨ b = f(a)   [EUF: b = f(a) via [a = b; a = f(a)]]
+            r6: ⊥   [RUP over [r0, r1, r2, r4, r5, r3]]
+    Conclusion: s7
+    |}]
 ;;
