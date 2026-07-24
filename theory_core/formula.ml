@@ -1,6 +1,20 @@
 open! Core
 open! Feel.Import
 
+type any_theory =
+  [ `Boolean
+  | `Uf
+  | `Type
+  | `La
+  | `Term
+  | `Atom
+  ]
+
+type any_quantified_theory =
+  [ any_theory
+  | `Quantified
+  ]
+
 type _ t =
   (* always used *)
   | Var : Tvar.t -> [> `Term ] t
@@ -11,6 +25,12 @@ type _ t =
   | Not : 'a t -> ([> `Boolean ] as 'a) t
   | And : 'a t list -> ([> `Boolean ] as 'a) t
   | Or : 'a t list -> ([> `Boolean ] as 'a) t
+  (* Quantifiers -- see formula.mli for why [body]/[triggers] are pinned to
+     [any_theory t] rather than the ambient ['a t]. *)
+  | Forall :
+      Tvar.t list * any_theory t list list * any_theory t
+      -> ([> `Quantified ] as 'a) t
+  | Exists : Tvar.t list * any_theory t -> ([> `Quantified ] as 'a) t
   (* UF *)
   | App : Tvar.t * 'a t list -> ([> `Uf ] as 'a) t
   (* Types *)
@@ -56,6 +76,8 @@ module Op = struct
     | La_scale_const of Q.t
     | La_add
     | La_compare of [ `Le | `Ge | `Lt | `Gt ]
+    | Forall of Tvar.t list
+    | Exists of Tvar.t list
   [@@deriving sexp, compare, hash, equal]
 
   include functor Hashable.Make
@@ -72,6 +94,8 @@ let op : type a. a t -> Op.t =
   | Not _ -> Not
   | And _ -> And
   | Or _ -> Or
+  | Forall (bound, _, _) -> Forall bound
+  | Exists (bound, _) -> Exists bound
   | App (v, _) -> App v
   | Bool -> Bool
   | Int -> Int
@@ -86,15 +110,6 @@ let op : type a. a t -> Op.t =
   | La_add _ -> La_add
   | La_compare (_, op, _) -> La_compare op
 ;;
-
-type any_theory =
-  [ `Boolean
-  | `Uf
-  | `Type
-  | `La
-  | `Term
-  | `Atom
-  ]
 
 module Theory = struct
   type _ t =
@@ -130,8 +145,10 @@ module Theory = struct
 end
 
 type any = any_theory t
+type quantified = any_quantified_theory t
 
 let widen (type a) (t : a t) : any = Obj.magic t
+let widen_quantified (type a) (t : a t) : quantified = Obj.magic t
 let widen_list (type a) (l : a t list) : any list = Obj.magic l
 
 let args (type a) (t : a t) : any list =
@@ -143,6 +160,8 @@ let args (type a) (t : a t) : any list =
   | Not x -> [ widen x ]
   | And l -> widen_list l
   | Or l -> widen_list l
+  | Forall (_, triggers, body) -> List.concat triggers @ [ body ]
+  | Exists (_, body) -> [ body ]
   | App (_, l) -> widen_list l
   | Bool -> []
   | Int -> []
@@ -167,6 +186,10 @@ let make_opt ~(op : Op.t) ~(args : any list) : any option =
   | Not, [ a ] -> Some (Not a)
   | And, l -> Some (And l)
   | Or, l -> Some (Or l)
+  (* Unlike every other op, a Forall/Exists can never be reconstructed here: the
+     result would have to be typed [quantified], not [any]. *)
+  | Forall _, _ -> None
+  | Exists _, _ -> None
   | App v, l -> Some (App (v, l))
   | Bool, [] -> Some Bool
   | Int, [] -> Some Int
@@ -201,49 +224,80 @@ let make_opt ~(op : Op.t) ~(args : any list) : any option =
 
 let make ~op ~args = Option.value_exn (make_opt ~op ~args)
 
+let rec substitute (subst : any Tvar.Map.t) (term : any) : any =
+  match term with
+  | Var v ->
+    (match Map.find subst v with
+     | Some replacement -> replacement
+     | None -> term)
+  | _ ->
+    let new_args = List.map (args term) ~f:(substitute subst) in
+    make ~op:(op term) ~args:new_args
+;;
+
 let rec sexp_of_t : type a. (a -> Sexp.t) -> a t -> Sexp.t =
   fun sexp_of_a formula ->
   let node tag args = Sexp.List (Sexp.Atom tag :: args) in
-  let sexp_of_t a = sexp_of_t sexp_of_a a in
+  (* Children of the same phantom tag [a] as [formula] itself. *)
+  let sexp_of_sub a = sexp_of_t sexp_of_a a in
+  (* Children pinned to [any_theory t] (Forall/Exists triggers and bodies), a
+     different instantiation than [a] -- can't reuse [sexp_of_sub]. *)
+  let sexp_of_ground a = sexp_of_t (fun _ -> assert false) a in
   match formula with
   | Var v -> node "Var" [ [%sexp_of: Tvar.t] v ]
-  | Eq (a, b) -> node "Eq" [ sexp_of_t a; sexp_of_t b ]
+  | Eq (a, b) -> node "Eq" [ sexp_of_sub a; sexp_of_sub b ]
   | True -> Sexp.Atom "True"
   | False -> Sexp.Atom "False"
-  | Not f -> node "Not" [ sexp_of_t f ]
-  | And fs -> node "And" [ [%sexp_of: Sexp.t list] (List.map fs ~f:sexp_of_t) ]
-  | Or fs -> node "Or" [ [%sexp_of: Sexp.t list] (List.map fs ~f:sexp_of_t) ]
+  | Not f -> node "Not" [ sexp_of_sub f ]
+  | And fs ->
+    node "And" [ [%sexp_of: Sexp.t list] (List.map fs ~f:sexp_of_sub) ]
+  | Or fs -> node "Or" [ [%sexp_of: Sexp.t list] (List.map fs ~f:sexp_of_sub) ]
+  | Forall (bound, triggers, body) ->
+    node
+      "Forall"
+      [ [%sexp_of: Tvar.t list] bound
+      ; [%sexp_of: Sexp.t list list]
+          (List.map triggers ~f:(List.map ~f:sexp_of_ground))
+      ; sexp_of_ground body
+      ]
+  | Exists (bound, body) ->
+    node "Exists" [ [%sexp_of: Tvar.t list] bound; sexp_of_ground body ]
   | App (f, args) ->
     node
       "App"
       [ [%sexp_of: Tvar.t] f
-      ; [%sexp_of: Sexp.t list] (List.map args ~f:sexp_of_t)
+      ; [%sexp_of: Sexp.t list] (List.map args ~f:sexp_of_sub)
       ]
   | Bool -> Sexp.Atom "Bool"
   | Int -> Sexp.Atom "Int"
   | Float -> Sexp.Atom "Float"
   | Type -> Sexp.Atom "Type"
-  | Function_type (a, b) -> node "Function_type" [ sexp_of_t a; sexp_of_t b ]
-  | Type_of f -> node "Type_of" [ sexp_of_t f ]
+  | Function_type (a, b) ->
+    node "Function_type" [ sexp_of_sub a; sexp_of_sub b ]
+  | Type_of f -> node "Type_of" [ sexp_of_sub f ]
   | Type_var v -> node "Type_var" [ [%sexp_of: Tvar.t] v ]
   | Type_app (f, args) ->
     node
       "Type_app"
       [ [%sexp_of: Tvar.t] f
-      ; [%sexp_of: Sexp.t list] (List.map args ~f:sexp_of_t)
+      ; [%sexp_of: Sexp.t list] (List.map args ~f:sexp_of_sub)
       ]
   | La_const q -> node "La_const" [ [%sexp_of: Q.t] q ]
   | La_scale_const (q, a) ->
-    node "La_scale_const" [ [%sexp_of: Q.t] q; sexp_of_t a ]
-  | La_add (a, b) -> node "La_add" [ sexp_of_t a; sexp_of_t b ]
+    node "La_scale_const" [ [%sexp_of: Q.t] q; sexp_of_sub a ]
+  | La_add (a, b) -> node "La_add" [ sexp_of_sub a; sexp_of_sub b ]
   | La_compare (a, op, b) ->
     node
       "La_compare"
-      [ sexp_of_t a; [%sexp_of: [ `Le | `Ge | `Lt | `Gt ]] op; sexp_of_t b ]
+      [ sexp_of_sub a; [%sexp_of: [ `Le | `Ge | `Lt | `Gt ]] op; sexp_of_sub b ]
 ;;
 
 let sexp_of_t_any : type a. a t -> Sexp.t =
   fun f -> sexp_of_t (fun _ -> assert false) f
+;;
+
+let sexp_of_quantified (q : quantified) : Sexp.t =
+  sexp_of_t (fun _ -> assert false) q
 ;;
 
 let rec any_of_sexp sexp : any =
@@ -298,6 +352,8 @@ let rank : type a. a t -> int = function
   | Not _ -> 4
   | And _ -> 5
   | Or _ -> 6
+  | Forall _ -> 20
+  | Exists _ -> 21
   | App _ -> 7
   | Bool -> 8
   | Int -> 9
@@ -335,6 +391,15 @@ let rec compare_poly : type a b. a t -> b t -> int =
   | Not f1, Not f2 -> compare_poly f1 f2
   | And fs1, And fs2 -> compare_list_poly compare_poly fs1 fs2
   | Or fs1, Or fs2 -> compare_list_poly compare_poly fs1 fs2
+  | Forall (b1, tr1, body1), Forall (b2, tr2, body2) ->
+    lex
+      ([%compare: Tvar.t list] b1 b2)
+      (fun () ->
+        lex
+          (compare_list_poly (compare_list_poly compare_poly) tr1 tr2)
+          (fun () -> compare_poly body1 body2))
+  | Exists (b1, body1), Exists (b2, body2) ->
+    lex ([%compare: Tvar.t list] b1 b2) (fun () -> compare_poly body1 body2)
   | App (f1, args1), App (f2, args2) ->
     lex
       ([%compare: Tvar.t] f1 f2)
@@ -368,6 +433,8 @@ let rec compare_poly : type a b. a t -> b t -> int =
   | Not _, _
   | And _, _
   | Or _, _
+  | Forall _, _
+  | Exists _, _
   | App _, _
   | Bool, _
   | Int, _
@@ -410,6 +477,14 @@ let rec hash_fold_poly : type a. Hash.state -> a t -> Hash.state =
   | Not f -> hash_fold_poly state f
   | And fs -> hash_fold_list_poly hash_fold_poly state fs
   | Or fs -> hash_fold_list_poly hash_fold_poly state fs
+  | Forall (bound, triggers, body) ->
+    let state = [%hash_fold: Tvar.t list] state bound in
+    let state =
+      List.fold triggers ~init:state ~f:(hash_fold_list_poly hash_fold_poly)
+    in
+    hash_fold_poly state body
+  | Exists (bound, body) ->
+    hash_fold_poly ([%hash_fold: Tvar.t list] state bound) body
   | App (f, args) ->
     hash_fold_list_poly hash_fold_poly ([%hash_fold: Tvar.t] state f) args
   | Function_type (a, b) -> hash_fold_poly (hash_fold_poly state a) b
@@ -451,4 +526,25 @@ module Any = struct
 
   include functor Comparable.Make
   include functor Hashable.Make
+end
+
+let compare_quantified (a : quantified) (b : quantified) : int =
+  compare_poly a b
+;;
+
+let equal_quantified (a : quantified) (b : quantified) : bool =
+  compare_poly a b = 0
+;;
+
+let hash_fold_quantified (state : Hash.state) (a : quantified) : Hash.state =
+  hash_fold_poly state a
+;;
+
+let hash_quantified (a : quantified) : int = Hash.run hash_fold_poly a
+
+module Quantified = struct
+  type t = quantified [@@deriving sexp_of, compare, hash]
+
+  include functor Comparable.Make_plain
+  include functor Hashable.Make_plain
 end

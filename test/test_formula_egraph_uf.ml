@@ -78,8 +78,8 @@ let%expect_test "Type_eq atoms are handled natively" =
     {|
     (Lemma
      (((Type_eq ((Base Int) (Base Float))) true)
-      ((Type_eq ((Var a) (Base Int))) false)
-      ((Type_eq ((Var a) (Base Float))) false)))
+      ((Type_eq ((Var a) (Base Float))) false)
+      ((Type_eq ((Var a) (Base Int))) false)))
     |}]
 ;;
 

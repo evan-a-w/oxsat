@@ -198,6 +198,11 @@ module Shape = struct
     | Type
     | La
     | Var of Tvar.t
+    (* Unreachable in practice: [encode] only ever takes a
+       [[> `Boolean] Formula.t], which structurally excludes [Forall]/[Exists].
+       Still needed for exhaustiveness since [shape_of] is generic over any
+       phantom tag. *)
+    | Quantified
 end
 
 let shape_of (type a) (formula : a Formula.t) : Shape.t =
@@ -207,6 +212,7 @@ let shape_of (type a) (formula : a Formula.t) : Shape.t =
     Bool
     (* unreachable: [shape_of] is only ever called on [Eq]'s own arguments *)
   | True | False | Not _ | And _ | Or _ -> Bool
+  | Forall (_, _, _) | Exists (_, _) -> Quantified
   | App (_, _) -> Uf
   | Bool | Int | Float | Type
   | Function_type (_, _)
@@ -317,6 +323,8 @@ and eq_formula_of
   fun a b ->
   let module F = Formula_with_no_shared_theories in
   match shape_of a, shape_of b with
+  | Quantified, _ | _, Quantified ->
+    Or_error.error_s [%message "a quantified formula is not comparable"]
   | Bool, _ | _, Bool ->
     let%bind.Or_error a = bool_formula_of a in
     let%bind.Or_error b = bool_formula_of b in
@@ -350,6 +358,8 @@ and neq_formula_of
   fun a b ->
   let module F = Formula_with_no_shared_theories in
   match shape_of a, shape_of b with
+  | Quantified, _ | _, Quantified ->
+    Or_error.error_s [%message "a quantified formula is not comparable"]
   | Bool, _ | _, Bool ->
     let%bind.Or_error eq = eq_formula_of a b in
     Ok (F.Not eq)

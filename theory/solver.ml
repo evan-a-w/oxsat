@@ -422,7 +422,9 @@ let clause_to_formula t (literals : int array) : Formula.any option =
   else None
 ;;
 
-let make_unsat_core t (core_clauses : Feel.Sat_result.Core_clause.t list)
+let unsat_core_of_core_clauses
+  t
+  (core_clauses : Feel.Sat_result.Core_clause.t list)
   : Solver_result.Core_step.t list
   =
   List.filter_map core_clauses ~f:(fun { literals; is_theory } ->
@@ -519,7 +521,7 @@ let solve ?time_bound ?(assumptions = [||]) t : Solver_result.t =
           ~scope_vars:t.scopes
           ~refutation_clauses)
     in
-    Unsat { core = make_unsat_core t core; proof }
+    Unsat { core = unsat_core_of_core_clauses t core; proof }
 ;;
 
 let stats t = Feel.Solver.stats t.solver

@@ -5,6 +5,11 @@ module Core_step = struct
   type t =
     | Asserted of Formula.any
     | Theory_lemma of Formula.any
+    | Quantifier_instance of
+        { body : Formula.any
+        ; bound_values : (Tvar.t * Formula.any) list
+        ; instance : Formula.any
+        }
   [@@deriving sexp_of]
 end
 
