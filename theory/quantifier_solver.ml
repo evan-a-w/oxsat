@@ -144,11 +144,31 @@ let relabel_core_step t (step : Solver_result.Core_step.t)
   | Theory_lemma _ | Quantifier_instance _ -> step
 ;;
 
-let relabel_result t (result : Solver_result.t) : Solver_result.t =
+module Result = struct
+  type t =
+    | Unsat of
+        { core : Solver_result.Core_step.t list
+        ; proof : Proof.t option [@sexp.option]
+        }
+    | Sat of { model : Model.t }
+    | Unknown_but_possibly_sat of { model : Model.t }
+  [@@deriving sexp_of]
+end
+
+(* Maps the underlying [Solver_result.t] to a [Result.t], relabeling
+   instance-derived core steps and demoting a [Sat] to
+   [Unknown_but_possibly_sat] whenever any universal axiom is in play: with
+   axioms present, trigger-based instantiation can't certify the model against
+   the universals, so the ground [Sat] is only "possibly sat". A ground problem
+   (no axioms ever registered) keeps its authoritative [Sat]. *)
+let classify t (result : Solver_result.t) : Result.t =
   match result with
-  | Sat _ -> result
   | Unsat { core; proof } ->
     Unsat { core = List.map core ~f:(relabel_core_step t); proof }
+  | Sat { model } ->
+    if List.is_empty t.axiom_states
+    then Sat { model }
+    else Unknown_but_possibly_sat { model }
 ;;
 
 let rec solve_loop ?time_bound ?assumptions ~max_rounds ~round t
@@ -180,6 +200,6 @@ let rec solve_loop ?time_bound ?assumptions ~max_rounds ~round t
           solve_loop ?time_bound ?assumptions ~max_rounds ~round:(round + 1) t))
 ;;
 
-let solve ?time_bound ?assumptions ?(max_rounds = 50) t =
-  relabel_result t (solve_loop ?time_bound ?assumptions ~max_rounds ~round:0 t)
+let solve ?time_bound ?assumptions ?(max_rounds = 50) t : Result.t =
+  classify t (solve_loop ?time_bound ?assumptions ~max_rounds ~round:0 t)
 ;;

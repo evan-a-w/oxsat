@@ -26,21 +26,38 @@ val pop : t -> unit
 (** The underlying theory egraph -- see {!Solver.egraph}. *)
 val egraph : t -> Formula_egraph_uf.t
 
+(** The outcome of {!solve}. Distinct from {!Solver_result.t} because quantifier
+    reasoning cannot in general certify satisfiability: a [Sat] here is a
+    genuine, proven model, whereas [Unknown_but_possibly_sat] is a ground model
+    of everything instantiated so far that may still violate an uninstantiated
+    universal. *)
+module Result : sig
+  type t =
+    | Unsat of
+        { core : Solver_result.Core_step.t list
+        ; proof : Proof.t option [@sexp.option]
+        }
+    | Sat of { model : Model.t }
+    | Unknown_but_possibly_sat of { model : Model.t }
+  [@@deriving sexp_of]
+end
+
 (** Repeatedly solves the underlying [Solver.t], then e-matches every registered
     axiom's triggers against the current egraph and asserts newly-found ground
     instances (guarded by the axiom's guard atom, so it's sound regardless of
     whether that atom happens to be forced true), until one of:
-    - the SAT search reports [Unsat]
-    - a round finds no new instances (saturation -- the returned [Sat] is a
-      genuine model, modulo the inherent incompleteness of E-matching-based
-      quantifier reasoning: the absence of a matching ground term doesn't prove
-      the axiom's universal validity)
-    - [max_rounds] (default 50) is reached, since E-matching over UF need not
-      terminate -- in that case the returned [Sat] model is only as good as the
-      instances found so far. *)
+    - the SAT search reports [Unsat] -> [Result.Unsat] (authoritative)
+    - a ground model is reached (either a round finds no new instances, or
+      [max_rounds] -- default 50 -- is hit; E-matching over UF need not
+      terminate). Such a model is returned as [Result.Sat] only if no universal
+      axioms were ever asserted, so the underlying ground result is
+      authoritative; otherwise it is [Result.Unknown_but_possibly_sat], since
+      trigger-based instantiation is incomplete -- the model satisfies every
+      instance generated so far but is not proven to satisfy the universals over
+      terms no trigger matched. *)
 val solve
   :  ?time_bound:Feel.Solver.time_bound
   -> ?assumptions:int array
   -> ?max_rounds:int
   -> t
-  -> Solver_result.t
+  -> Result.t

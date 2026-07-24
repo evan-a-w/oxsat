@@ -134,13 +134,6 @@ module Op : sig
     | La_scale_const of Q.t
     | La_add
     | La_compare of [ `Le | `Ge | `Lt | `Gt ]
-    (* Appended, not inserted alongside the other boolean-structure ops above,
-       so ppx_hash/ppx_compare's declaration-order-derived tags for every
-       pre-existing op stay unchanged. Quantifier ops carry the bound-variable
-       list as a shape tag; unlike every other op, [make_opt]/[make] can't
-       reconstruct a [Forall]/[Exists] from [op]+[args] (their result would have
-       to be typed [quantified], not [any]) so they always return [None] for
-       these two. *)
     | Forall of Tvar.t list
     | Exists of Tvar.t list
   [@@deriving sexp, compare, hash, equal]

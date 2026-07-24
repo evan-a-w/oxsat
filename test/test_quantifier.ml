@@ -190,7 +190,7 @@ let%expect_test "forall x. f x = x contradicts an asserted disequality, only \
        qs
        (Formula.widen_quantified (Not (Eq (f a, a))))
      : _ Or_error.t);
-  print_s [%sexp (Quantifier_solver.solve qs : Solver_result.t)];
+  print_s [%sexp (Quantifier_solver.solve qs : Quantifier_solver.Result.t)];
   [%expect
     {|
     (Unsat
@@ -204,7 +204,25 @@ let%expect_test "forall x. f x = x contradicts an asserted disequality, only \
     |}]
 ;;
 
-let%expect_test "forall x. f x = x is satisfiable when nothing contradicts it" =
+let%expect_test "a purely ground problem (no axioms) still returns a definite \
+                 Sat"
+  =
+  let qs = Quantifier_solver.create () in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  ignore
+    (Quantifier_solver.assert_formula qs (Formula.widen_quantified (Eq (a, a)))
+     : _ Or_error.t);
+  (match Quantifier_solver.solve qs with
+   | Sat _ -> print_endline "Sat"
+   | Unknown_but_possibly_sat _ -> print_endline "unexpected Unknown"
+   | Unsat _ as r -> print_s [%sexp (r : Quantifier_solver.Result.t)]);
+  [%expect {| Sat |}]
+;;
+
+(* With a universal axiom in play, a saturated ground model is only
+   [Unknown_but_possibly_sat]: nothing contradicts [forall x. f x = x], but
+   trigger-based instantiation can't certify it over terms no trigger reached. *)
+let%expect_test "forall x. f x = x with no contradiction is only possibly-sat" =
   let qs = Quantifier_solver.create () in
   let f_sym = Tvar.of_string "f" in
   let f arg : Formula.any = App (f_sym, [ arg ]) in
@@ -220,9 +238,10 @@ let%expect_test "forall x. f x = x is satisfiable when nothing contradicts it" =
        (Formula.widen_quantified (Eq (f a, f a)))
      : _ Or_error.t);
   (match Quantifier_solver.solve qs with
-   | Sat _ -> print_endline "Sat"
-   | Unsat _ as r -> print_s [%sexp (r : Solver_result.t)]);
-  [%expect {| Sat |}]
+   | Sat _ -> print_endline "unexpected definite Sat"
+   | Unknown_but_possibly_sat _ -> print_endline "Unknown_but_possibly_sat"
+   | Unsat _ as r -> print_s [%sexp (r : Quantifier_solver.Result.t)]);
+  [%expect {| Unknown_but_possibly_sat |}]
 ;;
 
 let%expect_test "max_rounds bounds an axiom whose instances keep matching \
@@ -246,9 +265,11 @@ let%expect_test "max_rounds bounds an axiom whose instances keep matching \
        (Formula.widen_quantified (Eq (f a, f a)))
      : _ Or_error.t);
   (match Quantifier_solver.solve qs ~max_rounds:3 with
-   | Sat _ -> print_endline "Sat (terminated within max_rounds)"
-   | Unsat _ as r -> print_s [%sexp (r : Solver_result.t)]);
-  [%expect {| Sat (terminated within max_rounds) |}];
+   | Unknown_but_possibly_sat _ ->
+     print_endline "Unknown_but_possibly_sat (terminated within max_rounds)"
+   | Sat _ -> print_endline "unexpected definite Sat"
+   | Unsat _ as r -> print_s [%sexp (r : Quantifier_solver.Result.t)]);
+  [%expect {| Unknown_but_possibly_sat (terminated within max_rounds) |}];
   (* Registered terms grew (bounded by max_rounds), rather than never returning. *)
   let term_count =
     Formula_egraph_uf.registered_terms (Quantifier_solver.egraph qs)
@@ -290,7 +311,7 @@ let%expect_test "produce_proofs: a quantifier-driven unsat yields a checked \
        (Formula.widen_quantified (Not (Eq (h a, h b))))
      : _ Or_error.t);
   (match Quantifier_solver.solve qs ~max_rounds:2 with
-   | Sat _ -> print_endline "unexpected Sat"
+   | Sat _ | Unknown_but_possibly_sat _ -> print_endline "unexpected sat"
    | Unsat { proof = None; _ } -> print_endline "no proof produced"
    | Unsat { proof = Some proof; _ } ->
      print_s [%message "" ~checked:(Or_error.is_ok (Proof.check proof) : bool)]);
