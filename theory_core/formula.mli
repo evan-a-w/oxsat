@@ -1,6 +1,25 @@
 open! Core
 open! Feel.Import
 
+type any_theory =
+  [ `Boolean
+  | `Uf
+  | `Type
+  | `La
+  | `Term
+  | `Atom
+  ]
+
+(** [any_theory] plus [`Quantified]. Kept separate from [any_theory] so that
+    functions typed over [any] (e.g. {!Formula_egraph_uf.add_term},
+    [Encoding.encode], [Model.check]) are statically incapable of receiving a
+    [Forall]/[Exists] -- see {!Quantifier_elaboration} for how those get turned
+    into plain [any] before reaching ground-only consumers. *)
+type any_quantified_theory =
+  [ any_theory
+  | `Quantified
+  ]
+
 (** Propositional formulas over theory atoms. *)
 type _ t =
   (* always used *)
@@ -12,6 +31,14 @@ type _ t =
   | Not : 'a t -> ([> `Boolean ] as 'a) t
   | And : 'a t list -> ([> `Boolean ] as 'a) t
   | Or : 'a t list -> ([> `Boolean ] as 'a) t
+  (* Quantifiers. [body]/[triggers] are plain [any_theory t], not the
+     polymorphic ['a t] used elsewhere in this GADT: a Forall/Exists body can't
+     itself contain a further quantifier (no alternation in v1). Tagged
+     [`Quantified], not [`Boolean], so it never unifies with [any]. *)
+  | Forall :
+      Tvar.t list * any_theory t list list * any_theory t
+      -> ([> `Quantified ] as 'a) t
+  | Exists : Tvar.t list * any_theory t -> ([> `Quantified ] as 'a) t
   (* UF *)
   | App : Tvar.t * 'a t list -> ([> `Uf ] as 'a) t
   (* Types *)
@@ -34,15 +61,6 @@ type _ t =
       * 'a t
       -> ([> `La ] as 'a) t
 [@@deriving sexp, compare, hash, equal]
-
-type any_theory =
-  [ `Boolean
-  | `Uf
-  | `Type
-  | `La
-  | `Term
-  | `Atom
-  ]
 
 module Theory : sig
   type _ t =
@@ -69,14 +87,29 @@ end
 
 type any = any_theory t [@@deriving sexp, compare, hash, equal]
 
+(** No [of_sexp]/round-trip: quantified formulas are built programmatically, not
+    parsed, so only the printing direction is provided. *)
+type quantified = any_quantified_theory t
+[@@deriving sexp_of, compare, hash, equal]
+
 (** Widens the phantom theory tag without changing the formula. *)
 val widen : 'a t -> any
+
+(** Like {!widen}, but into the wider [`Quantified]-inclusive [quantified]. *)
+val widen_quantified : 'a t -> quantified
 
 module Any : sig
   type t = any [@@deriving sexp, compare, hash]
 
   include Comparable.S with type t := t
   include Hashable.S with type t := t
+end
+
+module Quantified : sig
+  type t = quantified [@@deriving sexp_of, compare, hash]
+
+  include Comparable.S_plain with type t := t
+  include Hashable.S_plain with type t := t
 end
 
 module Op : sig
@@ -101,6 +134,15 @@ module Op : sig
     | La_scale_const of Q.t
     | La_add
     | La_compare of [ `Le | `Ge | `Lt | `Gt ]
+    (* Appended, not inserted alongside the other boolean-structure ops above,
+       so ppx_hash/ppx_compare's declaration-order-derived tags for every
+       pre-existing op stay unchanged. Quantifier ops carry the bound-variable
+       list as a shape tag; unlike every other op, [make_opt]/[make] can't
+       reconstruct a [Forall]/[Exists] from [op]+[args] (their result would have
+       to be typed [quantified], not [any]) so they always return [None] for
+       these two. *)
+    | Forall of Tvar.t list
+    | Exists of Tvar.t list
   [@@deriving sexp, compare, hash, equal]
 
   include Comparable.S with type t := t
@@ -111,3 +153,8 @@ val op : 'a t -> Op.t
 val args : 'a t -> any list
 val make_opt : op:Op.t -> args:any list -> any option
 val make : op:Op.t -> args:any list -> any
+
+(** Capture-free substitution over a ground term: replaces each [Var v] for [v]
+    in [subst] with its mapped replacement, leaving everything else structurally
+    unchanged. *)
+val substitute : any Tvar.Map.t -> any -> any

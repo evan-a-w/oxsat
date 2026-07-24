@@ -17,12 +17,17 @@ module Shape = struct
     | Type
     | La
     | Var
+    (* Unreachable via [of_formula] -- [Formula.any] structurally excludes
+       [Forall]/[Exists] -- but [shape_of] is generic over any phantom tag, so
+       it must still classify them. *)
+    | Quantified
 end
 
 let shape_of (type a) (formula : a Formula.t) : Shape.t =
   match formula with
   | Var _ -> Var
   | Eq _ | True | False | Not _ | And _ | Or _ -> Bool
+  | Forall _ | Exists _ -> Quantified
   | App _ -> Uf
   | Bool
   | Int
@@ -123,6 +128,8 @@ let rec of_formula : Formula.any -> t Or_error.t = function
 and eq_formula_of : type a. a Formula.t -> a Formula.t -> t Or_error.t =
   fun a b ->
   match shape_of a, shape_of b with
+  | Quantified, _ | _, Quantified ->
+    Or_error.error_s [%message "a quantified formula is not comparable"]
   | Bool, _ | _, Bool ->
     let%bind.Or_error a = of_formula (Formula.widen a) in
     let%map.Or_error b = of_formula (Formula.widen b) in
@@ -143,6 +150,8 @@ and eq_formula_of : type a. a Formula.t -> a Formula.t -> t Or_error.t =
 and neq_formula_of : type a. a Formula.t -> a Formula.t -> t Or_error.t =
   fun a b ->
   match shape_of a, shape_of b with
+  | Quantified, _ | _, Quantified ->
+    Or_error.error_s [%message "a quantified formula is not comparable"]
   | Bool, _ | _, Bool ->
     let%map.Or_error equality = eq_formula_of a b in
     Not equality
