@@ -20,7 +20,14 @@ val assert_formula
   -> Formula.quantified
   -> [ `Ok | `Unsat of Feel.Sat_result.Core_clause.t list ] Or_error.t
 
+(** Assertion scopes over {!Solver.push}/{!Solver.pop}. In addition to the SAT
+    solver retracting the scope's clauses, [pop] retracts this layer's
+    scope-local state: axioms registered while the scope was open, and the
+    instances they recorded as already-emitted. So an instance asserted inside a
+    scope can be re-derived after its [pop], rather than being permanently
+    suppressed by the already-instantiated cache while its clause is gone. *)
 val push : t -> unit
+
 val pop : t -> unit
 
 (** The underlying theory egraph -- see {!Solver.egraph}. *)

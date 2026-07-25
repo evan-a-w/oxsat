@@ -676,3 +676,66 @@ let%expect_test "produce_proofs: the checker rejects mutations of a real proof" 
        (broken_refutation_rejected true))
       |}]
 ;;
+
+(* Scope-awareness of the already-instantiated cache: an instance emitted inside
+   a [push] scope must not stay suppressed after the scope is popped and its
+   clause retracted. Here [f(a)=a] is emitted in-scope (against [f(a)≠c], no
+   conflict); after [pop] it must be re-derivable to contradict a freshly
+   asserted [f(a)≠a]. Without scope-aware [seen] the second solve would miss it
+   and answer "possibly sat". *)
+let%expect_test "push/pop: a popped instance is re-derivable, not suppressed" =
+  let qs = Quantifier_solver.create () in
+  let f arg : Formula.any = App (Tvar.of_string "f", [ arg ]) in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let c : Formula.any = Var (Tvar.of_string "c") in
+  let x = Tvar.of_string "x" in
+  let label = function
+    | Quantifier_solver.Result.Unsat _ -> "unsat"
+    | Sat _ -> "sat"
+    | Unknown_but_possibly_sat _ -> "possibly-sat"
+  in
+  let assert_ f =
+    ignore (Quantifier_solver.assert_formula qs f : _ Or_error.t)
+  in
+  assert_ (Forall ([ x ], [ [ f (Var x) ] ], Eq (f (Var x), Var x)));
+  Quantifier_solver.push qs;
+  assert_ (Formula.widen_quantified (Not (Eq (f a, c))));
+  print_endline (label (Quantifier_solver.solve qs ~max_rounds:2));
+  Quantifier_solver.pop qs;
+  assert_ (Formula.widen_quantified (Not (Eq (f a, a))));
+  print_endline (label (Quantifier_solver.solve qs ~max_rounds:2));
+  [%expect {|
+    possibly-sat
+    unsat
+    |}]
+;;
+
+(* An axiom registered inside a scope is dropped on [pop]: after popping the
+   universal, the same disequality that was unsat with it present is now sat.
+   And because no axioms remain, the result is a definite [Sat], not "possibly
+   sat". *)
+let%expect_test "push/pop: an axiom registered in a scope is dropped on pop" =
+  let qs = Quantifier_solver.create () in
+  let f arg : Formula.any = App (Tvar.of_string "f", [ arg ]) in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let x = Tvar.of_string "x" in
+  let label = function
+    | Quantifier_solver.Result.Unsat _ -> "unsat"
+    | Sat _ -> "sat"
+    | Unknown_but_possibly_sat _ -> "possibly-sat"
+  in
+  let assert_ f =
+    ignore (Quantifier_solver.assert_formula qs f : _ Or_error.t)
+  in
+  Quantifier_solver.push qs;
+  assert_ (Forall ([ x ], [ [ f (Var x) ] ], Eq (f (Var x), Var x)));
+  assert_ (Formula.widen_quantified (Not (Eq (f a, a))));
+  print_endline (label (Quantifier_solver.solve qs ~max_rounds:2));
+  Quantifier_solver.pop qs;
+  assert_ (Formula.widen_quantified (Not (Eq (f a, a))));
+  print_endline (label (Quantifier_solver.solve qs ~max_rounds:2));
+  [%expect {|
+    unsat
+    sat
+    |}]
+;;
