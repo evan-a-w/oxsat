@@ -391,6 +391,33 @@ let assert_formula t (formula : Formula.any)
   Ok result
 ;;
 
+(* Proof provenance for a quantifier layer on top ({!Quantifier_solver}): no-ops
+   unless proof production is on. See {!Proof_generation}. *)
+
+let proof_add_quantified_given t given =
+  Option.iter t.proof_generation ~f:(fun pg ->
+    Proof_generation.add_quantified_given pg given)
+;;
+
+let proof_note_forall_instance t ~instance ~forall ~bound_values =
+  Option.iter t.proof_generation ~f:(fun pg ->
+    Proof_generation.note_forall_instance pg ~instance ~forall ~bound_values)
+;;
+
+let proof_note_exists_skolemization t ~skolem_body ~existential ~skolems =
+  Option.iter t.proof_generation ~f:(fun pg ->
+    Proof_generation.note_exists_skolemization
+      pg
+      ~skolem_body
+      ~existential
+      ~skolems)
+;;
+
+let proof_note_synthetic t atom =
+  Option.iter t.proof_generation ~f:(fun pg ->
+    Proof_generation.note_synthetic pg atom)
+;;
+
 let push t =
   let activation = Encoding.fresh_var t.encoding in
   t.scopes <- activation :: t.scopes;

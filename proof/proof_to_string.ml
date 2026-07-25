@@ -116,6 +116,37 @@ let rec formula_to_string (formula : Formula.any) =
     in
     sprintf "%s %s %s" (formula_to_string a) op (formula_to_string b)
 
+(* A quantified formula: renders [∀]/[∃] with their bound variables, delegating
+   binder-free subterms to {!formula_to_string}. *)
+and quantified_to_string (q : Formula.quantified) =
+  let bound_to_string bound =
+    String.concat ~sep:", " (List.map bound ~f:Tvar.to_string)
+  in
+  match Formula.to_any q with
+  | Some ground -> formula_to_string ground
+  | None ->
+    (match q with
+     | Forall (bound, _triggers, body) ->
+       sprintf
+         "∀%s. %s"
+         (bound_to_string bound)
+         (formula_to_string (Formula.widen body))
+     | Exists (bound, body) ->
+       sprintf
+         "∃%s. %s"
+         (bound_to_string bound)
+         (formula_to_string (Formula.widen body))
+     | Not f -> sprintf "¬(%s)" (quantified_to_string f)
+     | And fs ->
+       String.concat
+         ~sep:" ∧ "
+         (List.map fs ~f:(fun f -> sprintf "(%s)" (quantified_to_string f)))
+     | Or fs ->
+       String.concat
+         ~sep:" ∨ "
+         (List.map fs ~f:(fun f -> sprintf "(%s)" (quantified_to_string f)))
+     | _ -> "<quantified?>")
+
 (* A sub-formula that appears as a conjunct/disjunct/negand: parenthesize
    compound boolean structure so precedence is unambiguous. *)
 and atom_to_string (formula : Formula.any) =
@@ -365,15 +396,15 @@ let certificate_to_string ~clause (certificate : Proof_theory_certificate.t) =
          (Tvar.to_string b))
 ;;
 
-let reason_to_string ~clause ~num_assumptions (reason : Refutation.Reason.t) =
+let reason_to_string ~clause ~premise_steps (reason : Refutation.Reason.t) =
   match reason with
   | Input_clause { input; literal = _ } ->
-    (* [input] indexes the refutation's inputs = the proof's assumptions
-       followed by a trailing [¬false]. Within the assumption range it *is*
-       assumption a[input]; the sentinel (which a real refutation never cites) is
-       named as a bare input to avoid implying a nonexistent assumption. *)
-    if input < num_assumptions
-    then sprintf "assumption a%d" input
+    (* [input] indexes the refutation's inputs = the enclosing [By_refutation]'s
+       premise steps followed by a trailing [¬false]. Name it by the proof step
+       that establishes that premise; the sentinel (which a real refutation never
+       cites) is named as a bare input to avoid implying a nonexistent step. *)
+    if input < Array.length premise_steps
+    then sprintf "s%d" premise_steps.(input)
     else sprintf "input i%d (¬false)" input
   | Extension_definition id ->
     sprintf "definition of e%d" (Proof_id.Extension.to_int id)
@@ -388,11 +419,11 @@ let reason_to_string ~clause ~num_assumptions (reason : Refutation.Reason.t) =
             sprintf "r%d" (Proof_id.Refutation_step.to_int h))))
 ;;
 
-(* Renders a refutation into [out] at the current indent. [num_assumptions] is
-   the enclosing proof's assumption count, used to name input references. Kept
-   here (rather than in [Proof]) since it needs only the [Refutation] and
-   certificate modules. *)
-let render_refutation out ~num_assumptions (refutation : Refutation.t) =
+(* Renders a refutation into [out] at the current indent. [premise_steps] are
+   the step indices of the enclosing [By_refutation]'s premises, in input order,
+   used to name input references. Kept here (rather than in [Proof]) since it
+   needs only the [Refutation] and certificate modules. *)
+let render_refutation out ~premise_steps (refutation : Refutation.t) =
   let open Buffer_out in
   line out "refutation:";
   indented out ~f:(fun () ->
@@ -418,6 +449,6 @@ let render_refutation out ~num_assumptions (refutation : Refutation.t) =
              (clause_to_string step.Refutation.Step.clause)
              (reason_to_string
                 ~clause:step.Refutation.Step.clause
-                ~num_assumptions
+                ~premise_steps
                 step.reason)))))
 ;;

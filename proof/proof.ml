@@ -12,7 +12,7 @@ module Refutation = Refutation
 module Assumption = struct
   type t =
     { name : string option
-    ; formula : Formula.any
+    ; formula : Formula.quantified
     }
   [@@deriving sexp, compare]
 end
@@ -35,6 +35,8 @@ module Kernel_rule = struct
         { direction : Rewrite_direction.t
         ; path : int list
         }
+    | Forall_instantiation of { bound_values : (Tvar.t * Formula.any) list }
+    | Exists_elim of { skolems : (Tvar.t * Formula.any) list }
   [@@deriving sexp, compare]
 end
 
@@ -55,7 +57,7 @@ end
 module Step = struct
   type t =
     { name : string option
-    ; conclusion : Formula.any
+    ; conclusion : Formula.quantified
     ; justification : Justification.t
     }
   [@@deriving sexp, compare]
@@ -70,6 +72,16 @@ type t =
 
 let error message = Or_error.error_string message
 let formula_equal left right = Formula.compare_any left right = 0
+
+let formula_equal_quantified left right =
+  Formula.compare_quantified left right = 0
+;;
+
+let ground_of_quantified q ~context =
+  match Formula.to_any q with
+  | Some ground -> Ok ground
+  | None -> error context
+;;
 
 let equality = function
   | Formula.Eq (left, right) -> Some (Formula.widen left, Formula.widen right)
@@ -187,7 +199,7 @@ let check_rewrite premises conclusion ~direction ~path =
   | _ -> error "rewrite expects an equality and a source premise"
 ;;
 
-let check_kernel rule premises conclusion =
+let check_ground_kernel rule premises conclusion =
   match (rule : Kernel_rule.t) with
   | Propositional -> check_propositional premises conclusion
   | Equality_refl -> check_equality_refl premises conclusion
@@ -196,16 +208,118 @@ let check_kernel rule premises conclusion =
   | Congruence -> check_congruence premises conclusion
   | Rewrite { direction; path } ->
     check_rewrite premises conclusion ~direction ~path
+  | Forall_instantiation _ | Exists_elim _ ->
+    (* Handled by [check_kernel] before ground conversion. *)
+    error "quantifier kernel rule reached the ground checker"
+;;
+
+(* Substitutes [bindings] into [body] (a quantifier's ground body) and checks the
+   ground [conclusion] equals the result, requiring every [bound] variable to be
+   bound. Shared by universal instantiation and existential elimination. *)
+let check_witnessing ~bound ~body ~bindings ~conclusion ~missing_error =
+  match Tvar.Map.of_alist bindings with
+  | `Duplicate_key key ->
+    Or_error.error_s
+      [%message "a bound variable was witnessed twice" (key : Tvar.t)]
+  | `Ok subst ->
+    if not (List.for_all bound ~f:(Map.mem subst))
+    then error missing_error
+    else (
+      let expected = Formula.substitute subst (Formula.widen body) in
+      let%bind.Or_error conclusion =
+        ground_of_quantified
+          conclusion
+          ~context:"a quantifier rule's conclusion must be ground"
+      in
+      if formula_equal expected conclusion
+      then Ok ()
+      else error "a quantifier rule's conclusion does not match its witnessed body")
+;;
+
+let check_forall_instantiation premises conclusion ~bound_values =
+  match premises with
+  | [ Formula.Forall (bound, _triggers, body) ] ->
+    check_witnessing
+      ~bound
+      ~body
+      ~bindings:bound_values
+      ~conclusion
+      ~missing_error:
+        "universal instantiation must instantiate every bound variable"
+  | [ _ ] -> error "universal instantiation premise must be a [∀]"
+  | _ -> error "universal instantiation expects a single premise"
+;;
+
+let check_exists_elim premises conclusion ~skolems ~assumption_tvars =
+  match premises with
+  | [ Formula.Exists (bound, body) as premise ] ->
+    let%bind.Or_error () =
+      check_witnessing
+        ~bound
+        ~body
+        ~bindings:skolems
+        ~conclusion
+        ~missing_error:
+          "existential elimination must witness every bound variable"
+    in
+    let skolem_tvars =
+      List.fold skolems ~init:Tvar.Set.empty ~f:(fun acc (_, witness) ->
+        Set.union acc (Formula.tvars (Formula.widen_quantified witness)))
+    in
+    let forbidden = Set.union assumption_tvars (Formula.tvars premise) in
+    if Set.are_disjoint skolem_tvars forbidden
+    then Ok ()
+    else
+      error
+        "existential elimination's Skolem symbol is not fresh (it occurs in the \
+         premise or an assumption)"
+  | [ _ ] -> error "existential elimination premise must be an [∃]"
+  | _ -> error "existential elimination expects a single premise"
+;;
+
+let check_kernel ~assumption_tvars rule premises conclusion =
+  match (rule : Kernel_rule.t) with
+  | Forall_instantiation { bound_values } ->
+    check_forall_instantiation premises conclusion ~bound_values
+  | Exists_elim { skolems } ->
+    check_exists_elim premises conclusion ~skolems ~assumption_tvars
+  | Propositional | Equality_refl | Equality_symm | Equality_trans | Congruence
+  | Rewrite _ ->
+    let%bind.Or_error premises =
+      Or_error.all
+        (List.map premises ~f:(fun premise ->
+           ground_of_quantified
+             premise
+             ~context:
+               "a ground kernel rule was given a quantified premise"))
+    in
+    let%bind.Or_error conclusion =
+      ground_of_quantified
+        conclusion
+        ~context:"a ground kernel rule concluded a quantified formula"
+    in
+    check_ground_kernel rule premises conclusion
+;;
+
+(* Ground formulas must be well-shaped booleans; quantified ones ([∀]/[∃] and
+   the boolean structure over them) are checked structurally by the rules that
+   consume them, not by [Boolean_formula.of_formula]. *)
+let check_well_formed (q : Formula.quantified) =
+  match Formula.to_any q with
+  | None -> Ok ()
+  | Some ground -> Or_error.map (Boolean_formula.of_formula ground) ~f:ignore
 ;;
 
 let check proof =
+  let assumption_tvars =
+    Array.fold proof.assumptions ~init:Tvar.Set.empty ~f:(fun acc assumption ->
+      Set.union acc (Formula.tvars assumption.Assumption.formula))
+  in
   let%bind.Or_error () =
     Or_error.all_unit
       (Array.to_list proof.assumptions
        |> List.map ~f:(fun assumption ->
-         Or_error.map
-           (Boolean_formula.of_formula assumption.Assumption.formula)
-           ~f:ignore))
+         check_well_formed assumption.Assumption.formula))
   in
   let step_at ~before id =
     let id = Id.Step.to_int id in
@@ -218,9 +332,7 @@ let check proof =
   let%bind.Or_error () =
     Array.foldi proof.steps ~init:(Ok ()) ~f:(fun index result step ->
       let%bind.Or_error () = result in
-      let%bind.Or_error () =
-        Or_error.map (Boolean_formula.of_formula step.Step.conclusion) ~f:ignore
-      in
+      let%bind.Or_error () = check_well_formed step.Step.conclusion in
       match step.justification with
       | Assumption assumption ->
         let assumption = Id.Assumption.to_int assumption in
@@ -228,7 +340,7 @@ let check proof =
         then
           Or_error.error_s
             [%message "assumption index out of bounds" (assumption : int)]
-        else if formula_equal
+        else if formula_equal_quantified
                   step.conclusion
                   proof.assumptions.(assumption).Assumption.formula
         then Ok ()
@@ -241,17 +353,24 @@ let check proof =
                Or_error.map (step_at ~before:index premise) ~f:(fun step ->
                  step.Step.conclusion)))
         in
-        check_kernel rule premises step.conclusion
+        check_kernel ~assumption_tvars rule premises step.conclusion
       | By_refutation { premises; refutation } ->
         let%bind.Or_error premises =
           Or_error.all
             (Array.to_list premises
              |> List.map ~f:(fun premise ->
-               Or_error.map (step_at ~before:index premise) ~f:(fun step ->
-                 step.Step.conclusion)))
+               let%bind.Or_error step = step_at ~before:index premise in
+               ground_of_quantified
+                 step.Step.conclusion
+                 ~context:"a refutation premise must be ground"))
+        in
+        let%bind.Or_error conclusion =
+          ground_of_quantified
+            step.conclusion
+            ~context:"a refutation's conclusion must be ground"
         in
         let expected_inputs =
-          Array.of_list (premises @ [ Formula.Not step.conclusion ])
+          Array.of_list (premises @ [ Formula.Not conclusion ])
         in
         if Array.length expected_inputs
            <> Array.length refutation.Refutation.inputs
@@ -275,19 +394,36 @@ let check proof =
 
 let check_theory_certificate = Proof_theory_certificate_check.check
 
+let subst_to_string pairs =
+  String.concat
+    ~sep:", "
+    (List.map pairs ~f:(fun (v, term) ->
+       sprintf
+         "%s := %s"
+         (Tvar.to_string v)
+         (Proof_to_string.formula_to_string term)))
+;;
+
 let justification_to_string (j : Justification.t) =
   let refs prefix ids =
     Array.to_list ids |> List.map ~f:(fun p -> prefix ^ Int.to_string p)
   in
+  let over premises =
+    String.concat ~sep:", " (refs "s" (Array.map premises ~f:Id.Step.to_int))
+  in
   match j with
   | Assumption id -> sprintf "assumption a%d" (Id.Assumption.to_int id)
+  | Kernel { rule = Forall_instantiation { bound_values }; premises } ->
+    sprintf "∀-instantiation {%s} over [%s]" (subst_to_string bound_values)
+      (over premises)
+  | Kernel { rule = Exists_elim { skolems }; premises } ->
+    sprintf "∃-elimination {%s} over [%s]" (subst_to_string skolems)
+      (over premises)
   | Kernel { rule; premises } ->
     sprintf
       "%s over [%s]"
       (Sexp.to_string (Kernel_rule.sexp_of_t rule))
-      (String.concat
-         ~sep:", "
-         (refs "s" (Array.map premises ~f:Id.Step.to_int)))
+      (over premises)
   | By_refutation { premises; refutation = _ } ->
     sprintf
       "refutation of [%s]"
@@ -307,7 +443,7 @@ let to_string_hum (proof : t) =
         (sprintf
            "a%d: %s"
            index
-           (Proof_to_string.formula_to_string assumption.Assumption.formula))));
+           (Proof_to_string.quantified_to_string assumption.Assumption.formula))));
   line out "Steps:";
   indented out ~f:(fun () ->
     Array.iteri proof.steps ~f:(fun index step ->
@@ -316,14 +452,14 @@ let to_string_hum (proof : t) =
         (sprintf
            "s%d: %s   [%s]"
            index
-           (Proof_to_string.formula_to_string step.Step.conclusion)
+           (Proof_to_string.quantified_to_string step.Step.conclusion)
            (justification_to_string step.justification));
       match step.justification with
-      | By_refutation { refutation; _ } ->
+      | By_refutation { refutation; premises } ->
         indented out ~f:(fun () ->
           Proof_to_string.render_refutation
             out
-            ~num_assumptions:(Array.length proof.assumptions)
+            ~premise_steps:(Array.map premises ~f:Id.Step.to_int)
             refutation)
       | Assumption _ | Kernel _ -> ()));
   line out (sprintf "Conclusion: s%d" (Id.Step.to_int proof.conclusion));

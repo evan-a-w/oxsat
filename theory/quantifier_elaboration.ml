@@ -12,12 +12,14 @@ let fresh_tvar ~hint () =
   Tvar.of_string (sprintf "%s.%d" hint id)
 ;;
 
-let register_forall
-  (axioms : Quantifier_axiom.Axiom.t list ref)
+(* Fresh capture-avoiding renaming of a universal's bound variables, so two
+   axioms reusing the same source name (and any Skolem constants) never
+   collide. *)
+let alpha_rename
   ~(bound : Tvar.t list)
   ~(triggers : Formula.any list list)
   ~(body : Formula.any)
-  : Formula.any
+  : Tvar.t list * Formula.any list list * Formula.any
   =
   let renaming =
     List.map bound ~f:(fun v ->
@@ -32,19 +34,52 @@ let register_forall
     List.map triggers ~f:(List.map ~f:(Formula.substitute subst))
   in
   let body = Formula.substitute subst body in
+  bound, triggers, body
+;;
+
+let register_forall
+  (axioms : Quantifier_axiom.Axiom.t list ref)
+  ~(bound : Tvar.t list)
+  ~(triggers : Formula.any list list)
+  ~(body : Formula.any)
+  : Formula.any
+  =
+  let bound, triggers, body = alpha_rename ~bound ~triggers ~body in
   let guard : Formula.any =
     Eq (Var (fresh_tvar ~hint:"%guard" ()), Var (fresh_tvar ~hint:"%guard" ()))
   in
-  axioms := { Quantifier_axiom.Axiom.guard; bound; triggers; body } :: !axioms;
+  axioms
+  := { Quantifier_axiom.Axiom.guard = Some guard; bound; triggers; body }
+     :: !axioms;
   guard
 ;;
 
-let skolemize ~(bound : Tvar.t list) (body : Formula.any) : Formula.any =
-  let subst =
-    List.map bound ~f:(fun v -> v, Formula.Var (fresh_tvar ~hint:"%skolem" ()))
-    |> Tvar.Map.of_alist_exn
+let register_toplevel_forall
+  ~(bound : Tvar.t list)
+  ~(triggers : Formula.any list list)
+  ~(body : Formula.any)
+  : Quantifier_axiom.Axiom.t * Formula.quantified
+  =
+  let bound, triggers, body = alpha_rename ~bound ~triggers ~body in
+  let axiom =
+    { Quantifier_axiom.Axiom.guard = None; bound; triggers; body }
   in
-  Formula.substitute subst body
+  axiom, Forall (bound, triggers, body)
+;;
+
+let skolemize_existential ~(bound : Tvar.t list) (body : Formula.any)
+  : (Tvar.t * Formula.any) list * Formula.any
+  =
+  let pairs =
+    List.map bound ~f:(fun v ->
+      v, (Formula.Var (fresh_tvar ~hint:"%skolem" ()) : Formula.any))
+  in
+  let subst = Tvar.Map.of_alist_exn pairs in
+  pairs, Formula.substitute subst body
+;;
+
+let skolemize ~(bound : Tvar.t list) (body : Formula.any) : Formula.any =
+  snd (skolemize_existential ~bound body)
 ;;
 
 let rec go
