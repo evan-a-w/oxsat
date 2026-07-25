@@ -18,15 +18,36 @@ Each result line also reports `Alloc` (bytes allocated per iteration) and
 `MajGC` (major collections per iteration); allocation changes are often a more
 reliable signal than timing noise.
 
-## A/B comparison
+## A/B comparison against the checked-in baselines
+
+`bench/comparisons/` holds baseline results (`smt.sexp`, `sat.sexp`,
+`dimacs.sexp`) for the current state of the code. After making a change, run:
 
 ```
-# baseline
-dune exec --profile=release bench/feel_bench.exe -- -bench smt -o bench/results/before.sexp
-# ... make a change ...
-dune exec --profile=release bench/feel_bench.exe -- -bench smt -o bench/results/after.sexp
-# compare (sorted by largest time regression; ratios are after/before)
-dune exec bench/feel_bench.exe -- bench/results/before.sexp bench/results/after.sexp
+bench/compare.sh smt                      # full suite vs baseline
+bench/compare.sh smt -only "Bin packing"  # subset
+```
+
+This runs the suite, then prints a table of time/alloc ratios (after/before,
+so > 1x is a regression) sorted by largest regression.
+
+After an intentional performance change, update the baseline:
+
+```
+dune exec --profile=release bench/feel_bench.exe -- -bench smt \
+  -o bench/comparisons/smt.sexp
+dune exec --profile=release bench/feel_bench.exe -- -bench sat -sat-max-n 80 \
+  -o bench/comparisons/sat.sexp
+dune exec --profile=release bench/feel_bench.exe -- -bench dimacs \
+  -min-iterations 1 -max-iterations 1 -sample-runs 1 \
+  -o bench/comparisons/dimacs.sexp
+```
+
+Baselines are machine-dependent; only update them on the machine you compare
+on. You can also compare any two files manually (`-only` filters both files):
+
+```
+dune exec bench/feel_bench.exe -- [-only SUB]... before.sexp after.sexp
 ```
 
 ## CPU profiling
