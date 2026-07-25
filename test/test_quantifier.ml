@@ -368,7 +368,8 @@ let%expect_test "produce_proofs: a bare existential drives a checked, fully \
    | Unsat { proof = Some proof; _ } ->
      print_s [%message "" ~checked:(Or_error.is_ok (Proof.check proof) : bool)];
      print_endline (Proof.to_string_hum proof));
-  [%expect {|
+  [%expect
+    {|
     (checked true)
     Assumptions:
       a0: ∃x. f(x) = a ∧ g(x) = a ∧ f(x) ≠ g(x)
@@ -399,8 +400,8 @@ let%expect_test "produce_proofs: a bare existential drives a checked, fully \
 (* A top-level conjunction of a universal and an existential -- the user's
    "forall and existential in the same formula, at toplevel" case. Each conjunct
    is handled at top level, so both get real proof steps: the [∃] is eliminated
-   to a Skolem body [f(sk) = c ∧ sk ≠ c], the [∀] instantiates on [f(sk)] to give
-   [f(sk) = sk], and EUF (rather than a direct literal clash) closes it. *)
+   to a Skolem body [f(sk) = c ∧ sk ≠ c], the [∀] instantiates on [f(sk)] to
+   give [f(sk) = sk], and EUF (rather than a direct literal clash) closes it. *)
 let%expect_test "produce_proofs: forall + existential in one top-level \
                  conjunction, both cited"
   =
@@ -427,7 +428,8 @@ let%expect_test "produce_proofs: forall + existential in one top-level \
    | Unsat { proof = Some proof; _ } ->
      print_s [%message "" ~checked:(Or_error.is_ok (Proof.check proof) : bool)];
      print_endline (Proof.to_string_hum proof));
-  [%expect {|
+  [%expect
+    {|
     (checked true)
     Assumptions:
       a0: ∀y.bound.22. f(y.bound.22) = y.bound.22
@@ -461,8 +463,8 @@ let%expect_test "produce_proofs: forall + existential in one top-level \
 (* A quantifier nested inside boolean structure keeps the guard encoding, whose
    guard atom is synthetic -- so a refutation depending on it declines to
    produce a real proof (the documented fallback), while still solving. *)
-let%expect_test "produce_proofs: a nested quantifier still solves but declines a \
-                 proof"
+let%expect_test "produce_proofs: a nested quantifier still solves but declines \
+                 a proof"
   =
   let qs =
     Quantifier_solver.create ~config:{ Solver.Config.produce_proofs = true } ()

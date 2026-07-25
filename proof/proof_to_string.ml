@@ -401,8 +401,9 @@ let reason_to_string ~clause ~premise_steps (reason : Refutation.Reason.t) =
   | Input_clause { input; literal = _ } ->
     (* [input] indexes the refutation's inputs = the enclosing [By_refutation]'s
        premise steps followed by a trailing [¬false]. Name it by the proof step
-       that establishes that premise; the sentinel (which a real refutation never
-       cites) is named as a bare input to avoid implying a nonexistent step. *)
+       that establishes that premise; the sentinel (which a real refutation
+       never cites) is named as a bare input to avoid implying a nonexistent
+       step. *)
     if input < Array.length premise_steps
     then sprintf "s%d" premise_steps.(input)
     else sprintf "input i%d (¬false)" input

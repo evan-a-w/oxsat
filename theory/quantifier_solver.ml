@@ -189,7 +189,8 @@ let instantiate t : Formula.any list =
         Hashtbl.set
           t.provenance_by_guarded
           ~key:asserted
-          ~data:{ Instance_provenance.body = axiom.body; bound_values; instance };
+          ~data:
+            { Instance_provenance.body = axiom.body; bound_values; instance };
         Some asserted)))
 ;;
 

@@ -69,7 +69,6 @@ let note_exists_skolemization t ~skolem_body ~existential ~skolems =
 ;;
 
 let note_synthetic t atom = Hash_set.add t.synthetic atom
-
 let push t = t.scopes <- [] :: t.scopes
 
 let pop t =
@@ -324,9 +323,7 @@ let unsat_proof
   let premises = asserted_formulas t in
   (* A guard atom of a nested universal has no real meaning, so a refutation
      citing one (directly or inside a guarded instance) can't be a real proof. *)
-  let depends_on_synthetic =
-    Array.exists premises ~f:(contains_synthetic t)
-  in
+  let depends_on_synthetic = Array.exists premises ~f:(contains_synthetic t) in
   if touches_scope_var || depends_on_synthetic
   then None
   else (
@@ -384,7 +381,8 @@ let unsat_proof
                   { rule = Exists_elim { skolems }
                   ; premises = [| Hashtbl.find_exn given_step existential |]
                   })
-           | None -> add_step conclusion (Assumption (add_assumption conclusion))))
+           | None ->
+             add_step conclusion (Assumption (add_assumption conclusion))))
     in
     let final_step =
       add_step

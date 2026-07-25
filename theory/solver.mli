@@ -38,6 +38,7 @@ val assert_formula
 
 (** Opens a new assertion scope. Formulas asserted after [push] (until the
     matching [pop]) are only enforced while this scope is active. *)
+
 (** Proof-provenance hooks for a quantifier layer built on top of this solver
     (see {!Quantifier_solver}). Each is a no-op unless proof production is on.
     They let a generated {!Proof.t} cite the real [∀]/[∃] and justify each

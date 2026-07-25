@@ -213,9 +213,9 @@ let check_ground_kernel rule premises conclusion =
     error "quantifier kernel rule reached the ground checker"
 ;;
 
-(* Substitutes [bindings] into [body] (a quantifier's ground body) and checks the
-   ground [conclusion] equals the result, requiring every [bound] variable to be
-   bound. Shared by universal instantiation and existential elimination. *)
+(* Substitutes [bindings] into [body] (a quantifier's ground body) and checks
+   the ground [conclusion] equals the result, requiring every [bound] variable
+   to be bound. Shared by universal instantiation and existential elimination. *)
 let check_witnessing ~bound ~body ~bindings ~conclusion ~missing_error =
   match Tvar.Map.of_alist bindings with
   | `Duplicate_key key ->
@@ -233,7 +233,8 @@ let check_witnessing ~bound ~body ~bindings ~conclusion ~missing_error =
       in
       if formula_equal expected conclusion
       then Ok ()
-      else error "a quantifier rule's conclusion does not match its witnessed body")
+      else
+        error "a quantifier rule's conclusion does not match its witnessed body")
 ;;
 
 let check_forall_instantiation premises conclusion ~bound_values =
@@ -252,7 +253,7 @@ let check_forall_instantiation premises conclusion ~bound_values =
 
 let check_exists_elim premises conclusion ~skolems ~assumption_tvars =
   match premises with
-  | [ Formula.Exists (bound, body) as premise ] ->
+  | [ (Formula.Exists (bound, body) as premise) ] ->
     let%bind.Or_error () =
       check_witnessing
         ~bound
@@ -271,8 +272,8 @@ let check_exists_elim premises conclusion ~skolems ~assumption_tvars =
     then Ok ()
     else
       error
-        "existential elimination's Skolem symbol is not fresh (it occurs in the \
-         premise or an assumption)"
+        "existential elimination's Skolem symbol is not fresh (it occurs in \
+         the premise or an assumption)"
   | [ _ ] -> error "existential elimination premise must be an [∃]"
   | _ -> error "existential elimination expects a single premise"
 ;;
@@ -283,15 +284,18 @@ let check_kernel ~assumption_tvars rule premises conclusion =
     check_forall_instantiation premises conclusion ~bound_values
   | Exists_elim { skolems } ->
     check_exists_elim premises conclusion ~skolems ~assumption_tvars
-  | Propositional | Equality_refl | Equality_symm | Equality_trans | Congruence
+  | Propositional
+  | Equality_refl
+  | Equality_symm
+  | Equality_trans
+  | Congruence
   | Rewrite _ ->
     let%bind.Or_error premises =
       Or_error.all
         (List.map premises ~f:(fun premise ->
            ground_of_quantified
              premise
-             ~context:
-               "a ground kernel rule was given a quantified premise"))
+             ~context:"a ground kernel rule was given a quantified premise"))
     in
     let%bind.Or_error conclusion =
       ground_of_quantified
@@ -414,10 +418,14 @@ let justification_to_string (j : Justification.t) =
   match j with
   | Assumption id -> sprintf "assumption a%d" (Id.Assumption.to_int id)
   | Kernel { rule = Forall_instantiation { bound_values }; premises } ->
-    sprintf "∀-instantiation {%s} over [%s]" (subst_to_string bound_values)
+    sprintf
+      "∀-instantiation {%s} over [%s]"
+      (subst_to_string bound_values)
       (over premises)
   | Kernel { rule = Exists_elim { skolems }; premises } ->
-    sprintf "∃-elimination {%s} over [%s]" (subst_to_string skolems)
+    sprintf
+      "∃-elimination {%s} over [%s]"
+      (subst_to_string skolems)
       (over premises)
   | Kernel { rule; premises } ->
     sprintf

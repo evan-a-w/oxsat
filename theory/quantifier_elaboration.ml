@@ -13,8 +13,7 @@ let fresh_tvar ~hint () =
 ;;
 
 (* Fresh capture-avoiding renaming of a universal's bound variables, so two
-   axioms reusing the same source name (and any Skolem constants) never
-   collide. *)
+   axioms reusing the same source name (and any Skolem constants) never collide. *)
 let alpha_rename
   ~(bound : Tvar.t list)
   ~(triggers : Formula.any list list)
@@ -61,9 +60,7 @@ let register_toplevel_forall
   : Quantifier_axiom.Axiom.t * Formula.quantified
   =
   let bound, triggers, body = alpha_rename ~bound ~triggers ~body in
-  let axiom =
-    { Quantifier_axiom.Axiom.guard = None; bound; triggers; body }
-  in
+  let axiom = { Quantifier_axiom.Axiom.guard = None; bound; triggers; body } in
   axiom, Forall (bound, triggers, body)
 ;;
 

@@ -309,11 +309,15 @@ let%expect_test "kernel universal instantiation is checked" =
   let instance : Formula.quantified =
     Formula.widen_quantified (Formula.Eq (App (f, [ a ]), a))
   in
-  let proof rule : Proof.t =
-    { assumptions = [| { name = None; formula = forall } |]
+  (* A non-[∀] premise, to check the rule rejects being applied to it. *)
+  let not_a_forall : Formula.quantified =
+    Exists ([ x ], Eq (App (f, [ Var x ]), Var x))
+  in
+  let proof ?(premise = forall) rule : Proof.t =
+    { assumptions = [| { name = None; formula = premise } |]
     ; steps =
         [| { name = None
-           ; conclusion = forall
+           ; conclusion = premise
            ; justification = Assumption (Proof.Id.Assumption.of_int_exn 0)
            }
          ; { name = None
@@ -326,18 +330,31 @@ let%expect_test "kernel universal instantiation is checked" =
     }
   in
   let valid = proof (Forall_instantiation { bound_values = [ x, a ] }) in
+  let rejects rule ~premise =
+    Or_error.is_error (Proof.check (proof ~premise rule))
+  in
   print_s
     [%message
       ""
         ~valid:(Or_error.is_ok (Proof.check valid) : bool)
         ~wrong_substitution_rejected:
-          (Or_error.is_error
-             (Proof.check (proof (Forall_instantiation { bound_values = [ x, b ] })))
+          (rejects
+             (Forall_instantiation { bound_values = [ x, b ] })
+             ~premise:forall
+           : bool)
+        ~missing_variable_rejected:
+          (rejects (Forall_instantiation { bound_values = [] }) ~premise:forall
+           : bool)
+        ~non_forall_premise_rejected:
+          (rejects
+             (Forall_instantiation { bound_values = [ x, a ] })
+             ~premise:not_a_forall
            : bool)];
   print_endline (Proof.to_string_hum valid);
   [%expect
     {|
-    ((valid true) (wrong_substitution_rejected true))
+    ((valid true) (wrong_substitution_rejected true)
+     (missing_variable_rejected true) (non_forall_premise_rejected true))
     Assumptions:
       a0: ∀x. f(x) = x
     Steps:
@@ -359,20 +376,30 @@ let%expect_test "kernel existential elimination is checked, with a freshness \
   let witnessed : Formula.quantified =
     Formula.widen_quantified (Formula.Not (Eq (App (f, [ sk ]), sk)))
   in
-  let proof ~extra_assumptions : Proof.t =
+  (* A non-[∃] premise, to check the rule rejects being applied to it. *)
+  let not_an_exists : Formula.quantified =
+    Forall ([ x ], [], Not (Eq (App (f, [ Var x ]), Var x)))
+  in
+  let proof
+    ?(premise = existential)
+    ?(conclusion = witnessed)
+    ~extra_assumptions
+    ()
+    : Proof.t
+    =
     let assumptions =
       Array.of_list
-        ({ Proof.Assumption.name = None; formula = existential }
+        ({ Proof.Assumption.name = None; formula = premise }
          :: extra_assumptions)
     in
     { assumptions
     ; steps =
         [| { name = None
-           ; conclusion = existential
+           ; conclusion = premise
            ; justification = Assumption (Proof.Id.Assumption.of_int_exn 0)
            }
          ; { name = None
-           ; conclusion = witnessed
+           ; conclusion
            ; justification =
                Kernel
                  { rule = Exists_elim { skolems = [ x, sk ] }
@@ -383,7 +410,7 @@ let%expect_test "kernel existential elimination is checked, with a freshness \
     ; conclusion = Proof.Id.Step.of_int_exn 1
     }
   in
-  let fresh = proof ~extra_assumptions:[] in
+  let fresh = proof ~extra_assumptions:[] () in
   (* The Skolem [%sk] occurs in another assumption -- eigenvariable condition
      violated. *)
   let not_fresh =
@@ -391,19 +418,42 @@ let%expect_test "kernel existential elimination is checked, with a freshness \
       ~extra_assumptions:
         [ { Proof.Assumption.name = None
           ; formula =
-              Formula.widen_quantified (Formula.Eq (sk, Var (Tvar.of_string "c")))
+              Formula.widen_quantified
+                (Formula.Eq (sk, Var (Tvar.of_string "c")))
           }
         ]
+      ()
+  in
+  (* Conclusion witnesses [x := c] but the rule's skolems say [x := %sk]. *)
+  let wrong_witness =
+    proof
+      ~conclusion:
+        (Formula.widen_quantified
+           (Formula.Not
+              (Eq
+                 ( App (f, [ Var (Tvar.of_string "c") ])
+                 , Var (Tvar.of_string "c") ))))
+      ~extra_assumptions:[]
+      ()
+  in
+  let non_exists_premise =
+    proof ~premise:not_an_exists ~extra_assumptions:[] ()
   in
   print_s
     [%message
       ""
         ~valid:(Or_error.is_ok (Proof.check fresh) : bool)
-        ~stale_skolem_rejected:(Or_error.is_error (Proof.check not_fresh) : bool)];
+        ~stale_skolem_rejected:
+          (Or_error.is_error (Proof.check not_fresh) : bool)
+        ~wrong_witness_rejected:
+          (Or_error.is_error (Proof.check wrong_witness) : bool)
+        ~non_exists_premise_rejected:
+          (Or_error.is_error (Proof.check non_exists_premise) : bool)];
   print_endline (Proof.to_string_hum fresh);
   [%expect
     {|
-    ((valid true) (stale_skolem_rejected true))
+    ((valid true) (stale_skolem_rejected true) (wrong_witness_rejected true)
+     (non_exists_premise_rejected true))
     Assumptions:
       a0: ∃x. f(x) ≠ x
     Steps:
