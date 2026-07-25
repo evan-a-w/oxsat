@@ -393,7 +393,29 @@ let check proof =
   then
     Or_error.error_s
       [%message "proof conclusion is out of bounds" (conclusion : int)]
-  else Ok ()
+  else (
+    (* The other half of the eigenvariable condition: a Skolem introduced by
+       existential elimination names an arbitrary witness, so it must not escape
+       into the proof's exported conclusion. (Per-step freshness already keeps
+       it out of the assumptions and premise.) In practice conclusions are
+       [false], which trivially satisfies this. *)
+    let introduced_skolems =
+      Array.fold proof.steps ~init:Tvar.Set.empty ~f:(fun acc step ->
+        match step.Step.justification with
+        | Kernel { rule = Exists_elim { skolems }; _ } ->
+          List.fold skolems ~init:acc ~f:(fun acc (_, witness) ->
+            Set.union acc (Formula.tvars (Formula.widen_quantified witness)))
+        | Assumption _ | Kernel _ | By_refutation _ -> acc)
+    in
+    let conclusion_tvars =
+      Formula.tvars proof.steps.(conclusion).Step.conclusion
+    in
+    if Set.are_disjoint introduced_skolems conclusion_tvars
+    then Ok ()
+    else
+      error
+        "a Skolem introduced by existential elimination escapes into the \
+         proof's conclusion (eigenvariable condition)")
 ;;
 
 let check_theory_certificate = Proof_theory_certificate_check.check

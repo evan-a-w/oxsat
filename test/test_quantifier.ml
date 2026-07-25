@@ -496,3 +496,183 @@ let%expect_test "produce_proofs: a nested quantifier still solves but declines \
    | Unsat { proof = Some _; _ } -> print_endline "unexpected proof");
   [%expect {| unsat, no proof (nested) |}]
 ;;
+
+(* A single universal that must be instantiated at TWO distinct, unrelated terms
+   for the refutation to close: [∀x.f(x)=c] with [f(a)≠f(b)] forces both
+   [f(a)=c] and [f(b)=c] (a and b share no equality, so congruence cannot bridge
+   [f(a)] and [f(b)] on its own), after which EUF chains [f(a)=c=f(b)] to
+   contradict the disequality. Two [∀-instantiation] steps feed one refutation. *)
+let%expect_test "produce_proofs: one universal instantiated at two terms" =
+  let qs =
+    Quantifier_solver.create ~config:{ Solver.Config.produce_proofs = true } ()
+  in
+  let f arg : Formula.any = App (Tvar.of_string "f", [ arg ]) in
+  let c : Formula.any = Var (Tvar.of_string "c") in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let b : Formula.any = Var (Tvar.of_string "b") in
+  let x = Tvar.of_string "x" in
+  ignore
+    (Quantifier_solver.assert_formula
+       qs
+       (Forall ([ x ], [ [ f (Var x) ] ], Eq (f (Var x), c)))
+     : _ Or_error.t);
+  ignore
+    (Quantifier_solver.assert_formula
+       qs
+       (Formula.widen_quantified (Not (Eq (f a, f b))))
+     : _ Or_error.t);
+  (match Quantifier_solver.solve qs ~max_rounds:3 with
+   | Sat _ | Unknown_but_possibly_sat _ -> print_endline "unexpected sat"
+   | Unsat { proof = None; _ } -> print_endline "no proof produced"
+   | Unsat { proof = Some proof; _ } ->
+     print_s [%message "" ~checked:(Or_error.is_ok (Proof.check proof) : bool)];
+     print_endline (Proof.to_string_hum proof));
+  [%expect
+    {|
+    (checked true)
+    Assumptions:
+      a0: ∀x.bound.27. f(x.bound.27) = c
+      a1: bool ≠ int
+      a2: bool ≠ float
+      a3: int ≠ float
+      a4: f(a) ≠ f(b)
+    Steps:
+      s0: ∀x.bound.27. f(x.bound.27) = c   [assumption a0]
+      s1: bool ≠ int   [assumption a1]
+      s2: bool ≠ float   [assumption a2]
+      s3: int ≠ float   [assumption a3]
+      s4: f(a) ≠ f(b)   [assumption a4]
+      s5: f(a) = c   [∀-instantiation {x.bound.27 := a} over [s0]]
+      s6: f(b) = c   [∀-instantiation {x.bound.27 := b} over [s0]]
+      s7: false   [refutation of [s1, s2, s3, s4, s5, s6]]
+        refutation:
+          steps:
+            r0: f(a) ≠ f(b)   [s4]
+            r1: c = f(a)   [s5]
+            r2: c = f(b)   [s6]
+            r3: c ≠ f(a) ∨ c ≠ f(b) ∨ f(a) = f(b)   [EUF: f(a) = f(b) via [c = f(a); c = f(b)]]
+            r4: ⊥   [RUP over [r0, r1, r2, r3]]
+    Conclusion: s7
+    |}]
+;;
+
+(* Confidence that [Proof.check] is not vacuous: take a real, complex proof (the
+   forall + existential co-occurrence) and corrupt it four ways, each of which
+   the checker must reject. If any mutation were accepted, the checker would be
+   trusting rather than verifying. *)
+let%expect_test "produce_proofs: the checker rejects mutations of a real proof" =
+  let qs =
+    Quantifier_solver.create ~config:{ Solver.Config.produce_proofs = true } ()
+  in
+  let f arg : Formula.any = App (Tvar.of_string "f", [ arg ]) in
+  let c : Formula.any = Var (Tvar.of_string "c") in
+  let y = Tvar.of_string "y" in
+  let x = Tvar.of_string "x" in
+  ignore
+    (Quantifier_solver.assert_formula
+       qs
+       (And
+          [ Forall ([ y ], [ [ f (Var y) ] ], Eq (f (Var y), Var y))
+          ; Exists ([ x ], And [ Eq (f (Var x), c); Not (Eq (Var x, c)) ])
+          ])
+     : _ Or_error.t);
+  match Quantifier_solver.solve qs ~max_rounds:2 with
+  | Sat _ | Unknown_but_possibly_sat _ -> print_endline "unexpected sat"
+  | Unsat { proof = None; _ } -> print_endline "no proof produced"
+  | Unsat { proof = Some proof; _ } ->
+    let find ~f =
+      fst
+        (Array.findi_exn proof.steps ~f:(fun _ step ->
+           f step.Proof.Step.justification))
+    in
+    let map_step i ~f =
+      { proof with
+        steps =
+          Array.mapi proof.steps ~f:(fun j step ->
+            if j = i then f step else step)
+      }
+    in
+    let inst_i =
+      find ~f:(function
+        | Proof.Justification.Kernel { rule = Forall_instantiation _; _ } ->
+          true
+        | _ -> false)
+    in
+    let exists_i =
+      find ~f:(function
+        | Proof.Justification.Kernel { rule = Exists_elim _; _ } -> true
+        | _ -> false)
+    in
+    let refut_i =
+      find ~f:(function
+        | Proof.Justification.By_refutation _ -> true
+        | _ -> false)
+    in
+    let bogus : Formula.any = Var (Tvar.of_string "%bogus") in
+    (* 1. Change the instantiation's witness but not its conclusion. *)
+    let wrong_instantiation =
+      map_step inst_i ~f:(fun step ->
+        match step.justification with
+        | Kernel { rule = Forall_instantiation { bound_values }; premises } ->
+          let bound_values =
+            List.map bound_values ~f:(fun (v, _) -> v, bogus)
+          in
+          { step with
+            justification =
+              Kernel { rule = Forall_instantiation { bound_values }; premises }
+          }
+        | _ -> step)
+    in
+    (* 2. Claim the instantiation's ground conclusion is directly the [∀]
+       assumption (a0). *)
+    let forged_instantiation =
+      map_step inst_i ~f:(fun step ->
+        { step with
+          justification = Assumption (Proof.Id.Assumption.of_int_exn 0)
+        })
+    in
+    (* 3. Tamper with the witnessed body of the existential step. *)
+    let tampered_exists =
+      map_step exists_i ~f:(fun step ->
+        { step with conclusion = Formula.widen_quantified (Eq (bogus, c)) })
+    in
+    (* 4. Strip the hints from the refutation's RUP step so it no longer derives
+       the empty clause. *)
+    let broken_refutation =
+      map_step refut_i ~f:(fun step ->
+        match step.justification with
+        | By_refutation { premises; refutation } ->
+          let steps =
+            Array.map refutation.Proof.Refutation.steps ~f:(fun rstep ->
+              match rstep.Proof.Refutation.Step.reason with
+              | Rup _ ->
+                { rstep with
+                  reason = Proof.Refutation.Reason.Rup { hints = [||] }
+                }
+              | _ -> rstep)
+          in
+          { step with
+            justification =
+              By_refutation { premises; refutation = { refutation with steps } }
+          }
+        | _ -> step)
+    in
+    print_s
+      [%message
+        ""
+          ~baseline_checks:(Or_error.is_ok (Proof.check proof) : bool)
+          ~wrong_instantiation_rejected:
+            (Or_error.is_error (Proof.check wrong_instantiation) : bool)
+          ~forged_instantiation_rejected:
+            (Or_error.is_error (Proof.check forged_instantiation) : bool)
+          ~tampered_exists_rejected:
+            (Or_error.is_error (Proof.check tampered_exists) : bool)
+          ~broken_refutation_rejected:
+            (Or_error.is_error (Proof.check broken_refutation) : bool)];
+    [%expect
+      {|
+      ((baseline_checks true) (wrong_instantiation_rejected true)
+       (forged_instantiation_rejected true) (tampered_exists_rejected true)
+       (broken_refutation_rejected true))
+      |}]
+;;

@@ -410,7 +410,12 @@ let%expect_test "kernel existential elimination is checked, with a freshness \
     ; conclusion = Proof.Id.Step.of_int_exn 1
     }
   in
-  let fresh = proof ~extra_assumptions:[] () in
+  (* Regression: a bare [∃-elimination] whose conclusion is the witnessed body
+     is NOT a valid standalone proof -- [f(%sk) ≠ %sk] does not follow from
+     [∃x. f(x) ≠ x] ([%sk] names an arbitrary witness). The step itself is
+     locally well-formed, so this is only caught by the eigenvariable escape
+     check on the proof's conclusion. *)
+  let eigenvariable_escape = proof ~extra_assumptions:[] () in
   (* The Skolem [%sk] occurs in another assumption -- eigenvariable condition
      violated. *)
   let not_fresh =
@@ -442,24 +447,32 @@ let%expect_test "kernel existential elimination is checked, with a freshness \
   print_s
     [%message
       ""
-        ~valid:(Or_error.is_ok (Proof.check fresh) : bool)
+        ~eigenvariable_escape_rejected:
+          (Or_error.is_error (Proof.check eigenvariable_escape) : bool)
         ~stale_skolem_rejected:
           (Or_error.is_error (Proof.check not_fresh) : bool)
         ~wrong_witness_rejected:
           (Or_error.is_error (Proof.check wrong_witness) : bool)
         ~non_exists_premise_rejected:
           (Or_error.is_error (Proof.check non_exists_premise) : bool)];
-  print_endline (Proof.to_string_hum fresh);
+  print_endline
+    "rejected standalone existential elimination (eigenvariable escapes):";
+  print_endline (Proof.to_string_hum eigenvariable_escape);
+  print_s [%sexp (Proof.check eigenvariable_escape : unit Or_error.t)];
   [%expect
     {|
-    ((valid true) (stale_skolem_rejected true) (wrong_witness_rejected true)
-     (non_exists_premise_rejected true))
+    ((eigenvariable_escape_rejected true) (stale_skolem_rejected true)
+     (wrong_witness_rejected true) (non_exists_premise_rejected true))
+    rejected standalone existential elimination (eigenvariable escapes):
     Assumptions:
       a0: ∃x. f(x) ≠ x
     Steps:
       s0: ∃x. f(x) ≠ x   [assumption a0]
       s1: f(%sk) ≠ %sk   [∃-elimination {x := %sk} over [s0]]
     Conclusion: s1
+
+    (Error
+     "a Skolem introduced by existential elimination escapes into the proof's conclusion (eigenvariable condition)")
     |}]
 ;;
 

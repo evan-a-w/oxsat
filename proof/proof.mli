@@ -56,8 +56,9 @@ module Kernel_rule : sig
     | Exists_elim of
         { (* premise [∃bound. body]; conclusion [body] with each bound variable
              replaced by its witness per [skolems], subject to the eigenvariable
-             freshness condition: no Skolem symbol occurs in the premise or in
-             any of the proof's assumptions. *)
+             condition: no Skolem symbol occurs in the premise, in any of the
+             proof's assumptions, or in the proof's final conclusion (the last
+             enforced by [check], not here). *)
           skolems : (Tvar.t * Formula.any) list
         }
   [@@deriving sexp, compare]
