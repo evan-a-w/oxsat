@@ -325,18 +325,26 @@ let%expect_test "kernel universal instantiation is checked" =
     ; conclusion = Proof.Id.Step.of_int_exn 1
     }
   in
+  let valid = proof (Forall_instantiation { bound_values = [ x, a ] }) in
   print_s
     [%message
       ""
-        ~valid:
-          (Or_error.is_ok
-             (Proof.check (proof (Forall_instantiation { bound_values = [ x, a ] })))
-           : bool)
+        ~valid:(Or_error.is_ok (Proof.check valid) : bool)
         ~wrong_substitution_rejected:
           (Or_error.is_error
              (Proof.check (proof (Forall_instantiation { bound_values = [ x, b ] })))
            : bool)];
-  [%expect {| ((valid true) (wrong_substitution_rejected true)) |}]
+  print_endline (Proof.to_string_hum valid);
+  [%expect
+    {|
+    ((valid true) (wrong_substitution_rejected true))
+    Assumptions:
+      a0: ∀x. f(x) = x
+    Steps:
+      s0: ∀x. f(x) = x   [assumption a0]
+      s1: f(a) = a   [∀-instantiation {x := a} over [s0]]
+    Conclusion: s1
+    |}]
 ;;
 
 let%expect_test "kernel existential elimination is checked, with a freshness \
@@ -392,7 +400,17 @@ let%expect_test "kernel existential elimination is checked, with a freshness \
       ""
         ~valid:(Or_error.is_ok (Proof.check fresh) : bool)
         ~stale_skolem_rejected:(Or_error.is_error (Proof.check not_fresh) : bool)];
-  [%expect {| ((valid true) (stale_skolem_rejected true)) |}]
+  print_endline (Proof.to_string_hum fresh);
+  [%expect
+    {|
+    ((valid true) (stale_skolem_rejected true))
+    Assumptions:
+      a0: ∃x. f(x) ≠ x
+    Steps:
+      s0: ∃x. f(x) ≠ x   [assumption a0]
+      s1: f(%sk) ≠ %sk   [∃-elimination {x := %sk} over [s0]]
+    Conclusion: s1
+    |}]
 ;;
 
 let%expect_test "a multi-rule proof DAG is checked" =
