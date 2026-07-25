@@ -23,6 +23,19 @@ module Instance_provenance = struct
     }
 end
 
+(* One [push] scope's undo log, so [pop] can retract exactly what this layer
+   accumulated while the scope was open (mirroring the SAT solver retracting the
+   scope's clauses). [saved_axiom_states] restores the list -- new axioms are
+   consed on, so dropping back to the saved head removes them. [seen_additions]
+   and [provenance_additions] record the fresh mutations to reverse. *)
+module Scope = struct
+  type t =
+    { saved_axiom_states : Axiom_state.t list
+    ; mutable seen_additions : (Formula.Any.Hash_set.t * Formula.any) list
+    ; mutable provenance_additions : Formula.any list
+    }
+end
+
 type t =
   { solver : Solver.t
   ; mutable axiom_states : Axiom_state.t list
@@ -30,13 +43,38 @@ type t =
        back to what produced it, so an [Unsat] core can cite the instantiation
        instead of showing an opaque asserted disjunction. *)
     provenance_by_guarded : Instance_provenance.t Formula.Any.Table.t
+  ; (* Open [push] scopes, innermost first; see {!push}/{!pop}. *)
+    mutable scopes : Scope.t list
   }
 
 let create ?config () =
   { solver = Solver.create ?config ()
   ; axiom_states = []
   ; provenance_by_guarded = Formula.Any.Table.create ()
+  ; scopes = []
   }
+;;
+
+(* Records a first-time instantiation ([instance] known fresh in [seen]) so an
+   enclosing scope can undo it on [pop] -- otherwise a popped instance would
+   linger in [seen] and never be re-emitted after its clause was retracted. *)
+let note_seen t seen instance =
+  Hash_set.add seen instance;
+  match t.scopes with
+  | [] -> ()
+  | scope :: _ ->
+    scope.seen_additions <- (seen, instance) :: scope.seen_additions
+;;
+
+let note_provenance t ~key ~data =
+  let is_new = not (Hashtbl.mem t.provenance_by_guarded key) in
+  Hashtbl.set t.provenance_by_guarded ~key ~data;
+  if is_new
+  then (
+    match t.scopes with
+    | [] -> ()
+    | scope :: _ ->
+      scope.provenance_additions <- key :: scope.provenance_additions)
 ;;
 
 let add_axiom_state t ~axiom ~given =
@@ -109,8 +147,33 @@ let rec assert_formula t (formula : Formula.quantified)
      | _ -> assert_nested_guarded t formula)
 ;;
 
-let push t = Solver.push t.solver
-let pop t = Solver.pop t.solver
+let push t =
+  Solver.push t.solver;
+  t.scopes
+  <- { Scope.saved_axiom_states = t.axiom_states
+     ; seen_additions = []
+     ; provenance_additions = []
+     }
+     :: t.scopes
+;;
+
+(* Retract this layer's scope in lockstep with the SAT solver: drop axioms
+   registered in the scope, remove the instances they added to their [seen] sets
+   (so they can be re-emitted now their clauses are gone), and drop their
+   provenance entries. *)
+let pop t =
+  Solver.pop t.solver;
+  match t.scopes with
+  | [] -> ()
+  | scope :: rest ->
+    t.scopes <- rest;
+    t.axiom_states <- scope.saved_axiom_states;
+    List.iter scope.seen_additions ~f:(fun (seen, instance) ->
+      Hash_set.remove seen instance);
+    List.iter scope.provenance_additions ~f:(fun key ->
+      Hashtbl.remove t.provenance_by_guarded key)
+;;
+
 let egraph t = Solver.egraph t.solver
 
 (* Matches a whole trigger group (all terms must hold under one substitution)
@@ -166,7 +229,7 @@ let instantiate t : Formula.any list =
       if Hash_set.mem seen instance
       then None
       else (
-        Hash_set.add seen instance;
+        note_seen t seen instance;
         let bound_values = Map.to_alist subst in
         (* The formula actually asserted, and the provenance key that
            [relabel_core_step] looks it up by. A top-level universal is
@@ -186,8 +249,8 @@ let instantiate t : Formula.any list =
             instance
           | Some guard -> Formula.Or [ Not guard; instance ]
         in
-        Hashtbl.set
-          t.provenance_by_guarded
+        note_provenance
+          t
           ~key:asserted
           ~data:
             { Instance_provenance.body = axiom.body; bound_values; instance };
