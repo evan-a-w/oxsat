@@ -2,9 +2,47 @@ open! Core
 open! Import
 module Refutation_clause = Feel.Solver.Refutation_clause
 
-type t = { mutable scopes : Formula.any list list }
+(* A ground instance asserted for a top-level universal, recording the [∀] it
+   came from and the witnessing substitution, so the proof derives it by a
+   checked universal-instantiation step rather than assuming it. *)
+module Forall_instance = struct
+  type t =
+    { forall : Formula.quantified
+    ; bound_values : (Tvar.t * Formula.any) list
+    }
+end
 
-let create () = { scopes = [ [] ] }
+(* The ground body an existential was Skolemized to, recording the [∃] and the
+   witnessing Skolem substitution, so the proof derives it by a checked
+   existential-elimination step. *)
+module Exists_skolemization = struct
+  type t =
+    { existential : Formula.quantified
+    ; skolems : (Tvar.t * Formula.any) list
+    }
+end
+
+type t =
+  { mutable scopes : Formula.any list list
+  ; (* Top-level [∀]/[∃] formulas cited as assumptions, in registration order
+       (reversed). *)
+    mutable quantified_givens : Formula.quantified list
+  ; forall_instances : Forall_instance.t Formula.Any.Table.t
+  ; exists_skolemizations : Exists_skolemization.t Formula.Any.Table.t
+  ; (* Ground atoms with no real meaning (guards for universals nested inside
+       boolean structure). A refutation that depends on one can't be turned into
+       a real proof, so we decline -- the same fallback as a push/pop scope. *)
+    synthetic : Formula.Any.Hash_set.t
+  }
+
+let create () =
+  { scopes = [ [] ]
+  ; quantified_givens = []
+  ; forall_instances = Formula.Any.Table.create ()
+  ; exists_skolemizations = Formula.Any.Table.create ()
+  ; synthetic = Formula.Any.Hash_set.create ()
+  }
+;;
 
 let assert_formula t formula =
   match t.scopes with
@@ -12,6 +50,25 @@ let assert_formula t formula =
   | [] -> assert false
 ;;
 
+let add_quantified_given t given =
+  t.quantified_givens <- given :: t.quantified_givens
+;;
+
+let note_forall_instance t ~instance ~forall ~bound_values =
+  Hashtbl.set
+    t.forall_instances
+    ~key:instance
+    ~data:{ Forall_instance.forall; bound_values }
+;;
+
+let note_exists_skolemization t ~skolem_body ~existential ~skolems =
+  Hashtbl.set
+    t.exists_skolemizations
+    ~key:skolem_body
+    ~data:{ Exists_skolemization.existential; skolems }
+;;
+
+let note_synthetic t atom = Hash_set.add t.synthetic atom
 let push t = t.scopes <- [] :: t.scopes
 
 let pop t =
@@ -22,6 +79,11 @@ let pop t =
 
 let asserted_formulas t =
   List.rev t.scopes |> List.concat_map ~f:List.rev |> Array.of_list
+;;
+
+let rec contains_synthetic t (formula : Formula.any) =
+  Hash_set.mem t.synthetic formula
+  || List.exists (Formula.args formula) ~f:(contains_synthetic t)
 ;;
 
 (* Resolves SAT variables and literals to their proof-level counterparts and
@@ -258,10 +320,13 @@ let unsat_proof
     List.exists refutation_clauses ~f:(fun (rc : Refutation_clause.t) ->
       Array.exists rc.literals ~f:(fun lit -> Set.mem scope_vars (Int.abs lit)))
   in
-  if touches_scope_var
+  let premises = asserted_formulas t in
+  (* A guard atom of a nested universal has no real meaning, so a refutation
+     citing one (directly or inside a guarded instance) can't be a real proof. *)
+  let depends_on_synthetic = Array.exists premises ~f:(contains_synthetic t) in
+  if touches_scope_var || depends_on_synthetic
   then None
   else (
-    let premises = asserted_formulas t in
     (* The refutation refutes the premises together with the negation of the
        step's conclusion ([False]); [Proof.check] requires exactly this input
        layout. *)
@@ -274,30 +339,60 @@ let unsat_proof
         ~refutation_clauses
         ~inputs
     in
-    let assumptions : Proof.Assumption.t array =
-      Array.map premises ~f:(fun formula ->
-        { Proof.Assumption.name = None; formula })
+    let assumptions = Queue.create () in
+    let steps = Queue.create () in
+    let add_assumption formula =
+      let id = Queue.length assumptions in
+      Queue.enqueue assumptions { Proof.Assumption.name = None; formula };
+      Proof.Id.Assumption.of_int_exn id
     in
-    let assumption_steps : Proof.Step.t array =
-      Array.mapi premises ~f:(fun index conclusion ->
-        { Proof.Step.name = None
-        ; conclusion
-        ; justification = Assumption (Proof.Id.Assumption.of_int_exn index)
-        })
+    let add_step conclusion justification =
+      let id = Queue.length steps in
+      Queue.enqueue steps { Proof.Step.name = None; conclusion; justification };
+      Proof.Id.Step.of_int_exn id
     in
-    let premise_ids =
-      Array.mapi premises ~f:(fun index _ -> Proof.Id.Step.of_int_exn index)
+    (* Each top-level [∀]/[∃] becomes an assumption and its own assumption step,
+       cited by the instantiation/elimination steps below. *)
+    let given_step = Formula.Quantified.Table.create () in
+    List.iter (List.rev t.quantified_givens) ~f:(fun given ->
+      let assumption = add_assumption given in
+      let step = add_step given (Assumption assumption) in
+      Hashtbl.set given_step ~key:given ~data:step);
+    (* One step per asserted ground formula, in assertion order: a plain
+       assumption, or -- for an instance / Skolemized body -- a checked
+       derivation from the [∀]/[∃] it came from. *)
+    let premise_steps =
+      Array.map premises ~f:(fun premise ->
+        let conclusion = Formula.widen_quantified premise in
+        match Hashtbl.find t.forall_instances premise with
+        | Some { forall; bound_values } ->
+          add_step
+            conclusion
+            (Kernel
+               { rule = Forall_instantiation { bound_values }
+               ; premises = [| Hashtbl.find_exn given_step forall |]
+               })
+        | None ->
+          (match Hashtbl.find t.exists_skolemizations premise with
+           | Some { existential; skolems } ->
+             add_step
+               conclusion
+               (Kernel
+                  { rule = Exists_elim { skolems }
+                  ; premises = [| Hashtbl.find_exn given_step existential |]
+                  })
+           | None ->
+             add_step conclusion (Assumption (add_assumption conclusion))))
     in
-    let final_step : Proof.Step.t =
-      { Proof.Step.name = None
-      ; conclusion = Formula.False
-      ; justification = By_refutation { premises = premise_ids; refutation }
-      }
+    let final_step =
+      add_step
+        (Formula.widen_quantified Formula.False)
+        (By_refutation { premises = premise_steps; refutation })
     in
     let proof : Proof.t =
-      { assumptions
-      ; steps = Array.append assumption_steps [| final_step |]
-      ; conclusion = Proof.Id.Step.of_int_exn (Array.length premises)
+      { assumptions = Queue.to_array assumptions
+      ; steps = Queue.to_array steps
+      ; conclusion = final_step
       }
     in
     match Proof.check proof with

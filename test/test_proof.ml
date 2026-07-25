@@ -60,7 +60,7 @@ let%expect_test "proof clauses normalize, sort, and deduplicate literals" =
 ;;
 
 let%expect_test "manual proofs have a stable S-expression representation" =
-  let formula : Formula.any = Eq (Var x, Var x) in
+  let formula : Formula.quantified = Eq (Var x, Var x) in
   let proof : Proof.t =
     { assumptions = [| { name = Some "h"; formula } |]
     ; steps =
@@ -262,9 +262,9 @@ let%expect_test "RUP propagates through input and extension clauses" =
 ;;
 
 let%expect_test "kernel equality transitivity is checked" =
-  let a : Formula.any = Var (Tvar.of_string "a") in
-  let b : Formula.any = Var (Tvar.of_string "b") in
-  let c : Formula.any = Var (Tvar.of_string "c") in
+  let a : Formula.quantified = Var (Tvar.of_string "a") in
+  let b : Formula.quantified = Var (Tvar.of_string "b") in
+  let c : Formula.quantified = Var (Tvar.of_string "c") in
   let assumptions : Proof.Assumption.t array =
     [| { name = None; formula = Eq (a, b) }
      ; { name = None; formula = Eq (b, c) }
@@ -298,16 +298,194 @@ let%expect_test "kernel equality transitivity is checked" =
   [%expect {| (checks (valid true)) |}]
 ;;
 
-let%expect_test "a multi-rule proof DAG is checked" =
+let%expect_test "kernel universal instantiation is checked" =
+  let x = Tvar.of_string "x" in
+  let f = Tvar.of_string "f" in
   let a : Formula.any = Var (Tvar.of_string "a") in
   let b : Formula.any = Var (Tvar.of_string "b") in
-  let c : Formula.any = Var (Tvar.of_string "c") in
-  let d : Formula.any = Var (Tvar.of_string "d") in
+  let forall : Formula.quantified =
+    Forall ([ x ], [], Eq (App (f, [ Var x ]), Var x))
+  in
+  let instance : Formula.quantified =
+    Formula.widen_quantified (Formula.Eq (App (f, [ a ]), a))
+  in
+  (* A non-[∀] premise, to check the rule rejects being applied to it. *)
+  let not_a_forall : Formula.quantified =
+    Exists ([ x ], Eq (App (f, [ Var x ]), Var x))
+  in
+  let proof ?(premise = forall) rule : Proof.t =
+    { assumptions = [| { name = None; formula = premise } |]
+    ; steps =
+        [| { name = None
+           ; conclusion = premise
+           ; justification = Assumption (Proof.Id.Assumption.of_int_exn 0)
+           }
+         ; { name = None
+           ; conclusion = instance
+           ; justification =
+               Kernel { rule; premises = [| Proof.Id.Step.of_int_exn 0 |] }
+           }
+        |]
+    ; conclusion = Proof.Id.Step.of_int_exn 1
+    }
+  in
+  let valid = proof (Forall_instantiation { bound_values = [ x, a ] }) in
+  let rejects rule ~premise =
+    Or_error.is_error (Proof.check (proof ~premise rule))
+  in
+  print_s
+    [%message
+      ""
+        ~valid:(Or_error.is_ok (Proof.check valid) : bool)
+        ~wrong_substitution_rejected:
+          (rejects
+             (Forall_instantiation { bound_values = [ x, b ] })
+             ~premise:forall
+           : bool)
+        ~missing_variable_rejected:
+          (rejects (Forall_instantiation { bound_values = [] }) ~premise:forall
+           : bool)
+        ~non_forall_premise_rejected:
+          (rejects
+             (Forall_instantiation { bound_values = [ x, a ] })
+             ~premise:not_a_forall
+           : bool)];
+  print_endline (Proof.to_string_hum valid);
+  [%expect
+    {|
+    ((valid true) (wrong_substitution_rejected true)
+     (missing_variable_rejected true) (non_forall_premise_rejected true))
+    Assumptions:
+      a0: ∀x. f(x) = x
+    Steps:
+      s0: ∀x. f(x) = x   [assumption a0]
+      s1: f(a) = a   [∀-instantiation {x := a} over [s0]]
+    Conclusion: s1
+    |}]
+;;
+
+let%expect_test "kernel existential elimination is checked, with a freshness \
+                 side condition"
+  =
+  let x = Tvar.of_string "x" in
   let f = Tvar.of_string "f" in
-  let app argument : Formula.any = App (f, [ argument ]) in
-  let source : Formula.any = Not (Eq (app a, d)) in
-  let rewritten : Formula.any = Not (Eq (app c, d)) in
-  let congruence : Formula.any = Eq (app a, app c) in
+  let sk : Formula.any = Var (Tvar.of_string "%sk") in
+  let existential : Formula.quantified =
+    Exists ([ x ], Not (Eq (App (f, [ Var x ]), Var x)))
+  in
+  let witnessed : Formula.quantified =
+    Formula.widen_quantified (Formula.Not (Eq (App (f, [ sk ]), sk)))
+  in
+  (* A non-[∃] premise, to check the rule rejects being applied to it. *)
+  let not_an_exists : Formula.quantified =
+    Forall ([ x ], [], Not (Eq (App (f, [ Var x ]), Var x)))
+  in
+  let proof
+    ?(premise = existential)
+    ?(conclusion = witnessed)
+    ~extra_assumptions
+    ()
+    : Proof.t
+    =
+    let assumptions =
+      Array.of_list
+        ({ Proof.Assumption.name = None; formula = premise }
+         :: extra_assumptions)
+    in
+    { assumptions
+    ; steps =
+        [| { name = None
+           ; conclusion = premise
+           ; justification = Assumption (Proof.Id.Assumption.of_int_exn 0)
+           }
+         ; { name = None
+           ; conclusion
+           ; justification =
+               Kernel
+                 { rule = Exists_elim { skolems = [ x, sk ] }
+                 ; premises = [| Proof.Id.Step.of_int_exn 0 |]
+                 }
+           }
+        |]
+    ; conclusion = Proof.Id.Step.of_int_exn 1
+    }
+  in
+  (* Regression: a bare [∃-elimination] whose conclusion is the witnessed body
+     is NOT a valid standalone proof -- [f(%sk) ≠ %sk] does not follow from
+     [∃x. f(x) ≠ x] ([%sk] names an arbitrary witness). The step itself is
+     locally well-formed, so this is only caught by the eigenvariable escape
+     check on the proof's conclusion. *)
+  let eigenvariable_escape = proof ~extra_assumptions:[] () in
+  (* The Skolem [%sk] occurs in another assumption -- eigenvariable condition
+     violated. *)
+  let not_fresh =
+    proof
+      ~extra_assumptions:
+        [ { Proof.Assumption.name = None
+          ; formula =
+              Formula.widen_quantified
+                (Formula.Eq (sk, Var (Tvar.of_string "c")))
+          }
+        ]
+      ()
+  in
+  (* Conclusion witnesses [x := c] but the rule's skolems say [x := %sk]. *)
+  let wrong_witness =
+    proof
+      ~conclusion:
+        (Formula.widen_quantified
+           (Formula.Not
+              (Eq
+                 ( App (f, [ Var (Tvar.of_string "c") ])
+                 , Var (Tvar.of_string "c") ))))
+      ~extra_assumptions:[]
+      ()
+  in
+  let non_exists_premise =
+    proof ~premise:not_an_exists ~extra_assumptions:[] ()
+  in
+  print_s
+    [%message
+      ""
+        ~eigenvariable_escape_rejected:
+          (Or_error.is_error (Proof.check eigenvariable_escape) : bool)
+        ~stale_skolem_rejected:
+          (Or_error.is_error (Proof.check not_fresh) : bool)
+        ~wrong_witness_rejected:
+          (Or_error.is_error (Proof.check wrong_witness) : bool)
+        ~non_exists_premise_rejected:
+          (Or_error.is_error (Proof.check non_exists_premise) : bool)];
+  print_endline
+    "rejected standalone existential elimination (eigenvariable escapes):";
+  print_endline (Proof.to_string_hum eigenvariable_escape);
+  print_s [%sexp (Proof.check eigenvariable_escape : unit Or_error.t)];
+  [%expect
+    {|
+    ((eigenvariable_escape_rejected true) (stale_skolem_rejected true)
+     (wrong_witness_rejected true) (non_exists_premise_rejected true))
+    rejected standalone existential elimination (eigenvariable escapes):
+    Assumptions:
+      a0: ∃x. f(x) ≠ x
+    Steps:
+      s0: ∃x. f(x) ≠ x   [assumption a0]
+      s1: f(%sk) ≠ %sk   [∃-elimination {x := %sk} over [s0]]
+    Conclusion: s1
+
+    (Error
+     "a Skolem introduced by existential elimination escapes into the proof's conclusion (eigenvariable condition)")
+    |}]
+;;
+
+let%expect_test "a multi-rule proof DAG is checked" =
+  let a : Formula.quantified = Var (Tvar.of_string "a") in
+  let b : Formula.quantified = Var (Tvar.of_string "b") in
+  let c : Formula.quantified = Var (Tvar.of_string "c") in
+  let d : Formula.quantified = Var (Tvar.of_string "d") in
+  let f = Tvar.of_string "f" in
+  let app argument : Formula.quantified = App (f, [ argument ]) in
+  let source : Formula.quantified = Not (Eq (app a, d)) in
+  let rewritten : Formula.quantified = Not (Eq (app c, d)) in
+  let congruence : Formula.quantified = Eq (app a, app c) in
   let assumptions : Proof.Assumption.t array =
     [| { name = Some "ab"; formula = Eq (a, b) }
      ; { name = Some "bc"; formula = Eq (b, c) }

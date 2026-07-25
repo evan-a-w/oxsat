@@ -3,7 +3,7 @@ open! Import
 
 module Axiom = struct
   type t =
-    { guard : Formula.any
+    { guard : Formula.any option
     ; bound : Tvar.t list
     ; triggers : Formula.any list list
     ; body : Formula.any

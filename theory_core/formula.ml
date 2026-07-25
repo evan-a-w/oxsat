@@ -300,6 +300,16 @@ let sexp_of_quantified (q : quantified) : Sexp.t =
   sexp_of_t (fun _ -> assert false) q
 ;;
 
+let rec contains_binder (q : quantified) : bool =
+  match q with
+  | Forall _ | Exists _ -> true
+  | _ -> List.exists (args q) ~f:(fun a -> contains_binder (widen_quantified a))
+;;
+
+let to_any (q : quantified) : any option =
+  if contains_binder q then None else Some (widen q)
+;;
+
 let rec any_of_sexp sexp : any =
   let fail () = of_sexp_error "Formula.any_of_sexp: unexpected sexp" sexp in
   match sexp with
@@ -342,6 +352,24 @@ let rec any_of_sexp sexp : any =
 
 let t_of_sexp (type a) (_a_of_sexp : Sexp.t -> a) (sexp : Sexp.t) : a t =
   (Obj.magic (any_of_sexp sexp : any) : a t)
+;;
+
+let rec quantified_of_sexp sexp : quantified =
+  match sexp with
+  | Sexp.List (Sexp.Atom "Forall" :: [ bound; triggers; body ]) ->
+    Forall
+      ( [%of_sexp: Tvar.t list] bound
+      , [%of_sexp: Sexp.t list list] triggers
+        |> List.map ~f:(List.map ~f:any_of_sexp)
+      , any_of_sexp body )
+  | Sexp.List [ Sexp.Atom "Exists"; bound; body ] ->
+    Exists ([%of_sexp: Tvar.t list] bound, any_of_sexp body)
+  | Sexp.List [ Sexp.Atom "Not"; f ] -> Not (quantified_of_sexp f)
+  | Sexp.List [ Sexp.Atom "And"; fs ] ->
+    And ([%of_sexp: Sexp.t list] fs |> List.map ~f:quantified_of_sexp)
+  | Sexp.List [ Sexp.Atom "Or"; fs ] ->
+    Or ([%of_sexp: Sexp.t list] fs |> List.map ~f:quantified_of_sexp)
+  | _ -> widen_quantified (any_of_sexp sexp)
 ;;
 
 let rank : type a. a t -> int = function
@@ -548,3 +576,16 @@ module Quantified = struct
   include functor Comparable.Make_plain
   include functor Hashable.Make_plain
 end
+
+let rec tvars_fold (acc : Tvar.Set.t) (q : quantified) : Tvar.Set.t =
+  let acc =
+    match op q with
+    | Var v | App v | Type_var v | Type_app v -> Set.add acc v
+    | Forall bound | Exists bound -> List.fold bound ~init:acc ~f:Set.add
+    | _ -> acc
+  in
+  List.fold (args q) ~init:acc ~f:(fun acc a ->
+    tvars_fold acc (widen_quantified a))
+;;
+
+let tvars (q : quantified) : Tvar.Set.t = tvars_fold Tvar.Set.empty q

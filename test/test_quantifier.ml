@@ -29,7 +29,7 @@ let%expect_test "top-level forall: registers an axiom, ground is its guard" =
     {|
     ((ground (Eq (Var %guard.2) (Var %guard.1)))
      (axioms
-      (((guard (Eq (Var %guard.2) (Var %guard.1))) (bound (x.bound.0))
+      (((guard ((Eq (Var %guard.2) (Var %guard.1)))) (bound (x.bound.0))
         (triggers (((App f ((Var x.bound.0))))))
         (body (Eq (App f ((Var x.bound.0))) (Var x.bound.0)))))))
     |}]
@@ -53,7 +53,7 @@ let%expect_test "negated exists becomes a triggerless (inert) forall" =
     {|
     ((ground (Eq (Var %guard.7) (Var %guard.6)))
      (axioms
-      (((guard (Eq (Var %guard.7) (Var %guard.6))) (bound (x.bound.5))
+      (((guard ((Eq (Var %guard.7) (Var %guard.6)))) (bound (x.bound.5))
         (triggers ())
         (body (Not (Eq (App f ((Var x.bound.5))) (Var x.bound.5))))))))
     |}]
@@ -67,7 +67,7 @@ let%expect_test "forall nested under Or: guard spliced in place, axiom still \
     {|
     ((ground (Or ((Eq (Var a) (Var a)) (Eq (Var %guard.10) (Var %guard.9)))))
      (axioms
-      (((guard (Eq (Var %guard.10) (Var %guard.9))) (bound (x.bound.8))
+      (((guard ((Eq (Var %guard.10) (Var %guard.9)))) (bound (x.bound.8))
         (triggers (((App f ((Var x.bound.8))))))
         (body (Eq (App f ((Var x.bound.8))) (Var x.bound.8)))))))
     |}]
@@ -85,10 +85,10 @@ let%expect_test "two independent foralls reusing the same bound-variable name \
        ((Eq (Var %guard.13) (Var %guard.12))
         (Eq (Var %guard.16) (Var %guard.15)))))
      (axioms
-      (((guard (Eq (Var %guard.13) (Var %guard.12))) (bound (x.bound.11))
+      (((guard ((Eq (Var %guard.13) (Var %guard.12)))) (bound (x.bound.11))
         (triggers (((App f ((Var x.bound.11))))))
         (body (Eq (App f ((Var x.bound.11))) (Var x.bound.11))))
-       ((guard (Eq (Var %guard.16) (Var %guard.15))) (bound (x.bound.14))
+       ((guard ((Eq (Var %guard.16) (Var %guard.15)))) (bound (x.bound.14))
         (triggers (((App f ((Var x.bound.14))))))
         (body (Not (Eq (App f ((Var x.bound.14))) (Var x.bound.14))))))))
     |}]
@@ -120,7 +120,7 @@ let%expect_test "manual instantiate-once: single ground match" =
   let f_sym = Tvar.of_string "f" in
   let fx : Formula.any = App (f_sym, [ Var x ]) in
   let axiom : Quantifier_axiom.Axiom.t =
-    { guard = Eq (Var (Tvar.of_string "g1"), Var (Tvar.of_string "g2"))
+    { guard = None
     ; bound = [ x ]
     ; triggers = [ [ fx ] ]
     ; body = Eq (fx, Var x)
@@ -140,7 +140,7 @@ let%expect_test "manual instantiate-once: two ground matches, no matches for \
   let f_sym = Tvar.of_string "f" in
   let fx : Formula.any = App (f_sym, [ Var x ]) in
   let axiom : Quantifier_axiom.Axiom.t =
-    { guard = Eq (Var (Tvar.of_string "g1"), Var (Tvar.of_string "g2"))
+    { guard = None
     ; bound = [ x ]
     ; triggers = [ [ fx ] ]
     ; body = Eq (fx, Var x)
@@ -199,7 +199,6 @@ let%expect_test "forall x. f x = x contradicts an asserted disequality, only \
         (body (Eq (App f ((Var x.bound.17))) (Var x.bound.17)))
         (bound_values ((x.bound.17 (Var a))))
         (instance (Eq (App f ((Var a))) (Var a))))
-       (Asserted (Eq (Var %guard.19) (Var %guard.18)))
        (Asserted (Not (Eq (App f ((Var a))) (Var a)))))))
     |}]
 ;;
@@ -276,7 +275,7 @@ let%expect_test "max_rounds bounds an axiom whose instances keep matching \
     |> List.length
   in
   print_s [%message "" (term_count : int)];
-  [%expect {| (term_count 16) |}]
+  [%expect {| (term_count 10) |}]
 ;;
 
 let%expect_test "produce_proofs: a quantifier-driven unsat yields a checked \
@@ -312,33 +311,368 @@ let%expect_test "produce_proofs: a quantifier-driven unsat yields a checked \
     {|
     (checked true)
     Assumptions:
-      a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: %guard.28 = %guard.27
+      a0: ∀x.bound.20. f(x.bound.20) = x.bound.20
+      a1: bool ≠ int
+      a2: bool ≠ float
+      a3: int ≠ float
       a4: a = b
       a5: f(a) ≠ b
-      a6: %guard.28 ≠ %guard.27 ∨ f(a) = a
     Steps:
-      s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: %guard.28 = %guard.27   [assumption a3]
+      s0: ∀x.bound.20. f(x.bound.20) = x.bound.20   [assumption a0]
+      s1: bool ≠ int   [assumption a1]
+      s2: bool ≠ float   [assumption a2]
+      s3: int ≠ float   [assumption a3]
       s4: a = b   [assumption a4]
       s5: f(a) ≠ b   [assumption a5]
-      s6: %guard.28 ≠ %guard.27 ∨ f(a) = a   [assumption a6]
-      s7: false   [refutation of [s0, s1, s2, s3, s4, s5, s6]]
+      s6: f(a) = a   [∀-instantiation {x.bound.20 := a} over [s0]]
+      s7: false   [refutation of [s1, s2, s3, s4, s5, s6]]
         refutation:
-          extensions:
-            e0 := (¬(%guard.27 = %guard.28) ∨ a = f(a))
           steps:
-            r0: %guard.27 = %guard.28   [assumption a3]
-            r1: a = b   [assumption a4]
-            r2: b ≠ f(a)   [assumption a5]
-            r3: a = f(a) ∨ %guard.27 ≠ %guard.28 ∨ ¬(e0)   [definition of e0]
-            r4: e0   [assumption a6]
-            r5: a ≠ b ∨ a ≠ f(a) ∨ b = f(a)   [EUF: b = f(a) via [a = b; a = f(a)]]
-            r6: ⊥   [RUP over [r0, r1, r2, r4, r5, r3]]
+            r0: a = b   [s4]
+            r1: b ≠ f(a)   [s5]
+            r2: a = f(a)   [s6]
+            r3: a ≠ b ∨ a ≠ f(a) ∨ b = f(a)   [EUF: b = f(a) via [a = b; a = f(a)]]
+            r4: ⊥   [RUP over [r0, r1, r2, r3]]
     Conclusion: s7
     |}]
+;;
+
+(* A bare top-level [∃] on its own, driven to unsat with no universal involved:
+   [∃x. f(x) = a ∧ g(x) = a ∧ f(x) ≠ g(x)] Skolemizes to a body whose three
+   literals have no direct clash -- EUF must derive [f(sk) = g(sk)] from the two
+   equalities to contradict the disequality. The proof cites the real [∃] and
+   justifies its Skolem body with a checked [∃-elimination] step. *)
+let%expect_test "produce_proofs: a bare existential drives a checked, fully \
+                 printed proof"
+  =
+  let qs =
+    Quantifier_solver.create ~config:{ Solver.Config.produce_proofs = true } ()
+  in
+  let f arg : Formula.any = App (Tvar.of_string "f", [ arg ]) in
+  let g arg : Formula.any = App (Tvar.of_string "g", [ arg ]) in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let x = Tvar.of_string "x" in
+  let existential : Formula.quantified =
+    Exists
+      ( [ x ]
+      , And
+          [ Eq (f (Var x), a)
+          ; Eq (g (Var x), a)
+          ; Not (Eq (f (Var x), g (Var x)))
+          ] )
+  in
+  ignore (Quantifier_solver.assert_formula qs existential : _ Or_error.t);
+  (match Quantifier_solver.solve qs ~max_rounds:2 with
+   | Sat _ | Unknown_but_possibly_sat _ -> print_endline "unexpected sat"
+   | Unsat { proof = None; _ } -> print_endline "no proof produced"
+   | Unsat { proof = Some proof; _ } ->
+     print_s [%message "" ~checked:(Or_error.is_ok (Proof.check proof) : bool)];
+     print_endline (Proof.to_string_hum proof));
+  [%expect
+    {|
+    (checked true)
+    Assumptions:
+      a0: ∃x. f(x) = a ∧ g(x) = a ∧ f(x) ≠ g(x)
+      a1: bool ≠ int
+      a2: bool ≠ float
+      a3: int ≠ float
+    Steps:
+      s0: ∃x. f(x) = a ∧ g(x) = a ∧ f(x) ≠ g(x)   [assumption a0]
+      s1: bool ≠ int   [assumption a1]
+      s2: bool ≠ float   [assumption a2]
+      s3: int ≠ float   [assumption a3]
+      s4: f(%skolem.21) = a ∧ g(%skolem.21) = a ∧ f(%skolem.21) ≠ g(%skolem.21)   [∃-elimination {x := %skolem.21} over [s0]]
+      s5: false   [refutation of [s1, s2, s3, s4]]
+        refutation:
+          extensions:
+            e0 := (a = f(%skolem.21) ∧ a = g(%skolem.21) ∧ ¬(f(%skolem.21) = g(%skolem.21)))
+          steps:
+            r0: a = f(%skolem.21) ∨ ¬(e0)   [definition of e0]
+            r1: a = g(%skolem.21) ∨ ¬(e0)   [definition of e0]
+            r2: f(%skolem.21) ≠ g(%skolem.21) ∨ ¬(e0)   [definition of e0]
+            r3: e0   [s4]
+            r4: a ≠ f(%skolem.21) ∨ a ≠ g(%skolem.21) ∨ f(%skolem.21) = g(%skolem.21)   [EUF: f(%skolem.21) = g(%skolem.21) via [a = f(%skolem.21); a = g(%skolem.21)]]
+            r5: ⊥   [RUP over [r3, r0, r1, r2, r4]]
+    Conclusion: s5
+    |}]
+;;
+
+(* A top-level conjunction of a universal and an existential -- the user's
+   "forall and existential in the same formula, at toplevel" case. Each conjunct
+   is handled at top level, so both get real proof steps: the [∃] is eliminated
+   to a Skolem body [f(sk) = c ∧ sk ≠ c], the [∀] instantiates on [f(sk)] to
+   give [f(sk) = sk], and EUF (rather than a direct literal clash) closes it. *)
+let%expect_test "produce_proofs: forall + existential in one top-level \
+                 conjunction, both cited"
+  =
+  let qs =
+    Quantifier_solver.create ~config:{ Solver.Config.produce_proofs = true } ()
+  in
+  let f_sym = Tvar.of_string "f" in
+  let f arg : Formula.any = App (f_sym, [ arg ]) in
+  let c : Formula.any = Var (Tvar.of_string "c") in
+  let y = Tvar.of_string "y" in
+  let x = Tvar.of_string "x" in
+  let forall : Formula.quantified =
+    Forall ([ y ], [ [ f (Var y) ] ], Eq (f (Var y), Var y))
+  in
+  let exists : Formula.quantified =
+    Exists ([ x ], And [ Eq (f (Var x), c); Not (Eq (Var x, c)) ])
+  in
+  ignore
+    (Quantifier_solver.assert_formula qs (And [ forall; exists ])
+     : _ Or_error.t);
+  (match Quantifier_solver.solve qs ~max_rounds:2 with
+   | Sat _ | Unknown_but_possibly_sat _ -> print_endline "unexpected sat"
+   | Unsat { proof = None; _ } -> print_endline "no proof produced"
+   | Unsat { proof = Some proof; _ } ->
+     print_s [%message "" ~checked:(Or_error.is_ok (Proof.check proof) : bool)];
+     print_endline (Proof.to_string_hum proof));
+  [%expect
+    {|
+    (checked true)
+    Assumptions:
+      a0: ∀y.bound.22. f(y.bound.22) = y.bound.22
+      a1: ∃x. f(x) = c ∧ x ≠ c
+      a2: bool ≠ int
+      a3: bool ≠ float
+      a4: int ≠ float
+    Steps:
+      s0: ∀y.bound.22. f(y.bound.22) = y.bound.22   [assumption a0]
+      s1: ∃x. f(x) = c ∧ x ≠ c   [assumption a1]
+      s2: bool ≠ int   [assumption a2]
+      s3: bool ≠ float   [assumption a3]
+      s4: int ≠ float   [assumption a4]
+      s5: f(%skolem.23) = c ∧ %skolem.23 ≠ c   [∃-elimination {x := %skolem.23} over [s1]]
+      s6: f(%skolem.23) = %skolem.23   [∀-instantiation {y.bound.22 := %skolem.23} over [s0]]
+      s7: false   [refutation of [s2, s3, s4, s5, s6]]
+        refutation:
+          extensions:
+            e0 := (c = f(%skolem.23) ∧ ¬(c = %skolem.23))
+          steps:
+            r0: c = f(%skolem.23) ∨ ¬(e0)   [definition of e0]
+            r1: c ≠ %skolem.23 ∨ ¬(e0)   [definition of e0]
+            r2: e0   [s5]
+            r3: %skolem.23 = f(%skolem.23)   [s6]
+            r4: c = %skolem.23 ∨ c ≠ f(%skolem.23) ∨ %skolem.23 ≠ f(%skolem.23)   [EUF: c = %skolem.23 via [c = f(%skolem.23); %skolem.23 = f(%skolem.23)]]
+            r5: ⊥   [RUP over [r2, r3, r0, r1, r4]]
+    Conclusion: s7
+    |}]
+;;
+
+(* A quantifier nested inside boolean structure keeps the guard encoding, whose
+   guard atom is synthetic -- so a refutation depending on it declines to
+   produce a real proof (the documented fallback), while still solving. *)
+let%expect_test "produce_proofs: a nested quantifier still solves but declines \
+                 a proof"
+  =
+  let qs =
+    Quantifier_solver.create ~config:{ Solver.Config.produce_proofs = true } ()
+  in
+  let f_sym = Tvar.of_string "f" in
+  let f arg : Formula.any = App (f_sym, [ arg ]) in
+  let x = Tvar.of_string "x" in
+  let c : Formula.any = Var (Tvar.of_string "c") in
+  let d : Formula.any = Var (Tvar.of_string "d") in
+  let nested_forall : Formula.quantified =
+    Or
+      [ Formula.widen_quantified (Formula.Eq (c, d))
+      ; Forall ([ x ], [ [ f (Var x) ] ], Eq (f (Var x), Var x))
+      ]
+  in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let b : Formula.any = Var (Tvar.of_string "b") in
+  List.iter
+    [ nested_forall
+    ; Formula.widen_quantified (Formula.Not (Eq (c, d)))
+    ; Formula.widen_quantified (Formula.Eq (a, b))
+    ; Formula.widen_quantified (Formula.Not (Eq (f a, b)))
+    ]
+    ~f:(fun formula ->
+      ignore (Quantifier_solver.assert_formula qs formula : _ Or_error.t));
+  (match Quantifier_solver.solve qs ~max_rounds:2 with
+   | Sat _ | Unknown_but_possibly_sat _ -> print_endline "unexpected sat"
+   | Unsat { proof = None; _ } -> print_endline "unsat, no proof (nested)"
+   | Unsat { proof = Some _; _ } -> print_endline "unexpected proof");
+  [%expect {| unsat, no proof (nested) |}]
+;;
+
+(* A single universal that must be instantiated at TWO distinct, unrelated terms
+   for the refutation to close: [∀x.f(x)=c] with [f(a)≠f(b)] forces both
+   [f(a)=c] and [f(b)=c] (a and b share no equality, so congruence cannot bridge
+   [f(a)] and [f(b)] on its own), after which EUF chains [f(a)=c=f(b)] to
+   contradict the disequality. Two [∀-instantiation] steps feed one refutation. *)
+let%expect_test "produce_proofs: one universal instantiated at two terms" =
+  let qs =
+    Quantifier_solver.create ~config:{ Solver.Config.produce_proofs = true } ()
+  in
+  let f arg : Formula.any = App (Tvar.of_string "f", [ arg ]) in
+  let c : Formula.any = Var (Tvar.of_string "c") in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let b : Formula.any = Var (Tvar.of_string "b") in
+  let x = Tvar.of_string "x" in
+  ignore
+    (Quantifier_solver.assert_formula
+       qs
+       (Forall ([ x ], [ [ f (Var x) ] ], Eq (f (Var x), c)))
+     : _ Or_error.t);
+  ignore
+    (Quantifier_solver.assert_formula
+       qs
+       (Formula.widen_quantified (Not (Eq (f a, f b))))
+     : _ Or_error.t);
+  (match Quantifier_solver.solve qs ~max_rounds:3 with
+   | Sat _ | Unknown_but_possibly_sat _ -> print_endline "unexpected sat"
+   | Unsat { proof = None; _ } -> print_endline "no proof produced"
+   | Unsat { proof = Some proof; _ } ->
+     print_s [%message "" ~checked:(Or_error.is_ok (Proof.check proof) : bool)];
+     print_endline (Proof.to_string_hum proof));
+  [%expect
+    {|
+    (checked true)
+    Assumptions:
+      a0: ∀x.bound.27. f(x.bound.27) = c
+      a1: bool ≠ int
+      a2: bool ≠ float
+      a3: int ≠ float
+      a4: f(a) ≠ f(b)
+    Steps:
+      s0: ∀x.bound.27. f(x.bound.27) = c   [assumption a0]
+      s1: bool ≠ int   [assumption a1]
+      s2: bool ≠ float   [assumption a2]
+      s3: int ≠ float   [assumption a3]
+      s4: f(a) ≠ f(b)   [assumption a4]
+      s5: f(a) = c   [∀-instantiation {x.bound.27 := a} over [s0]]
+      s6: f(b) = c   [∀-instantiation {x.bound.27 := b} over [s0]]
+      s7: false   [refutation of [s1, s2, s3, s4, s5, s6]]
+        refutation:
+          steps:
+            r0: f(a) ≠ f(b)   [s4]
+            r1: c = f(a)   [s5]
+            r2: c = f(b)   [s6]
+            r3: c ≠ f(a) ∨ c ≠ f(b) ∨ f(a) = f(b)   [EUF: f(a) = f(b) via [c = f(a); c = f(b)]]
+            r4: ⊥   [RUP over [r0, r1, r2, r3]]
+    Conclusion: s7
+    |}]
+;;
+
+(* Confidence that [Proof.check] is not vacuous: take a real, complex proof (the
+   forall + existential co-occurrence) and corrupt it four ways, each of which
+   the checker must reject. If any mutation were accepted, the checker would be
+   trusting rather than verifying. *)
+let%expect_test "produce_proofs: the checker rejects mutations of a real proof" =
+  let qs =
+    Quantifier_solver.create ~config:{ Solver.Config.produce_proofs = true } ()
+  in
+  let f arg : Formula.any = App (Tvar.of_string "f", [ arg ]) in
+  let c : Formula.any = Var (Tvar.of_string "c") in
+  let y = Tvar.of_string "y" in
+  let x = Tvar.of_string "x" in
+  ignore
+    (Quantifier_solver.assert_formula
+       qs
+       (And
+          [ Forall ([ y ], [ [ f (Var y) ] ], Eq (f (Var y), Var y))
+          ; Exists ([ x ], And [ Eq (f (Var x), c); Not (Eq (Var x, c)) ])
+          ])
+     : _ Or_error.t);
+  match Quantifier_solver.solve qs ~max_rounds:2 with
+  | Sat _ | Unknown_but_possibly_sat _ -> print_endline "unexpected sat"
+  | Unsat { proof = None; _ } -> print_endline "no proof produced"
+  | Unsat { proof = Some proof; _ } ->
+    let find ~f =
+      fst
+        (Array.findi_exn proof.steps ~f:(fun _ step ->
+           f step.Proof.Step.justification))
+    in
+    let map_step i ~f =
+      { proof with
+        steps =
+          Array.mapi proof.steps ~f:(fun j step ->
+            if j = i then f step else step)
+      }
+    in
+    let inst_i =
+      find ~f:(function
+        | Proof.Justification.Kernel { rule = Forall_instantiation _; _ } ->
+          true
+        | _ -> false)
+    in
+    let exists_i =
+      find ~f:(function
+        | Proof.Justification.Kernel { rule = Exists_elim _; _ } -> true
+        | _ -> false)
+    in
+    let refut_i =
+      find ~f:(function
+        | Proof.Justification.By_refutation _ -> true
+        | _ -> false)
+    in
+    let bogus : Formula.any = Var (Tvar.of_string "%bogus") in
+    (* 1. Change the instantiation's witness but not its conclusion. *)
+    let wrong_instantiation =
+      map_step inst_i ~f:(fun step ->
+        match step.justification with
+        | Kernel { rule = Forall_instantiation { bound_values }; premises } ->
+          let bound_values =
+            List.map bound_values ~f:(fun (v, _) -> v, bogus)
+          in
+          { step with
+            justification =
+              Kernel { rule = Forall_instantiation { bound_values }; premises }
+          }
+        | _ -> step)
+    in
+    (* 2. Claim the instantiation's ground conclusion is directly the [∀]
+       assumption (a0). *)
+    let forged_instantiation =
+      map_step inst_i ~f:(fun step ->
+        { step with
+          justification = Assumption (Proof.Id.Assumption.of_int_exn 0)
+        })
+    in
+    (* 3. Tamper with the witnessed body of the existential step. *)
+    let tampered_exists =
+      map_step exists_i ~f:(fun step ->
+        { step with conclusion = Formula.widen_quantified (Eq (bogus, c)) })
+    in
+    (* 4. Strip the hints from the refutation's RUP step so it no longer derives
+       the empty clause. *)
+    let broken_refutation =
+      map_step refut_i ~f:(fun step ->
+        match step.justification with
+        | By_refutation { premises; refutation } ->
+          let steps =
+            Array.map refutation.Proof.Refutation.steps ~f:(fun rstep ->
+              match rstep.Proof.Refutation.Step.reason with
+              | Rup _ ->
+                { rstep with
+                  reason = Proof.Refutation.Reason.Rup { hints = [||] }
+                }
+              | _ -> rstep)
+          in
+          { step with
+            justification =
+              By_refutation { premises; refutation = { refutation with steps } }
+          }
+        | _ -> step)
+    in
+    print_s
+      [%message
+        ""
+          ~baseline_checks:(Or_error.is_ok (Proof.check proof) : bool)
+          ~wrong_instantiation_rejected:
+            (Or_error.is_error (Proof.check wrong_instantiation) : bool)
+          ~forged_instantiation_rejected:
+            (Or_error.is_error (Proof.check forged_instantiation) : bool)
+          ~tampered_exists_rejected:
+            (Or_error.is_error (Proof.check tampered_exists) : bool)
+          ~broken_refutation_rejected:
+            (Or_error.is_error (Proof.check broken_refutation) : bool)];
+    [%expect
+      {|
+      ((baseline_checks true) (wrong_instantiation_rejected true)
+       (forged_instantiation_rejected true) (tampered_exists_rejected true)
+       (broken_refutation_rejected true))
+      |}]
 ;;

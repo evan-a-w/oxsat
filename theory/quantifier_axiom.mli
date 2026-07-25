@@ -2,13 +2,19 @@ open! Core
 open! Import
 
 (** A registered universal axiom: [forall bound, body], instantiated by matching
-    [triggers] against ground terms in the egraph. [guard] is a fresh,
-    otherwise-unconstrained ground equality atom spliced into the surrounding
-    ground formula in place of the original [Forall] node -- see
-    {!Quantifier_elaboration}. *)
+    [triggers] against ground terms in the egraph.
+
+    [guard] is [Some g] for a universal that appears nested inside boolean
+    structure: [g] is a fresh, otherwise-unconstrained ground equality atom
+    spliced into the surrounding ground formula in place of the original
+    [Forall] node (see {!Quantifier_elaboration}), and each instance is asserted
+    guarded as [¬g ∨ instance]. It is [None] for a top-level universal, which
+    imposes no ground constraint of its own until instantiated, so instances are
+    asserted unconditionally -- letting a proof cite the real [∀] and justify
+    each instance by checked universal instantiation. *)
 module Axiom : sig
   type t =
-    { guard : Formula.any
+    { guard : Formula.any option
     ; bound : Tvar.t list
     ; triggers : Formula.any list list
     ; body : Formula.any

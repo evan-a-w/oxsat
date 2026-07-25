@@ -30,3 +30,23 @@ open! Import
 val elaborate
   :  Formula.quantified
   -> Formula.any * Quantifier_axiom.Axiom.t list
+
+(** Registers a {b top-level} universal: alpha-renames [bound] to fresh
+    variables and returns a guard-free ({!Quantifier_axiom.Axiom.guard} =
+    [None]) axiom together with the renamed [∀] itself, for a proof to cite as
+    an assumption and justify each instance by universal instantiation. Unlike
+    {!elaborate}, imposes no ground constraint and no guard atom. *)
+val register_toplevel_forall
+  :  bound:Tvar.t list
+  -> triggers:Formula.any list list
+  -> body:Formula.any
+  -> Quantifier_axiom.Axiom.t * Formula.quantified
+
+(** Skolemizes an existential's [body]: replaces each bound variable with a
+    fresh ground constant, returning the witnessing substitution (bound variable
+    to its Skolem constant) alongside the resulting ground body. The
+    substitution is what a proof's existential-elimination step records. *)
+val skolemize_existential
+  :  bound:Tvar.t list
+  -> Formula.any
+  -> (Tvar.t * Formula.any) list * Formula.any

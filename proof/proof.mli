@@ -10,13 +10,18 @@ module Theory_certificate = Proof_theory_certificate
 module Refutation = Refutation
 
 (** A solver-independent, human-facing proof DAG. Every step proves a
-    {!Formula.any}; step and assumption IDs are indices into the corresponding
-    arrays and may only refer backwards when the proof is checked. *)
+    {!Formula.quantified} (a ground {!Formula.any} embeds via
+    {!Formula.widen_quantified}); step and assumption IDs are indices into the
+    corresponding arrays and may only refer backwards when the proof is checked.
+
+    Quantified conclusions only ever appear as an assumption's [∀]/[∃] and as
+    the premise of the two quantifier kernel rules below; all boolean, equality,
+    and refutation reasoning stays over ground formulas. *)
 
 module Assumption : sig
   type t =
     { name : string option
-    ; formula : Formula.any
+    ; formula : Formula.quantified
     }
   [@@deriving sexp, compare]
 end
@@ -42,6 +47,20 @@ module Kernel_rule : sig
         { direction : Rewrite_direction.t
         ; path : int list
         }
+    | Forall_instantiation of
+        { (* premise [∀bound. body]; conclusion [body] with each bound variable
+             replaced per [bound_values]. Every bound variable must be
+             instantiated. *)
+          bound_values : (Tvar.t * Formula.any) list
+        }
+    | Exists_elim of
+        { (* premise [∃bound. body]; conclusion [body] with each bound variable
+             replaced by its witness per [skolems], subject to the eigenvariable
+             condition: no Skolem symbol occurs in the premise, in any of the
+             proof's assumptions, or in the proof's final conclusion (the last
+             enforced by [check], not here). *)
+          skolems : (Tvar.t * Formula.any) list
+        }
   [@@deriving sexp, compare]
 end
 
@@ -64,7 +83,7 @@ end
 module Step : sig
   type t =
     { name : string option
-    ; conclusion : Formula.any
+    ; conclusion : Formula.quantified
     ; justification : Justification.t
     }
   [@@deriving sexp, compare]

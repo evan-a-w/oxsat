@@ -98,6 +98,19 @@ val widen : 'a t -> any
 (** Like {!widen}, but into the wider [`Quantified]-inclusive [quantified]. *)
 val widen_quantified : 'a t -> quantified
 
+(** [Some g] when [q] contains no quantifier node -- so it is already a plain
+    ground formula -- and [None] otherwise. The inverse direction of
+    {!widen_quantified} for the binder-free case. *)
+val to_any : quantified -> any option
+
+(** Parses the [sexp_of_quantified] representation. *)
+val quantified_of_sexp : Sexp.t -> quantified
+
+(** Every [Tvar.t] mentioned anywhere in [q]: term variables, function/type
+    application heads, and quantifier bound-variable lists. Used for the
+    eigenvariable freshness side condition of existential elimination. *)
+val tvars : quantified -> Tvar.Set.t
+
 module Any : sig
   type t = any [@@deriving sexp, compare, hash]
 

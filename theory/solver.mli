@@ -38,6 +38,30 @@ val assert_formula
 
 (** Opens a new assertion scope. Formulas asserted after [push] (until the
     matching [pop]) are only enforced while this scope is active. *)
+
+(** Proof-provenance hooks for a quantifier layer built on top of this solver
+    (see {!Quantifier_solver}). Each is a no-op unless proof production is on.
+    They let a generated {!Proof.t} cite the real [∀]/[∃] and justify each
+    ground instance / Skolemized body by a checked kernel rule. See the
+    corresponding functions in {!Proof_generation}. *)
+
+val proof_add_quantified_given : t -> Formula.quantified -> unit
+
+val proof_note_forall_instance
+  :  t
+  -> instance:Formula.any
+  -> forall:Formula.quantified
+  -> bound_values:(Tvar.t * Formula.any) list
+  -> unit
+
+val proof_note_exists_skolemization
+  :  t
+  -> skolem_body:Formula.any
+  -> existential:Formula.quantified
+  -> skolems:(Tvar.t * Formula.any) list
+  -> unit
+
+val proof_note_synthetic : t -> Formula.any -> unit
 val push : t -> unit
 
 (** Closes the innermost open scope, retracting the SAT-level constraints
