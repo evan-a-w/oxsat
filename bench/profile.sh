@@ -17,8 +17,7 @@
 # Profilers (both cross-platform: Linux + macOS, x86 + arm):
 #   flamegraph  cargo install flamegraph. Writes an interactive svg (default
 #               bench/flamegraph.svg); open it in a browser yourself. Uses perf
-#               on Linux; on macOS uses dtrace, which needs root, so the
-#               workload is re-run under sudo via flamegraph's --root.
+#               on Linux and xctrace (Time Profiler) on macOS; no root needed.
 #   samply      cargo install samply. Records a profile (default
 #               bench/samply.json.gz) and opens the Firefox Profiler UI in
 #               your browser automatically. No root needed. Re-open later
@@ -60,6 +59,13 @@ if [ "$expect_profiler" = 1 ]; then
   echo "error: --profiler expects an argument (flamegraph or samply)" >&2
   exit 1
 fi
+case "$profiler" in
+  flamegraph | samply) ;;
+  *)
+    echo "error: unknown profiler '$profiler' (expected flamegraph or samply)" >&2
+    exit 1
+    ;;
+esac
 
 has_flag() {
   local flag="$1"
@@ -99,13 +105,8 @@ case "$profiler" in
     text_args=()
     folded_file="bench/flamegraph.folded"
     [ "$text" = 1 ] && text_args=(--post-process "tee $folded_file")
-    if [ "$(uname)" = "Darwin" ]; then
-      flamegraph --root "${profiler_args[@]+"${profiler_args[@]}"}" \
-        "${text_args[@]+"${text_args[@]}"}" -- "$exe" "${bench_args[@]}"
-    else
-      flamegraph "${profiler_args[@]+"${profiler_args[@]}"}" \
-        "${text_args[@]+"${text_args[@]}"}" -- "$exe" "${bench_args[@]}"
-    fi
+    flamegraph "${profiler_args[@]+"${profiler_args[@]}"}" \
+      "${text_args[@]+"${text_args[@]}"}" -- "$exe" "${bench_args[@]}"
     echo "Wrote $out (open in a browser)"
     if [ "$text" = 1 ]; then
       bench/folded_summary.sh "$folded_file" | tee bench/flamegraph.txt
@@ -115,9 +116,5 @@ case "$profiler" in
     samply record "${profiler_args[@]+"${profiler_args[@]}"}" \
       -- "$exe" "${bench_args[@]}"
     echo "Wrote $out (re-open with: samply load $out)"
-    ;;
-  *)
-    echo "error: unknown profiler '$profiler' (expected flamegraph or samply)" >&2
-    exit 1
     ;;
 esac

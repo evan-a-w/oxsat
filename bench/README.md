@@ -37,8 +37,8 @@ profiles a benchmark. The script defaults to `-min-iterations 50
 itself; override after `--` as needed. Both profilers work on Linux and macOS.
 
 flamegraph (default; `cargo install flamegraph`) writes an interactive svg;
-open it in a browser yourself. On macOS the workload is re-run under sudo
-(dtrace requires root); on Linux it uses perf.
+open it in a browser yourself. Uses perf on Linux and xctrace (Time Profiler)
+on macOS; no root needed on either.
 
 ```
 bench/profile.sh -- -bench smt -only "Bin packing (items=15"
@@ -89,3 +89,10 @@ memtrace-viewer bench/trace.ctf   # serves a flamegraph UI in the browser
 
 Record notable results at the top of `bench/mac_smt_results.txt` /
 `bench/results.txt` as before.
+
+## Tests
+
+`bench/cram/` contains cram tests (run via `dune build @runtest`) covering
+benchmark filtering, saving/comparing results, the folded-stack summarizer,
+and profile.sh argument validation. Profiling itself (flamegraph/samply) is
+not exercised in tests since it needs perf/xctrace.
