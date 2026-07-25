@@ -128,6 +128,7 @@ let default_benchmark_config =
 
 let run_scaling_benchmark
   ?(benchmark_config = default_benchmark_config)
+  ?(only = [])
   ~max_num_vars
   ()
   =
@@ -188,5 +189,5 @@ let run_scaling_benchmark
       ]
     |> List.map ~f:benchmark_of_instance
   in
-  Benchmark.run_all_and_print ~config:benchmark_config benchmarks
+  Benchmark.run_all_and_print ~config:benchmark_config ~only benchmarks
 ;;

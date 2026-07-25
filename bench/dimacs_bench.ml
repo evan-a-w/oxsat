@@ -49,8 +49,12 @@ let default_benchmark_config =
     ()
 ;;
 
-let run_dimacs_examples ?(benchmark_config = default_benchmark_config) () =
+let run_dimacs_examples
+  ?(benchmark_config = default_benchmark_config)
+  ?(only = [])
+  ()
+  =
   let instances = default_instances () in
   let benchmarks = List.map instances ~f:benchmark_of_instance in
-  Benchmark.run_all_and_print ~config:benchmark_config benchmarks
+  Benchmark.run_all_and_print ~config:benchmark_config ~only benchmarks
 ;;

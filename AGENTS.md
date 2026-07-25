@@ -23,6 +23,10 @@ You can run the benchmarks, using the same commands as bench/results.txt or benc
 can add entries in a similar format. Be brief in descriptions of changes. Add
 entries to the TOP of the file, that's where things are added.
 
+See bench/README.md for the benchmark comparison and profiling workflow
+(filtering with -only, saving/comparing results, flamegraph and memtrace
+profiling).
+
 Eagerly remove dead code, unless you think it has a good chance of being useful
 in future, and it doesn't add complexity / performance losses / prevent optimisations.
 

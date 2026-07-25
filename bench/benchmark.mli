@@ -40,8 +40,10 @@ module Stats : sig
     ; p95 : float
     ; p99 : float
     ; samples : int
+    ; alloc_bytes : float (** Mean bytes allocated per iteration *)
+    ; major_collections : float (** Mean major GC collections per iteration *)
     }
-  [@@deriving sexp_of]
+  [@@deriving sexp]
 
   (** Format stats in nanoseconds *)
   val to_string_ns : t -> string
@@ -56,7 +58,7 @@ module Result : sig
     { name : string
     ; stats : Stats.t
     }
-  [@@deriving sexp_of]
+  [@@deriving sexp]
 
   val to_string : t -> string
 end
@@ -64,8 +66,16 @@ end
 (** Run a single benchmark and return statistics *)
 val run : ?config:Config.t -> name:string -> (unit -> 'a) -> Result.t
 
-(** Run multiple benchmarks *)
-val run_all : ?config:Config.t -> (string * (unit -> 'a)) list -> Result.t list
+(** Whether [name] passes the [only] filter (empty [only] matches everything). *)
+val matches_only : only:string list -> string -> bool
+
+(** Run multiple benchmarks. If [only] is non-empty, only benchmarks whose name
+    contains one of the given substrings are run. *)
+val run_all
+  :  ?config:Config.t
+  -> ?only:string list
+  -> (string * (unit -> 'a)) list
+  -> Result.t list
 
 (** Run a single benchmark and print results *)
 val run_and_print : ?config:Config.t -> name:string -> (unit -> 'a) -> Result.t
@@ -73,8 +83,18 @@ val run_and_print : ?config:Config.t -> name:string -> (unit -> 'a) -> Result.t
 (** Run multiple benchmarks and print results *)
 val run_all_and_print
   :  ?config:Config.t
+  -> ?only:string list
   -> (string * (unit -> 'a)) list
   -> Result.t list
 
 (** Print benchmark results *)
 val print_results : Result.t list -> unit
+
+(** Save/load results as sexp, for later comparison with [compare_results]. *)
+val save_results : filename:string -> Result.t list -> unit
+
+val load_results : filename:string -> Result.t list
+
+(** Print a table comparing two sets of results, sorted by largest time
+    regression first. Ratios are [after / before], so > 1x is a regression. *)
+val compare_results : before:Result.t list -> after:Result.t list -> unit

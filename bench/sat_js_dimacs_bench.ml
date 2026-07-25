@@ -68,9 +68,16 @@ let default_benchmark_config =
     ()
 ;;
 
-let run_dimacs_examples ?(benchmark_config = default_benchmark_config) () =
+let run_dimacs_examples
+  ?(benchmark_config = default_benchmark_config)
+  ?(only = [])
+  ()
+  =
   let instances =
-    Dimacs_bench.default_instances () |> List.map ~f:prepare_instance
+    Dimacs_bench.default_instances ()
+    |> List.map ~f:prepare_instance
+    |> List.filter ~f:(fun (instance : Prepared_instance.t) ->
+      Benchmark.matches_only ~only instance.name)
   in
   List.iter instances ~f:(benchmark_instance ~benchmark_config);
   []
