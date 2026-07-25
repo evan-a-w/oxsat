@@ -2,12 +2,17 @@
 # CPU-profile a benchmark and view the results.
 #
 # Usage:
-#   bench/profile.sh [--profiler flamegraph|samply] [profiler opts] -- [feel_bench args]
+#   bench/profile.sh [--profiler flamegraph|samply] [--text] [profiler opts] -- [feel_bench args]
 #
 # Examples:
 #   bench/profile.sh -- -bench smt -only "Bin packing (items=15"
 #   bench/profile.sh --profiler samply -- -bench smt -only "Bin packing"
 #   bench/profile.sh -o bench/binpacking.svg -- -bench smt -only "Bin packing"
+#   bench/profile.sh --text -- -bench smt -only "Bin packing"
+#
+# --text (flamegraph only) also writes the folded stacks to
+# bench/flamegraph.folded and prints a textual flat profile (saved to
+# bench/flamegraph.txt), suitable for reading without a browser.
 #
 # Profilers (both cross-platform: Linux + macOS, x86 + arm):
 #   flamegraph  cargo install flamegraph. Writes an interactive svg (default
@@ -26,6 +31,7 @@ set -eu
 cd "$(dirname "$0")/.."
 
 profiler="flamegraph"
+text=0
 profiler_args=()
 bench_args=()
 seen_sep=0
@@ -36,6 +42,8 @@ for arg in "$@"; do
     expect_profiler=0
   elif [ "$seen_sep" = 0 ] && [ "$arg" = "--profiler" ]; then
     expect_profiler=1
+  elif [ "$seen_sep" = 0 ] && [ "$arg" = "--text" ]; then
+    text=1
   elif [ "$seen_sep" = 0 ] && [ "$arg" = "--" ]; then
     seen_sep=1
   elif [ "$seen_sep" = 1 ]; then
@@ -44,6 +52,10 @@ for arg in "$@"; do
     profiler_args+=("$arg")
   fi
 done
+if [ "$text" = 1 ] && [ "$profiler" != flamegraph ]; then
+  echo "error: --text is only supported with --profiler flamegraph" >&2
+  exit 1
+fi
 if [ "$expect_profiler" = 1 ]; then
   echo "error: --profiler expects an argument (flamegraph or samply)" >&2
   exit 1
@@ -84,14 +96,20 @@ exe="$PWD/_build/default/bench/feel_bench.exe"
 
 case "$profiler" in
   flamegraph)
+    text_args=()
+    folded_file="bench/flamegraph.folded"
+    [ "$text" = 1 ] && text_args=(--post-process "tee $folded_file")
     if [ "$(uname)" = "Darwin" ]; then
       flamegraph --root "${profiler_args[@]+"${profiler_args[@]}"}" \
-        -- "$exe" "${bench_args[@]}"
+        "${text_args[@]+"${text_args[@]}"}" -- "$exe" "${bench_args[@]}"
     else
       flamegraph "${profiler_args[@]+"${profiler_args[@]}"}" \
-        -- "$exe" "${bench_args[@]}"
+        "${text_args[@]+"${text_args[@]}"}" -- "$exe" "${bench_args[@]}"
     fi
     echo "Wrote $out (open in a browser)"
+    if [ "$text" = 1 ]; then
+      bench/folded_summary.sh "$folded_file" | tee bench/flamegraph.txt
+    fi
     ;;
   samply)
     samply record "${profiler_args[@]+"${profiler_args[@]}"}" \

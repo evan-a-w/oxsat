@@ -53,6 +53,28 @@ Profiler UI in your browser automatically. No root needed.
 bench/profile.sh --profiler samply -- -bench smt -only "Bin packing (items=15"
 # re-open the saved profile later:
 samply load bench/samply.json.gz
+# record without opening the browser:
+bench/profile.sh --profiler samply -s -- -bench smt -only "Bin packing"
+```
+
+### Textual profiles (for reading without a browser / AI agents)
+
+`--text` (flamegraph only) additionally dumps the folded stacks to
+`bench/flamegraph.folded` and prints a flat profile table (also saved to
+`bench/flamegraph.txt`):
+
+```
+bench/profile.sh --text -- -bench smt -only "Bin packing (items=15"
+```
+
+Output columns: `self%` (samples where the function is the leaf), `tot%`
+(samples where it appears anywhere on the stack), plus raw sample counts.
+Functions are mangled OCaml symbols, e.g. `camlTheory__Simplex__pivot_271`.
+
+You can also summarize any folded-stacks file directly:
+
+```
+bench/folded_summary.sh bench/flamegraph.folded
 ```
 
 ## Allocation profiling (memtrace)
