@@ -15,6 +15,13 @@ first, with time and allocation ratios (after/before) and a geomean row.
   B       2.00 μs    1.00 μs   0.50x   2.00x
   geomean                           1.00x   1.00x
 
+In compare mode, -only filters both files by name:
+
+  $ ../feel_bench.exe -only B before.sexp after.sexp
+  name      before       after    time   alloc
+  B       2.00 μs    1.00 μs   0.50x   2.00x
+  geomean                           0.50x   2.00x
+
 Benchmarks present in only one file are skipped with warnings:
 
   $ cat > x.sexp <<EOF

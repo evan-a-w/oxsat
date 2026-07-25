@@ -196,7 +196,8 @@ let command =
          (listed string)
          ~doc:
            "SUBSTRING Only run benchmarks whose name contains SUBSTRING. May \
-            be passed multiple times to match any of several substrings."
+            be passed multiple times to match any of several substrings. In \
+            compare mode, filters both files by name."
      and output =
        flag
          "o"
@@ -208,9 +209,12 @@ let command =
      fun () ->
        match compare_files with
        | Some (before, after) ->
-         Benchmark.compare_results
-           ~before:(Benchmark.load_results ~filename:before)
-           ~after:(Benchmark.load_results ~filename:after)
+         let load filename =
+           Benchmark.load_results ~filename
+           |> List.filter ~f:(fun (r : Benchmark.Result.t) ->
+             Benchmark.matches_only ~only r.name)
+         in
+         Benchmark.compare_results ~before:(load before) ~after:(load after)
        | None ->
          let sat_max_n = Option.value sat_max_n ~default:400 in
          let run f = f ?min_iterations ?max_iterations ?sample_runs ~only in
