@@ -114,13 +114,17 @@ let run_scaling_benchmark
   ?(benchmark_config = Benchmark.Config.default)
   ?(tree_sizes = [ 100; 1000; 10000 ])
   ?(num_operations = 1000)
+  ?(only = [])
   ()
   =
-  List.map tree_sizes ~f:(fun tree_size ->
+  List.filter_map tree_sizes ~f:(fun tree_size ->
     let name = sprintf "RB tree (n=%d, ops=%d)" tree_size num_operations in
-    let bench_config = create_config ~tree_size ~num_operations () in
-    let benchmark_fn = make_benchmark_fn ~config:bench_config in
-    Benchmark.run ~config:benchmark_config ~name benchmark_fn)
+    if not (Benchmark.matches_only ~only name)
+    then None
+    else (
+      let bench_config = create_config ~tree_size ~num_operations () in
+      let benchmark_fn = make_benchmark_fn ~config:bench_config in
+      Some (Benchmark.run ~config:benchmark_config ~name benchmark_fn)))
 ;;
 
 (* Run benchmarks with different operation mixes *)

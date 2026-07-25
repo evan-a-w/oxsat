@@ -1,0 +1,2 @@
+(cram
+ (deps ../feel_bench.exe ../folded_summary.sh ../profile.sh))

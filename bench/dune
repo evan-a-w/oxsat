@@ -6,6 +6,15 @@
   (pps ppx_jane)))
 
 (library
+ (name memtrace_hook)
+ (modules memtrace_hook)
+ (libraries
+  core
+  (select memtrace_hook.ml from
+   (memtrace -> memtrace_hook.memtrace.ml)
+   (-> memtrace_hook.disabled.ml))))
+
+(library
  (name rb_bench)
  (modules rb_bench)
  (libraries core ds benchmark)
@@ -72,6 +81,7 @@
   ds
   unboxed
   benchmark
+  memtrace_hook
   rb_bench
   map_bench
   sat_bench

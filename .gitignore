@@ -38,3 +38,11 @@ _opam/
 
 *.trace
 *.xml
+
+# Benchmark artifacts
+bench/results/
+bench/flamegraph.svg
+bench/flamegraph.folded
+bench/flamegraph.txt
+bench/*.json.gz
+*.ctf

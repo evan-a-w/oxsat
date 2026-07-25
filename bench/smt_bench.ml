@@ -240,7 +240,11 @@ let default_benchmark_config =
     ()
 ;;
 
-let run_scaling_benchmark ?(benchmark_config = default_benchmark_config) () =
+let run_scaling_benchmark
+  ?(benchmark_config = default_benchmark_config)
+  ?(only = [])
+  ()
+  =
   let instances =
     [ gen_lp_feasible ~num_vars:10 ~num_constraints:30 ~seed:42
     ; gen_lp_feasible ~num_vars:20 ~num_constraints:60 ~seed:42
@@ -262,6 +266,12 @@ let run_scaling_benchmark ?(benchmark_config = default_benchmark_config) () =
   in
   (* Run each benchmark individually and print immediately so slow instances are
      visible. *)
+  let instances =
+    List.filter instances ~f:(fun inst ->
+      Benchmark.matches_only ~only inst.Instance.name)
+  in
+  if List.is_empty instances && not (List.is_empty only)
+  then eprintf "Warning: -only filters matched no benchmarks\n";
   List.concat_map instances ~f:(fun inst ->
     let results =
       Benchmark.run_all_and_print
