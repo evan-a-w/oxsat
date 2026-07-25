@@ -337,6 +337,65 @@ let%expect_test "produce_proofs: a quantifier-driven unsat yields a checked \
     |}]
 ;;
 
+(* A bare top-level [∃] on its own, driven to unsat with no universal involved:
+   [∃x. f(x) = a ∧ g(x) = a ∧ f(x) ≠ g(x)] Skolemizes to a body whose three
+   literals have no direct clash -- EUF must derive [f(sk) = g(sk)] from the two
+   equalities to contradict the disequality. The proof cites the real [∃] and
+   justifies its Skolem body with a checked [∃-elimination] step. *)
+let%expect_test "produce_proofs: a bare existential drives a checked, fully \
+                 printed proof"
+  =
+  let qs =
+    Quantifier_solver.create ~config:{ Solver.Config.produce_proofs = true } ()
+  in
+  let f arg : Formula.any = App (Tvar.of_string "f", [ arg ]) in
+  let g arg : Formula.any = App (Tvar.of_string "g", [ arg ]) in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let x = Tvar.of_string "x" in
+  let existential : Formula.quantified =
+    Exists
+      ( [ x ]
+      , And
+          [ Eq (f (Var x), a)
+          ; Eq (g (Var x), a)
+          ; Not (Eq (f (Var x), g (Var x)))
+          ] )
+  in
+  ignore (Quantifier_solver.assert_formula qs existential : _ Or_error.t);
+  (match Quantifier_solver.solve qs ~max_rounds:2 with
+   | Sat _ | Unknown_but_possibly_sat _ -> print_endline "unexpected sat"
+   | Unsat { proof = None; _ } -> print_endline "no proof produced"
+   | Unsat { proof = Some proof; _ } ->
+     print_s [%message "" ~checked:(Or_error.is_ok (Proof.check proof) : bool)];
+     print_endline (Proof.to_string_hum proof));
+  [%expect {|
+    (checked true)
+    Assumptions:
+      a0: ∃x. f(x) = a ∧ g(x) = a ∧ f(x) ≠ g(x)
+      a1: bool ≠ int
+      a2: bool ≠ float
+      a3: int ≠ float
+    Steps:
+      s0: ∃x. f(x) = a ∧ g(x) = a ∧ f(x) ≠ g(x)   [assumption a0]
+      s1: bool ≠ int   [assumption a1]
+      s2: bool ≠ float   [assumption a2]
+      s3: int ≠ float   [assumption a3]
+      s4: f(%skolem.21) = a ∧ g(%skolem.21) = a ∧ f(%skolem.21) ≠ g(%skolem.21)   [∃-elimination {x := %skolem.21} over [s0]]
+      s5: false   [refutation of [s1, s2, s3, s4]]
+        refutation:
+          extensions:
+            e0 := (a = f(%skolem.21) ∧ a = g(%skolem.21) ∧ ¬(f(%skolem.21) = g(%skolem.21)))
+          steps:
+            r0: a = f(%skolem.21) ∨ ¬(e0)   [definition of e0]
+            r1: a = g(%skolem.21) ∨ ¬(e0)   [definition of e0]
+            r2: f(%skolem.21) ≠ g(%skolem.21) ∨ ¬(e0)   [definition of e0]
+            r3: e0   [s4]
+            r4: a ≠ f(%skolem.21) ∨ a ≠ g(%skolem.21) ∨ f(%skolem.21) = g(%skolem.21)   [EUF: f(%skolem.21) = g(%skolem.21) via [a = f(%skolem.21); a = g(%skolem.21)]]
+            r5: ⊥   [RUP over [r3, r0, r1, r2, r4]]
+    Conclusion: s5
+    |}]
+;;
+
 (* A top-level conjunction of a universal and an existential -- the user's
    "forall and existential in the same formula, at toplevel" case. Each conjunct
    is handled at top level, so both get real proof steps: the [∃] is eliminated
@@ -371,29 +430,29 @@ let%expect_test "produce_proofs: forall + existential in one top-level \
   [%expect {|
     (checked true)
     Assumptions:
-      a0: ∀y.bound.21. f(y.bound.21) = y.bound.21
+      a0: ∀y.bound.22. f(y.bound.22) = y.bound.22
       a1: ∃x. f(x) = c ∧ x ≠ c
       a2: bool ≠ int
       a3: bool ≠ float
       a4: int ≠ float
     Steps:
-      s0: ∀y.bound.21. f(y.bound.21) = y.bound.21   [assumption a0]
+      s0: ∀y.bound.22. f(y.bound.22) = y.bound.22   [assumption a0]
       s1: ∃x. f(x) = c ∧ x ≠ c   [assumption a1]
       s2: bool ≠ int   [assumption a2]
       s3: bool ≠ float   [assumption a3]
       s4: int ≠ float   [assumption a4]
-      s5: f(%skolem.22) = c ∧ %skolem.22 ≠ c   [∃-elimination {x := %skolem.22} over [s1]]
-      s6: f(%skolem.22) = %skolem.22   [∀-instantiation {y.bound.21 := %skolem.22} over [s0]]
+      s5: f(%skolem.23) = c ∧ %skolem.23 ≠ c   [∃-elimination {x := %skolem.23} over [s1]]
+      s6: f(%skolem.23) = %skolem.23   [∀-instantiation {y.bound.22 := %skolem.23} over [s0]]
       s7: false   [refutation of [s2, s3, s4, s5, s6]]
         refutation:
           extensions:
-            e0 := (c = f(%skolem.22) ∧ ¬(c = %skolem.22))
+            e0 := (c = f(%skolem.23) ∧ ¬(c = %skolem.23))
           steps:
-            r0: c = f(%skolem.22) ∨ ¬(e0)   [definition of e0]
-            r1: c ≠ %skolem.22 ∨ ¬(e0)   [definition of e0]
+            r0: c = f(%skolem.23) ∨ ¬(e0)   [definition of e0]
+            r1: c ≠ %skolem.23 ∨ ¬(e0)   [definition of e0]
             r2: e0   [s5]
-            r3: %skolem.22 = f(%skolem.22)   [s6]
-            r4: c = %skolem.22 ∨ c ≠ f(%skolem.22) ∨ %skolem.22 ≠ f(%skolem.22)   [EUF: c = %skolem.22 via [c = f(%skolem.22); %skolem.22 = f(%skolem.22)]]
+            r3: %skolem.23 = f(%skolem.23)   [s6]
+            r4: c = %skolem.23 ∨ c ≠ f(%skolem.23) ∨ %skolem.23 ≠ f(%skolem.23)   [EUF: c = %skolem.23 via [c = f(%skolem.23); %skolem.23 = f(%skolem.23)]]
             r5: ⊥   [RUP over [r2, r3, r0, r1, r4]]
     Conclusion: s7
     |}]
