@@ -27,7 +27,10 @@ module Input = struct
     let empty = ()
     let add () ~op:_ ~args:_ = ()
     let remove () ~op:_ ~args:_ = ()
+    let tracks_metadata = false
   end
+
+  let use_op_index = false
 end
 
 module Graph = Egx.Graph.Make (Input)

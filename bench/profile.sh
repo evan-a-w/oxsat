@@ -2,7 +2,7 @@
 # CPU-profile a benchmark and view the results.
 #
 # Usage:
-#   bench/profile.sh [--profiler flamegraph|samply] [--text] [profiler opts] -- [feel_bench args]
+#   bench/profile.sh [--profiler flamegraph|samply|perf] [--text] [profiler opts] -- [feel_bench args]
 #
 # Examples:
 #   bench/profile.sh -- -bench smt -only "Bin packing (items=15"
@@ -22,6 +22,13 @@
 #               bench/samply.json.gz) and opens the Firefox Profiler UI in
 #               your browser automatically. No root needed. Re-open later
 #               with: samply load bench/samply.json.gz
+#   perf        Linux only, no cargo needed. Records perf.data (default
+#               bench/perf.data) and with --text writes folded stacks plus a
+#               flat profile. Useful where flamegraph/samply aren't installed
+#               (e.g. WSL2). Set PERF=/path/to/perf if the perf on PATH does
+#               not match your kernel, as happens on WSL2:
+#                 PERF=/usr/lib/linux-tools-5.15.0-186/perf \
+#                   bench/profile.sh --profiler perf --text -- -bench smt
 #
 # Defaults to a fixed number of iterations so the profile reflects the
 # benchmark rather than harness calibration (override by passing your own
@@ -51,18 +58,18 @@ for arg in "$@"; do
     profiler_args+=("$arg")
   fi
 done
-if [ "$text" = 1 ] && [ "$profiler" != flamegraph ]; then
-  echo "error: --text is only supported with --profiler flamegraph" >&2
+if [ "$text" = 1 ] && [ "$profiler" != flamegraph ] && [ "$profiler" != perf ]; then
+  echo "error: --text is only supported with --profiler flamegraph or perf" >&2
   exit 1
 fi
 if [ "$expect_profiler" = 1 ]; then
-  echo "error: --profiler expects an argument (flamegraph or samply)" >&2
+  echo "error: --profiler expects an argument (flamegraph, samply or perf)" >&2
   exit 1
 fi
 case "$profiler" in
-  flamegraph | samply) ;;
+  flamegraph | samply | perf) ;;
   *)
-    echo "error: unknown profiler '$profiler' (expected flamegraph or samply)" >&2
+    echo "error: unknown profiler '$profiler' (expected flamegraph, samply or perf)" >&2
     exit 1
     ;;
 esac
@@ -92,8 +99,9 @@ else
   case "$profiler" in
     flamegraph) out="bench/flamegraph.svg" ;;
     samply) out="bench/samply.json.gz" ;;
+    perf) out="bench/perf.data" ;;
   esac
-  profiler_args+=(-o "$out")
+  [ "$profiler" = perf ] || profiler_args+=(-o "$out")
 fi
 
 dune build --profile=release bench/feel_bench.exe 2>/dev/null \
@@ -116,5 +124,17 @@ case "$profiler" in
     samply record "${profiler_args[@]+"${profiler_args[@]}"}" \
       -- "$exe" "${bench_args[@]}"
     echo "Wrote $out (re-open with: samply load $out)"
+    ;;
+  perf)
+    perf_bin="${PERF:-perf}"
+    "$perf_bin" record -F 999 -g --call-graph dwarf -o "$out" \
+      "${profiler_args[@]+"${profiler_args[@]}"}" -- "$exe" "${bench_args[@]}"
+    echo "Wrote $out (inspect with: $perf_bin report -i $out)"
+    if [ "$text" = 1 ]; then
+      folded_file="bench/flamegraph.folded"
+      "$perf_bin" script -i "$out" \
+        | bench/perf_fold.sh >"$folded_file"
+      bench/folded_summary.sh "$folded_file" | tee bench/flamegraph.txt
+    fi
     ;;
 esac

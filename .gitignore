@@ -39,10 +39,12 @@ _opam/
 *.trace
 *.xml
 
-# Benchmark artifacts
-bench/results/
+# Benchmark artifacts (bench/results/**/*.txt are the checked-in records)
+bench/results/**/*.sexp
+bench/results/*.sexp
 bench/flamegraph.svg
 bench/flamegraph.folded
 bench/flamegraph.txt
 bench/*.json.gz
 *.ctf
+*/perf.data*

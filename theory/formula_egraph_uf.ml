@@ -168,15 +168,15 @@ let register_atom t ~(atom : Atom.t) =
 
 let create ~atoms =
   let t =
-    { id_by_term = Formula.Any.Table.create ()
-    ; term_by_id = G.Id.Table.create ()
-    ; node_by_id = G.Id.Table.create ()
+    { id_by_term = Formula.Any.Table.create ~size:128 ()
+    ; term_by_id = G.Id.Table.create ~size:128 ()
+    ; node_by_id = G.Id.Table.create ~size:128 ()
     ; egraph = G.create ()
-    ; atoms = Atom.Table.create ()
-    ; atom_terms = Formula.Any.Hash_set.create ()
+    ; atoms = Atom.Table.create ~size:128 ()
+    ; atom_terms = Formula.Any.Hash_set.create ~size:128 ()
     ; explanation_forest = Explanation_forest.create ()
     ; trail = ref []
-    ; falsehoods = Atom.Hash_set.create ()
+    ; falsehoods = Atom.Hash_set.create ~size:32 ()
     ; current_decision_level = ref 0
     ; last_certificate = None
     }
