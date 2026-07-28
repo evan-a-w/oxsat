@@ -139,6 +139,7 @@ let undo_entry t ~(trail_entry : Trail_entry.t) =
   Vsids.add_to_pool t.vsids ~literal:trail_entry.#literal;
   var.assignment <- Null;
   var.trail_entry <- Trail_entry.Option_u.none ();
+  var.trail_index <- -1;
   match trail_entry.#reason with
   | T #(Decision, ()) -> ()
   | T #(Clause_idx, clause_idx) ->
@@ -187,6 +188,7 @@ let push_trail_entry t ~(trail_entry : Trail_entry.t) =
          ~literal);
     var.assignment <- This (trail_entry.#literal > 0);
     var.trail_entry <- Trail_entry.Option_u.some trail_entry;
+    var.trail_index <- Trail_entry.Vec.length t.trail;
     Trail_entry.Vec.push t.trail trail_entry;
     Vsids.remove_from_pool t.vsids ~var:(Int.abs trail_entry.#literal);
     (match trail_entry.#reason with
@@ -379,19 +381,6 @@ let rec remove_greater_than_decision_level t ~decision_level =
     remove_greater_than_decision_level t ~decision_level)
 ;;
 
-let trail_index_of_var_exn t ~var =
-  let rec go i =
-    if i < 0
-    then
-      Error.raise_s
-        [%message "BUG: assigned var missing from trail" (var : int)]
-    else if Int.abs (Trail_entry.Vec.get t.trail i).#literal = var
-    then i
-    else go (i - 1)
-  in
-  go (Trail_entry.Vec.length t.trail - 1)
-;;
-
 let conflict_keep_trail_len t ~failed_clause_idx =
   let failed_clause = Vec.Value.get t.clauses failed_clause_idx in
   let keep = ref t.trail_processed_till in
@@ -400,8 +389,12 @@ let conflict_keep_trail_len t ~failed_clause_idx =
     match var.assignment with
     | Null -> ()
     | This _ ->
-      let trail_idx = trail_index_of_var_exn t ~var:(Int.abs literal) in
-      keep := Int.max !keep (trail_idx + 1));
+      if var.trail_index < 0
+      then
+        Error.raise_s
+          [%message
+            "BUG: assigned var missing from trail" ~var:(Int.abs literal : int)];
+      keep := Int.max !keep (var.trail_index + 1));
   !keep
 ;;
 
@@ -434,6 +427,7 @@ let ensure_literal t ~literal =
       t.vars
       { assignment = Null
       ; trail_entry = Trail_entry.Option_u.none ()
+      ; trail_index = -1
       ; watched_clauses = Tf_pair.create (fun _ -> Watched_clause.Vec.create ())
       ; exists = false
       }
