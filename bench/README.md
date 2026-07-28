@@ -108,8 +108,8 @@ OXSAT_MEMTRACE=bench/trace.ctf dune exec --profile=release bench/feel_bench.exe 
 memtrace-viewer bench/trace.ctf   # serves a flamegraph UI in the browser
 ```
 
-Record notable results at the top of `bench/mac_smt_results.txt` /
-`bench/results.txt` as before.
+Record notable results at the top of the file for your platform and benchmark
+under `bench/results/`: `bench/results/{mac,windows}/{sat_dimacs,smt}.txt`.
 
 ## Tests
 

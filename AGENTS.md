@@ -19,9 +19,12 @@ Prefer to write tests in expect test style (let%expect_test ..., prefer printing
 
 Prefer to modularize code where possible. For instance, if there is functionality that is self contained, you should create a file module.ml with a [type t] defined inside, and expose only the minimal necessary functionality in the .mli file.
 
-You can run the benchmarks, using the same commands as bench/results.txt or bench/mac_smt_results.txt. You
-can add entries in a similar format. Be brief in descriptions of changes. Add
-entries to the TOP of the file, that's where things are added.
+You can run the benchmarks, using the same commands as the files under
+bench/results/, which are split by platform and benchmark:
+bench/results/{mac,windows}/{sat_dimacs,smt}.txt. You can add entries in a
+similar format, to the file matching the platform you are on. Be brief in
+descriptions of changes. Add entries to the TOP of the file, that's where things
+are added.
 
 See bench/README.md for the benchmark comparison and profiling workflow
 (filtering with -only, saving/comparing results, flamegraph and memtrace

@@ -1,3 +1,32 @@
+better_proofs branch, restructured results dirs (WSL2, Linux 6.18)
+
+$ time dune exec --profile=release bench/feel_bench.exe -- -bench dimacs -min-iterations 1 -max-iterations 1 -sample-runs 5  && time dune exec --profile=release bench/feel_bench.exe -- -bench sat -sat-max-n 80
+DIMACS example benchmarks:
+SUDOKU: Mean: 32.02 ms  StdDev: 7.76 ms  p50: 30.16 ms  p75: 30.40 ms  p90: 46.74 ms  p95: 46.74 ms  p99: 46.74 ms  (n=5)  Alloc: 9.36 MiB/iter  MajGC: 0.800/iter
+SUCC_EG: Mean: 160.63 μs  StdDev: 12.85 μs  p50: 155.20 μs  p75: 158.18 μs  p90: 185.72 μs  p95: 185.72 μs  p99: 185.72 μs  (n=5)  Alloc: 155.53 KiB/iter  MajGC: 0.000/iter
+FACTOR_1234321: Mean: 244.06 ms  StdDev: 112.52 ms  p50: 181.32 ms  p75: 324.19 ms  p90: 424.99 ms  p95: 424.99 ms  p99: 424.99 ms  (n=5)  Alloc: 49.61 MiB/iter  MajGC: 2.000/iter
+FACTOR_1235321: Mean: 260.90 ms  StdDev: 125.98 ms  p50: 176.52 ms  p75: 389.43 ms  p90: 436.06 ms  p95: 436.06 ms  p99: 436.06 ms  (n=5)  Alloc: 49.61 MiB/iter  MajGC: 2.200/iter
+FAIL_EG: Mean: 12.09 ms  StdDev: 1.85 ms  p50: 12.68 ms  p75: 13.56 ms  p90: 14.38 ms  p95: 14.38 ms  p99: 14.38 ms  (n=5)  Alloc: 3.65 MiB/iter  MajGC: 0.200/iter
+SUBSETS_100: Mean: 895.44 ms  StdDev: 561.18 ms  p50: 618.83 ms  p75: 753.83 ms  p90: 2.01 s  p95: 2.01 s  p99: 2.01 s  (n=5)  Alloc: 68.55 MiB/iter  MajGC: 5.800/iter
+dune exec --profile=release bench/feel_bench.exe -- -bench dimacs  1  1  5  30.73s user 5.93s system  24.008 total
+SAT solver benchmarks up to n=80 variables
+Hard 3-SAT (n=50, m=213): Mean: 503.05 μs  StdDev: 3.90 μs  p50: 501.67 μs  p75: 505.39 μs  p90: 509.40 μs  p95: 509.40 μs  p99: 509.40 μs  (n=5)  Alloc: 242.09 KiB/iter  MajGC: 0.019/iter
+Hard 3-SAT (n=80, m=340): Mean: 81.01 μs  StdDev: 2.36 μs  p50: 79.85 μs  p75: 83.22 μs  p90: 84.31 μs  p95: 84.31 μs  p99: 84.31 μs  (n=5)  Alloc: 108.61 KiB/iter  MajGC: 0.008/iter
+Uniform 3-SAT (n=50, m=210): Mean: 289.61 μs  StdDev: 1.80 μs  p50: 289.50 μs  p75: 290.66 μs  p90: 292.43 μs  p95: 292.43 μs  p99: 292.43 μs  (n=5)  Alloc: 158.01 KiB/iter  MajGC: 0.013/iter
+Uniform 3-SAT (n=80, m=336): Mean: 79.55 μs  StdDev: 3.09 μs  p50: 77.47 μs  p75: 82.54 μs  p90: 83.98 μs  p95: 83.98 μs  p99: 83.98 μs  (n=5)  Alloc: 107.48 KiB/iter  MajGC: 0.008/iter
+Planted 3-SAT (n=50, m=175): Mean: 28.93 μs  StdDev: 1.29 μs  p50: 28.28 μs  p75: 28.60 μs  p90: 31.49 μs  p95: 31.49 μs  p99: 31.49 μs  (n=5)  Alloc: 53.94 KiB/iter  MajGC: 0.004/iter
+Planted 3-SAT (n=80, m=280): Mean: 66.86 μs  StdDev: 14.23 μs  p50: 59.81 μs  p75: 61.32 μs  p90: 95.25 μs  p95: 95.25 μs  p99: 95.25 μs  (n=5)  Alloc: 92.65 KiB/iter  MajGC: 0.007/iter
+Scale-free 3-SAT (n=50, m=185, alpha=2.30): Mean: 67.62 μs  StdDev: 24.47 μs  p50: 53.86 μs  p75: 60.67 μs  p90: 116.27 μs  p95: 116.27 μs  p99: 116.27 μs  (n=5)  Alloc: 69.50 KiB/iter  MajGC: 0.005/iter
+Scale-free 3-SAT (n=80, m=296, alpha=2.30): Mean: 86.49 μs  StdDev: 2.00 μs  p50: 85.87 μs  p75: 86.05 μs  p90: 90.31 μs  p95: 90.31 μs  p99: 90.31 μs  (n=5)  Alloc: 111.11 KiB/iter  MajGC: 0.009/iter
+Planted 4-SAT (n=50, m=225, min_sat=1): Mean: 45.54 μs  StdDev: 2.12 μs  p50: 44.73 μs  p75: 44.77 μs  p90: 49.72 μs  p95: 49.72 μs  p99: 49.72 μs  (n=5)  Alloc: 68.73 KiB/iter  MajGC: 0.006/iter
+Planted 4-SAT (n=80, m=360, min_sat=1): Mean: 74.96 μs  StdDev: 2.89 μs  p50: 74.60 μs  p75: 75.14 μs  p90: 80.29 μs  p95: 80.29 μs  p99: 80.29 μs  (n=5)  Alloc: 107.17 KiB/iter  MajGC: 0.008/iter
+Forced-backbone 3-SAT (n=50, m=190, backbone=6): Mean: 42.79 μs  StdDev: 3.32 μs  p50: 40.99 μs  p75: 42.65 μs  p90: 49.24 μs  p95: 49.24 μs  p99: 49.24 μs  (n=5)  Alloc: 63.31 KiB/iter  MajGC: 0.005/iter
+Forced-backbone 3-SAT (n=80, m=304, backbone=10): Mean: 125.48 μs  StdDev: 8.60 μs  p50: 121.50 μs  p75: 128.71 μs  p90: 140.81 μs  p95: 140.81 μs  p99: 140.81 μs  (n=5)  Alloc: 118.16 KiB/iter  MajGC: 0.009/iter
+Random k-CNF (n=50, m=200, max_k=5): Mean: 37.27 μs  StdDev: 19.10 μs  p50: 27.18 μs  p75: 30.16 μs  p90: 75.39 μs  p95: 75.39 μs  p99: 75.39 μs  (n=5)  Alloc: 68.86 KiB/iter  MajGC: 0.006/iter
+Random k-CNF (n=80, m=320, max_k=5): Mean: 58.35 μs  StdDev: 1.45 μs  p50: 57.76 μs  p75: 59.00 μs  p90: 60.84 μs  p95: 60.84 μs  p99: 60.84 μs  (n=5)  Alloc: 119.19 KiB/iter  MajGC: 0.009/iter
+dune exec --profile=release bench/feel_bench.exe -- -bench sat -sat-max-n 80  71.39s user 0.53s system  1:11.50 total
+
+
 Same, more iterations
 $ time dune exec --profile=release bench/feel_bench.exe -- -bench dimacs -min-iterations 1 -max-iterations 1 -sample-runs 5  && time dune exec --profile=release bench/feel_bench.exe -- -bench sat -sat-max-n 80
 DIMACS example benchmarks:

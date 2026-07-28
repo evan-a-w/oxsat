@@ -1,0 +1,21 @@
+better_proofs branch, first windows smt run (WSL2, Linux 6.18)
+
+$ time dune exec --profile=release bench/feel_bench.exe -- -bench smt
+SMT solver benchmarks (LP, MILP, EUF):
+LP feasible (n=10, m=30): Mean: 106.00 μs  StdDev: 3.00 μs  p50: 106.01 μs  p75: 109.66 μs  p90: 109.66 μs  p95: 109.66 μs  p99: 109.66 μs  (n=3)  Alloc: 499.23 KiB/iter  MajGC: 0.008/iter
+LP feasible (n=20, m=60): Mean: 257.65 μs  StdDev: 1.45 μs  p50: 258.24 μs  p75: 259.05 μs  p90: 259.05 μs  p95: 259.05 μs  p99: 259.05 μs  (n=3)  Alloc: 1.15 MiB/iter  MajGC: 0.040/iter
+LP feasible (n=50, m=150): Mean: 982.43 μs  StdDev: 24.50 μs  p50: 983.22 μs  p75: 1.01 ms  p90: 1.01 ms  p95: 1.01 ms  p99: 1.01 ms  (n=3)  Alloc: 3.43 MiB/iter  MajGC: 0.285/iter
+LP tight OR (n=5): Mean: 102.05 μs  StdDev: 31.14 μs  p50: 82.80 μs  p75: 145.98 μs  p90: 145.98 μs  p95: 145.98 μs  p99: 145.98 μs  (n=3)  Alloc: 297.26 KiB/iter  MajGC: 0.015/iter
+LP tight OR (n=7): Mean: 115.05 μs  StdDev: 727.37 ns  p50: 114.62 μs  p75: 116.07 μs  p90: 116.07 μs  p95: 116.07 μs  p99: 116.07 μs  (n=3)  Alloc: 442.41 KiB/iter  MajGC: 0.007/iter
+LP tight OR (n=9): Mean: 166.67 μs  StdDev: 3.64 μs  p50: 167.41 μs  p75: 170.71 μs  p90: 170.71 μs  p95: 170.71 μs  p99: 170.71 μs  (n=3)  Alloc: 597.15 KiB/iter  MajGC: 0.012/iter
+Bin packing (items=10, bins=3): Mean: 1.89 ms  StdDev: 82.62 μs  p50: 1.84 ms  p75: 2.01 ms  p90: 2.01 ms  p95: 2.01 ms  p99: 2.01 ms  (n=3)  Alloc: 3.81 MiB/iter  MajGC: 0.316/iter
+Bin packing (items=15, bins=4): Mean: 15.18 ms  StdDev: 429.31 μs  p50: 15.00 ms  p75: 15.77 ms  p90: 15.77 ms  p95: 15.77 ms  p99: 15.77 ms  (n=3)  Alloc: 27.25 MiB/iter  MajGC: 1.454/iter
+Bin packing (items=20, bins=4): Mean: 39.55 ms  StdDev: 10.53 ms  p50: 32.25 ms  p75: 54.43 ms  p90: 54.43 ms  p95: 54.43 ms  p99: 54.43 ms  (n=3)  Alloc: 49.43 MiB/iter  MajGC: 1.707/iter
+EUF chain UNSAT (n=50): Mean: 126.25 μs  StdDev: 3.12 μs  p50: 125.78 μs  p75: 130.28 μs  p90: 130.28 μs  p95: 130.28 μs  p99: 130.28 μs  (n=3)  Alloc: 296.53 KiB/iter  MajGC: 0.014/iter
+EUF chain UNSAT (n=200): Mean: 615.60 μs  StdDev: 10.45 μs  p50: 608.51 μs  p75: 630.38 μs  p90: 630.38 μs  p95: 630.38 μs  p99: 630.38 μs  (n=3)  Alloc: 1.14 MiB/iter  MajGC: 0.094/iter
+EUF chain UNSAT (n=1000): Mean: 5.87 ms  StdDev: 329.18 μs  p50: 5.78 ms  p75: 6.32 ms  p90: 6.32 ms  p95: 6.32 ms  p99: 6.32 ms  (n=3)  Alloc: 5.58 MiB/iter  MajGC: 0.427/iter
+EUF two-group SAT (n=50): Mean: 135.61 μs  StdDev: 246.27 ns  p50: 135.60 μs  p75: 135.92 μs  p90: 135.92 μs  p95: 135.92 μs  p99: 135.92 μs  (n=3)  Alloc: 328.99 KiB/iter  MajGC: 0.027/iter
+EUF two-group SAT (n=200): Mean: 804.21 μs  StdDev: 202.13 μs  p50: 673.91 μs  p75: 1.09 ms  p90: 1.09 ms  p95: 1.09 ms  p99: 1.09 ms  (n=3)  Alloc: 1.33 MiB/iter  MajGC: 0.109/iter
+EUF web (n=20, f=3): Mean: 87.70 μs  StdDev: 2.35 μs  p50: 87.10 μs  p75: 90.83 μs  p90: 90.83 μs  p95: 90.83 μs  p99: 90.83 μs  (n=3)  Alloc: 205.26 KiB/iter  MajGC: 0.017/iter
+EUF web (n=50, f=5): Mean: 265.13 μs  StdDev: 5.48 μs  p50: 261.26 μs  p75: 272.88 μs  p90: 272.88 μs  p95: 272.88 μs  p99: 272.88 μs  (n=3)  Alloc: 538.34 KiB/iter  MajGC: 0.044/iter
+dune exec --profile=release bench/feel_bench.exe -- -bench smt  96.23s user 0.79s system  1:36.93 total
