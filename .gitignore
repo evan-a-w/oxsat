@@ -47,3 +47,4 @@ bench/flamegraph.folded
 bench/flamegraph.txt
 bench/*.json.gz
 *.ctf
+*/perf.data*
