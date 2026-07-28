@@ -67,6 +67,15 @@ bench/profile.sh -o bench/binpacking.svg -- -bench smt -only "Bin packing"
 open bench/flamegraph.svg
 ```
 
+perf (Linux only, no cargo needed) records `bench/perf.data` directly. Useful
+where flamegraph/samply aren't installed. On WSL2 the `perf` on PATH is often a
+stub that doesn't match the running kernel; point `PERF` at a real one:
+
+```
+PERF=/usr/lib/linux-tools-5.15.0-186/perf \
+  bench/profile.sh --profiler perf --text -- -bench smt -only EUF
+```
+
 samply (`cargo install samply`) records a profile and opens the Firefox
 Profiler UI in your browser automatically. No root needed.
 
@@ -80,7 +89,7 @@ bench/profile.sh --profiler samply -s -- -bench smt -only "Bin packing"
 
 ### Textual profiles (for reading without a browser / AI agents)
 
-`--text` (flamegraph only) additionally dumps the folded stacks to
+`--text` (flamegraph and perf) additionally dumps the folded stacks to
 `bench/flamegraph.folded` and prints a flat profile table (also saved to
 `bench/flamegraph.txt`):
 
