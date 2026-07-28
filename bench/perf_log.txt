@@ -1,0 +1,106 @@
+Future ideas
+------------
+1. Reduce Formula_egraph_uf.register_term hashtable traffic. The remaining top
+   profile entry is still Base.Hashtbl.add_worker/find_and_call under
+   Formula_egraph_uf.register_term, Formula_egraph.add_to_global, and Encoding.
+   Next likely wins are interning/caching more compact keys or avoiding duplicate
+   id_by_term/term_by_id/node_by_id/global indexes where possible.
+
+2. Replace Formula_egraph_uf Explanation_forest Int.Table add_multi lists with a
+   custom vec-backed adjacency structure. BFS/explanation paths create temporary
+   Int.Hash_set/Int.Table structures and multi lists; this may matter more on
+   explanation-heavy unsat cases.
+
+3. Consider mutable per-class node storage with explicit undo logs. The current
+   list-backed persistent Node_index keeps undo simple. A mutable vector/hash-set
+   could reduce materialization/set costs further, but only if undo entries record
+   each mutation correctly.
+
+4. Add a dedicated quantifier/e-matching benchmark before changing
+   nodes_with_op further. Current tests are too small (~0.05s) to catch regressions.
+
+5. Pre-size SAT/theory tables from formula statistics. The fixed 128 sizes help
+   EUF, but a first pass over asserted formulas could choose tighter capacities
+   for large vs tiny instances.
+
+2026-07-28 egx node-index experiments (WSL2, PERF=/usr/lib/linux-tools-5.15.0-186/perf)
+
+Baseline for this round: pushed dev eaac28d (already includes O(1) solver trail_index and egx Class_metadata.tracks_metadata).
+Benchmarks are noisy on this machine, so comparisons use best-of-5 p50 with
+-min-iterations 200 -max-iterations 200 -sample-runs 5, plus deterministic Alloc.
+
+Kept changes
+------------
+1. Stop maintaining Node_index.nodes_by_op eagerly.
+
+   Before: per-class Node_index was { nodes : Node.Set.t; nodes_by_op :
+   Node.Set.t Op.Map.t }. The by-op map is only needed for e-matching, but EUF
+   congruence closure paid to update/merge it on every add/remove/union. Probe
+   for EUF chain n=1000 found ~434k words/iter in Node_index ops out of ~712k
+   total words: ~216k in nodes set operations and ~258k in nodes_by_op map work.
+
+   Change: Node_index keeps only nodes; nodes_with_op filters on demand.
+   Pattern/e-matching tests still pass. A synthetic e-matching stress test also
+   got faster rather than slower because it no longer pays eager map maintenance
+   during graph construction/merging.
+
+2. Store Node_index.nodes internally as a Node.t list, materializing Node.Set.t
+   only at API/query boundaries.
+
+   This preserves the cheap undo story (node indexes remain persistent values on
+   the trail) while replacing AVL set union/add/remove on the hot merge path with
+   list cons/append/filter. Public Class.nodes still returns Node.Set.t.
+
+3. Avoid allocating canonical nodes when children are already canonical.
+
+   canonical_node' used to always build a replacement node/list and then discard
+   it on `Unchanged`. Probe showed this was small (~18k words/iter for EUF chain
+   n=1000) but cheap to remove.
+
+4. Pre-size long-lived egraph/UF tables moderately.
+
+   Created Graph tables and Formula_egraph_uf tables with size 128 (or 32 for
+   small op/falsehood tables). This reduced hashtable resize work without making
+   small cases noticeably worse.
+
+Final results vs eaac28d
+------------------------
+Alloc per iteration, `-bench smt -only EUF`:
+
+  EUF chain UNSAT (n=50):       288.91 KiB -> 231.55 KiB
+  EUF chain UNSAT (n=200):        1.11 MiB -> 892.16 KiB
+  EUF chain UNSAT (n=1000):       5.43 MiB ->   4.14 MiB
+  EUF two-group SAT (n=50):    323.20 KiB -> 270.65 KiB
+  EUF two-group SAT (n=200):      1.30 MiB ->   1.09 MiB
+  EUF web (n=20, f=3):         201.09 KiB -> 169.60 KiB
+  EUF web (n=50, f=5):         525.31 KiB -> 435.55 KiB
+
+Best-of-5 p50 vs eaac28d:
+
+  EUF chain UNSAT (n=1000):  4.42 ms  -> 3.52 ms
+  EUF chain UNSAT (n=200):   553.63us -> 446.23us
+  EUF web (n=50):            253.17us -> 192.94us
+  EUF two-group SAT (n=200): 643.94us -> 518.53us
+
+Perf samples for `-bench smt -only EUF -min-iterations 300 -max-iterations 300
+-sample-runs 3`:
+
+  original before any work: 7319
+  after trail_index + tracks_metadata: 6150
+  after this node-index round: 5092
+
+Rejected / reverted attempts
+----------------------------
+1. Change Node.children from Id.t list to Id.t array.
+
+   This was prompted by the "node unboxing" idea, but measurement showed child
+   lists were not the allocation problem: canonical_node' children allocation was
+   only ~18k words/iter on EUF chain n=1000. Switching to arrays was essentially
+   allocation-neutral (and slightly worse on web before pre-sizing), while it
+   exposed mutable arrays inside Node.t, which is used as a hash/set key. Reverted
+   to Id.t list.
+
+2. Optimize Ds.Vec.get try/with wrappers.
+
+   Earlier microbenchmark showed only ~3% on a pure inlined get loop and under
+   1% overall. Not worth losing the nicer bounds errors right now.

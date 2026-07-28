@@ -1,3 +1,32 @@
+egx node-index allocation round: lazy by-op lookup, list-backed persistent
+Node_index, lazy canonical_node replacement, and moderate egraph/UF table sizing
+
+A/B vs eaac28d best-of-5 p50: EUF chain n=1000 4.42ms -> 3.52ms (-20%),
+chain n=200 554us -> 446us (-19%), web n=50 253us -> 193us (-24%), two-group
+n=200 644us -> 519us (-19%). Alloc n=1000 5.43MiB -> 4.14MiB. See
+bench/perf_log.txt for attempted/reverted experiments (including Node.children
+array, which was reverted).
+
+$ time dune exec --profile=release bench/feel_bench.exe -- -bench smt
+SMT solver benchmarks (LP, MILP, EUF):
+LP feasible (n=10, m=30): Mean: 112.72 μs  StdDev: 11.28 μs  p50: 104.78 μs  p75: 128.67 μs  p90: 128.67 μs  p95: 128.67 μs  p99: 128.67 μs  (n=3)  Alloc: 505.98 KiB/iter  MajGC: 0.009/iter
+LP feasible (n=20, m=60): Mean: 267.80 μs  StdDev: 9.08 μs  p50: 262.32 μs  p75: 280.59 μs  p90: 280.59 μs  p95: 280.59 μs  p99: 280.59 μs  (n=3)  Alloc: 1.16 MiB/iter  MajGC: 0.042/iter
+LP feasible (n=50, m=150): Mean: 994.96 μs  StdDev: 28.39 μs  p50: 994.54 μs  p75: 1.03 ms  p90: 1.03 ms  p95: 1.03 ms  p99: 1.03 ms  (n=3)  Alloc: 3.44 MiB/iter  MajGC: 0.285/iter
+LP tight OR (n=5): Mean: 85.41 μs  StdDev: 6.32 μs  p50: 88.58 μs  p75: 91.05 μs  p90: 91.05 μs  p95: 91.05 μs  p99: 91.05 μs  (n=3)  Alloc: 303.43 KiB/iter  MajGC: 0.017/iter
+LP tight OR (n=7): Mean: 123.90 μs  StdDev: 3.14 μs  p50: 125.70 μs  p75: 126.53 μs  p90: 126.53 μs  p95: 126.53 μs  p99: 126.53 μs  (n=3)  Alloc: 448.50 KiB/iter  MajGC: 0.007/iter
+LP tight OR (n=9): Mean: 213.17 μs  StdDev: 58.72 μs  p50: 178.48 μs  p75: 295.85 μs  p90: 295.85 μs  p95: 295.85 μs  p99: 295.85 μs  (n=3)  Alloc: 603.16 KiB/iter  MajGC: 0.013/iter
+Bin packing (items=10, bins=3): Mean: 1.82 ms  StdDev: 14.06 μs  p50: 1.81 ms  p75: 1.84 ms  p90: 1.84 ms  p95: 1.84 ms  p99: 1.84 ms  (n=3)  Alloc: 3.77 MiB/iter  MajGC: 0.313/iter
+Bin packing (items=15, bins=4): Mean: 14.94 ms  StdDev: 418.82 μs  p50: 15.03 ms  p75: 15.40 ms  p90: 15.40 ms  p95: 15.40 ms  p99: 15.40 ms  (n=3)  Alloc: 27.15 MiB/iter  MajGC: 1.356/iter
+Bin packing (items=20, bins=4): Mean: 31.27 ms  StdDev: 631.01 μs  p50: 30.95 ms  p75: 32.15 ms  p90: 32.15 ms  p95: 32.15 ms  p99: 32.15 ms  (n=3)  Alloc: 49.31 MiB/iter  MajGC: 1.698/iter
+EUF chain UNSAT (n=50): Mean: 95.59 μs  StdDev: 2.55 μs  p50: 94.66 μs  p75: 99.07 μs  p90: 99.07 μs  p95: 99.07 μs  p99: 99.07 μs  (n=3)  Alloc: 231.55 KiB/iter  MajGC: 0.008/iter
+EUF chain UNSAT (n=200): Mean: 567.20 μs  StdDev: 126.40 μs  p50: 483.95 μs  p75: 745.81 μs  p90: 745.81 μs  p95: 745.81 μs  p99: 745.81 μs  (n=3)  Alloc: 892.16 KiB/iter  MajGC: 0.072/iter
+EUF chain UNSAT (n=1000): Mean: 3.64 ms  StdDev: 61.11 μs  p50: 3.64 ms  p75: 3.71 ms  p90: 3.71 ms  p95: 3.71 ms  p99: 3.71 ms  (n=3)  Alloc: 4.14 MiB/iter  MajGC: 0.308/iter
+EUF two-group SAT (n=50): Mean: 105.91 μs  StdDev: 770.81 ns  p50: 105.36 μs  p75: 107.00 μs  p90: 107.00 μs  p95: 107.00 μs  p99: 107.00 μs  (n=3)  Alloc: 270.65 KiB/iter  MajGC: 0.022/iter
+EUF two-group SAT (n=200): Mean: 560.78 μs  StdDev: 26.03 μs  p50: 558.18 μs  p75: 593.89 μs  p90: 593.89 μs  p95: 593.89 μs  p99: 593.89 μs  (n=3)  Alloc: 1.09 MiB/iter  MajGC: 0.090/iter
+EUF web (n=20, f=3): Mean: 83.30 μs  StdDev: 26.47 μs  p50: 66.55 μs  p75: 120.67 μs  p90: 120.67 μs  p95: 120.67 μs  p99: 120.67 μs  (n=3)  Alloc: 169.60 KiB/iter  MajGC: 0.014/iter
+EUF web (n=50, f=5): Mean: 201.24 μs  StdDev: 3.62 μs  p50: 201.06 μs  p75: 205.76 μs  p90: 205.76 μs  p95: 205.76 μs  p99: 205.76 μs  (n=3)  Alloc: 435.55 KiB/iter  MajGC: 0.035/iter
+
+
 O(1) trail index on Var (was O(trail) rescan per conflict literal) + egx
 Class_metadata.tracks_metadata to skip metadata upkeep when it is a no-op
 
