@@ -148,12 +148,29 @@ let%expect_test "the independent checker accepts a manual by-refutation step" =
           else step)
     }
   in
+  let invalid_proof : Proof.t =
+    { proof with
+      steps =
+        [| { (proof.steps.(0)) with
+             justification =
+               By_refutation
+                 { premises = [||]; refutation = invalid_refutation }
+           }
+        |]
+    }
+  in
   print_s
     [%message
       "rejects incomplete RUP"
-        ~rejected:
-          (Or_error.is_error (Proof.Refutation.check invalid_refutation) : bool)];
-  [%expect {| ("rejects incomplete RUP" (rejected true)) |}]
+        ~refutation_rejected:
+          (Or_error.is_error (Proof.Refutation.check invalid_refutation) : bool)
+        ~proof_rejected:(Or_error.is_error (Proof.check invalid_proof) : bool)];
+  print_s [%sexp (Proof.check invalid_proof : unit Or_error.t)];
+  [%expect
+    {|
+    ("rejects incomplete RUP" (refutation_rejected true) (proof_rejected true))
+    (Error "RUP hints did not derive a conflict")
+    |}]
 ;;
 
 let%expect_test "RUP propagates through input and extension clauses" =
@@ -565,6 +582,58 @@ let%expect_test "a multi-rule proof DAG is checked" =
         ~bad_rewrite_rejected:
           (Or_error.is_error (Proof.check bad_rewrite) : bool)];
   [%expect {| (checks (valid true) (bad_rewrite_rejected true)) |}]
+;;
+
+let%expect_test "a solver refutation proof prints as human-readable text" =
+  let solver = Solver.create ~config:{ produce_proofs = true } () in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let b : Formula.any = Var (Tvar.of_string "b") in
+  let c : Formula.any = Var (Tvar.of_string "c") in
+  let d : Formula.any = Var (Tvar.of_string "d") in
+  let assert_ok formula =
+    match Or_error.ok_exn (Solver.assert_formula solver formula) with
+    | `Ok -> ()
+    | `Unsat _ -> print_endline "unsat at assert time"
+  in
+  assert_ok (Or [ Eq (a, b); Eq (c, d) ]);
+  assert_ok (Not (Eq (a, b)));
+  assert_ok (Not (Eq (c, d)));
+  (match Solver.solve solver with
+   | Sat _ -> print_endline "sat"
+   | Unsat { proof = Some proof; _ } ->
+     print_endline (Proof.to_string_hum proof);
+     print_s [%message "check" ~result:(Proof.check proof : unit Or_error.t)]
+   | Unsat { proof = None; _ } -> print_endline "no proof produced");
+  [%expect
+    {|
+    Assumptions:
+      a0: bool ≠ int
+      a1: bool ≠ float
+      a2: int ≠ float
+      a3: a = b ∨ c = d
+      a4: a ≠ b
+      a5: c ≠ d
+    Steps:
+      s0: bool ≠ int   [assumption a0]
+      s1: bool ≠ float   [assumption a1]
+      s2: int ≠ float   [assumption a2]
+      s3: a = b ∨ c = d   [assumption a3]
+      s4: a ≠ b   [assumption a4]
+      s5: c ≠ d   [assumption a5]
+      s6: false   [refutation of [s0, s1, s2, s3, s4, s5]]
+        refutation:
+          extensions:
+            e0 := (a = b ∨ c = d)
+          steps:
+            r0: a = b ∨ c = d ∨ ¬(e0)   [definition of e0]
+            r1: e0   [s3]
+            r2: a ≠ b   [s4]
+            r3: c ≠ d   [s5]
+            r4: ⊥   [RUP over [r1, r2, r3, r0]]
+    Conclusion: s6
+
+    (check (result (Ok ())))
+    |}]
 ;;
 
 let%expect_test "bare equality bridge and integer split certificates are \

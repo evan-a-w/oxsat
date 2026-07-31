@@ -49,6 +49,60 @@ let print_quantifier_proof_result = function
     print_endline "Unsat without proof"
 ;;
 
+let mask_fresh_witnesses text =
+  (* [Fresh_tvar.create ~hint] names [hint.<n>] where [<n>] is a process-global
+     counter (and [Tvar.to_string] strips the generated suffix), so the counter
+     is unstable. Mask it, keeping the hint, for stable expect output. *)
+  let mask_hint text ~hint =
+    let pattern = hint ^ "." in
+    let rec skip_digits i =
+      if i < String.length text && Char.is_digit text.[i]
+      then skip_digits (i + 1)
+      else i
+    in
+    let rec loop acc pos =
+      match String.substr_index text ~pattern ~pos with
+      | None -> acc ^ String.sub text ~pos ~len:(String.length text - pos)
+      | Some index ->
+        let digits_start = index + String.length pattern in
+        let digits_end = skip_digits digits_start in
+        if digits_end = digits_start
+        then
+          (* Not followed by a counter: copy the pattern verbatim. *)
+          loop
+            (acc ^ String.sub text ~pos ~len:(digits_start - pos))
+            digits_start
+        else (
+          let acc =
+            acc ^ String.sub text ~pos ~len:(index - pos) ^ pattern ^ "<fresh>"
+          in
+          loop acc digits_end)
+    in
+    loop "" 0
+  in
+  text |> mask_hint ~hint:"array_extensionality" |> mask_hint ~hint:".bound"
+;;
+
+(* Prints the [Proof.check] result and only the [Proof.to_string_hum] lines that
+   explain the array theory reasoning, so expect output stays short. *)
+let print_array_proof_lines proof =
+  let lines =
+    Proof.to_string_hum proof |> mask_fresh_witnesses |> String.split_lines
+  in
+  List.iter lines ~f:(fun line ->
+    if String.is_substring line ~substring:"array" then print_endline line)
+;;
+
+let theory_literal atom ~positive =
+  Proof.Literal.create ~atom:(Proof.Atom.Theory atom) ~positive
+;;
+
+let clause_exn literals =
+  match Proof.Clause.create literals with
+  | `Clause clause -> clause
+  | `Tautology -> failwith "unexpected tautology"
+;;
+
 let%expect_test "read over write at the same index" =
   let solver = Solver.create () in
   assert_ok solver (neq (select (store a i value) i) value);
@@ -250,4 +304,194 @@ let%expect_test "client variable named like the old array witness does not \
   assert_ok solver (eq (select a client_index) (select b client_index));
   print_solver_result (Solver.solve solver);
   [%expect {| Sat |}]
+;;
+
+let%expect_test "row1 proof prints human-readable certificate text" =
+  let solver = Solver.create ~config:{ produce_proofs = true } () in
+  assert_ok solver (neq (select (store a i value) i) value);
+  (match Solver.solve solver with
+   | Sat _ -> print_endline "sat"
+   | Unsat { proof = Some proof; _ } ->
+     print_endline (Proof.to_string_hum proof)
+   | Unsat { proof = None; _ } -> print_endline "no proof produced");
+  [%expect
+    {|
+    Assumptions:
+      a0: bool ≠ int
+      a1: bool ≠ float
+      a2: int ≠ float
+      a3: select(store(a, i, value), i) ≠ value
+    Steps:
+      s0: bool ≠ int   [assumption a0]
+      s1: bool ≠ float   [assumption a1]
+      s2: int ≠ float   [assumption a2]
+      s3: select(store(a, i, value), i) ≠ value   [assumption a3]
+      s4: false   [refutation of [s0, s1, s2, s3]]
+        refutation:
+          steps:
+            r0: value ≠ select(store(a, i, value), i)   [s3]
+            r1: value = select(store(a, i, value), i)   [array row1: select(store(a, i, value), i) = value]
+            r2: ⊥   [RUP over [r0, r1]]
+    Conclusion: s4
+    |}]
+;;
+
+let%expect_test "row2 proof prints human-readable certificate text" =
+  let solver = Solver.create ~config:{ produce_proofs = true } () in
+  assert_ok solver (neq i j);
+  assert_ok solver (neq (select (store a i value) j) (select a j));
+  (match Solver.solve solver with
+   | Sat _ -> print_endline "sat"
+   | Unsat { proof = Some proof; _ } ->
+     print_endline (Proof.to_string_hum proof)
+   | Unsat { proof = None; _ } -> print_endline "no proof produced");
+  [%expect
+    {|
+    Assumptions:
+      a0: bool ≠ int
+      a1: bool ≠ float
+      a2: int ≠ float
+      a3: i ≠ j
+      a4: select(store(a, i, value), j) ≠ select(a, j)
+    Steps:
+      s0: bool ≠ int   [assumption a0]
+      s1: bool ≠ float   [assumption a1]
+      s2: int ≠ float   [assumption a2]
+      s3: i ≠ j   [assumption a3]
+      s4: select(store(a, i, value), j) ≠ select(a, j)   [assumption a4]
+      s5: false   [refutation of [s0, s1, s2, s3, s4]]
+        refutation:
+          steps:
+            r0: i ≠ j   [s3]
+            r1: select(a, j) ≠ select(store(a, i, value), j)   [s4]
+            r2: i = j ∨ select(a, j) = select(store(a, i, value), j)   [array row2: i ≠ j ⟹ select(store(a, i, value), j) = select(a, j)]
+            r3: ⊥   [RUP over [r0, r1, r2]]
+    Conclusion: s5
+    |}]
+;;
+
+let%expect_test "extensionality proof prints certificate lines" =
+  let solver = Quantifier_solver.create ~config:{ produce_proofs = true } () in
+  let x = v "x" in
+  let y = v "y" in
+  let k = Tvar.of_string "k" in
+  let assert_q f =
+    ignore (Quantifier_solver.assert_formula solver f : _ Or_error.t)
+  in
+  assert_q
+    (Forall
+       ( [ k ]
+       , [ [ select x (Var k) ]; [ select y (Var k) ] ]
+       , eq (select x (Var k)) (select y (Var k)) ));
+  assert_q (Formula.widen_quantified (eq (select x i) (select x i)));
+  assert_q (Formula.widen_quantified (eq (select y i) (select y i)));
+  assert_q (Formula.widen_quantified (eq x a));
+  assert_q (Formula.widen_quantified (eq y b));
+  assert_q (Formula.widen_quantified (neq a b));
+  (match Quantifier_solver.solve solver ~max_rounds:6 with
+   | Unsat { proof = Some proof; _ } ->
+     print_s [%message "check" ~result:(Proof.check proof : unit Or_error.t)];
+     print_array_proof_lines proof
+   | Sat _ -> print_endline "sat"
+   | Unknown_but_possibly_sat _ -> print_endline "unknown"
+   | Unsat { proof = None; _ } -> print_endline "no proof produced");
+  [%expect
+    {|
+    (check (result (Ok ())))
+      s10: select(x, array_extensionality.<fresh>) = select(y, array_extensionality.<fresh>)   [∀-instantiation {k.bound.<fresh> := array_extensionality.<fresh>} over [s0]]
+            r3: a = b ∨ select(a, array_extensionality.<fresh>) ≠ select(b, array_extensionality.<fresh>)   [array extensionality: a ≠ b ⟹ select(a, array_extensionality.<fresh>) ≠ select(b, array_extensionality.<fresh>)]
+            r4: select(x, array_extensionality.<fresh>) = select(y, array_extensionality.<fresh>)   [s10]
+            r5: x ≠ a ∨ y ≠ b ∨ select(x, array_extensionality.<fresh>) ≠ select(y, array_extensionality.<fresh>) ∨ select(a, array_extensionality.<fresh>) = select(b, array_extensionality.<fresh>)   [EUF: select(a, array_extensionality.<fresh>) = select(b, array_extensionality.<fresh>) via [x = a; congruence(select(a, array_extensionality.<fresh>) = select(x, array_extensionality.<fresh>) from [a = x, array_extensionality.<fresh> = array_extensionality.<fresh>]); select(x, array_extensionality.<fresh>) = select(y, array_extensionality.<fresh>); y = b; congruence(select(y, array_extensionality.<fresh>) = select(b, array_extensionality.<fresh>) from [y = b, array_extensionality.<fresh> = array_extensionality.<fresh>])]]
+    |}]
+;;
+
+let%expect_test "bogus array certificates are rejected" =
+  let array = v "arr" in
+  let index = v "idx" in
+  let witness = v "wit" in
+  let left = v "left" in
+  let right = v "right" in
+  let row1_clause value =
+    clause_exn
+      [ theory_literal
+          (`Eq
+            (Formula.Select (Formula.Store (array, index, value), index), value))
+          ~positive:true
+      ]
+  in
+  let row1_certificate value : Proof.Theory_certificate.Array.t =
+    Read_over_write_same_index { array; index; value }
+  in
+  let extensionality_certificate ~type_premises
+    : Proof.Theory_certificate.Array.t
+    =
+    Extensionality { left; right; witness; type_premises }
+  in
+  let extensionality_clause ~type_premises ~certificate_left ~certificate_right =
+    let not_has_type (var, type_expr) =
+      theory_literal (`Type_eq (Type_expr.Var var, type_expr)) ~positive:false
+    in
+    clause_exn
+      (List.map type_premises ~f:not_has_type
+       @ [ theory_literal
+             (`Eq (certificate_left, certificate_right))
+             ~positive:true
+         ; theory_literal
+             (`Eq
+               ( Formula.Select (certificate_left, witness)
+               , Formula.Select (certificate_right, witness) ))
+             ~positive:false
+         ])
+  in
+  let int_array : Type_expr.t =
+    Type_expr.Array_type (Type_expr.Base Int, Type_expr.Base Int)
+  in
+  let guarded_clause =
+    extensionality_clause
+      ~type_premises:[ Tvar.of_string "arr", int_array ]
+      ~certificate_left:left
+      ~certificate_right:right
+  in
+  let check clause certificate =
+    Proof.check_theory_certificate ~clause (Array certificate)
+  in
+  print_s
+    [%message
+      "bogus array certificates"
+        ~row1_wrong_value:
+          (Or_error.is_error
+             (check (row1_clause other) (row1_certificate value))
+           : bool)
+        ~row1_wrong_index:
+          (Or_error.is_error
+             (check (row1_clause value) (row1_certificate other))
+           : bool)
+        ~extensionality_missing_guard:
+          (Or_error.is_error
+             (check
+                guarded_clause
+                (extensionality_certificate ~type_premises:[]))
+           : bool)
+        ~extensionality_unearned_guard:
+          (Or_error.is_error
+             (check
+                (extensionality_clause
+                   ~type_premises:[]
+                   ~certificate_left:left
+                   ~certificate_right:right)
+                (extensionality_certificate
+                   ~type_premises:[ Tvar.of_string "arr", int_array ]))
+           : bool)];
+  print_s
+    [%sexp
+      (check
+         (row1_clause other)
+         (Read_over_write_same_index { array; index; value })
+       : unit Or_error.t)];
+  [%expect
+    {|
+    ("bogus array certificates" (row1_wrong_value true) (row1_wrong_index true)
+     (extensionality_missing_guard true) (extensionality_unearned_guard true))
+    (Error "array certificate does not match its clause")
+    |}]
 ;;
