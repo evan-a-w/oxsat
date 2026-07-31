@@ -153,6 +153,38 @@ let%expect_test "satisfiable ADT problem has a checkable model" =
     |}]
 ;;
 
+let%expect_test "scoped ADT selector premise can be popped" =
+  let solver = Solver.create () in
+  let x = v "x" in
+  let h = v "h" in
+  assert_ok solver (neq (head x) h);
+  Solver.push solver;
+  assert_ok solver (eq x (cons h nil));
+  print_result (Solver.solve solver);
+  Solver.pop solver;
+  print_result (Solver.solve solver);
+  [%expect {|
+    Unsat
+    Sat
+    |}]
+;;
+
+let%expect_test "scoped ADT tester premise can be popped" =
+  let solver = Solver.create () in
+  let x = v "x" in
+  let h = v "h" in
+  assert_ok solver (is_nil x);
+  Solver.push solver;
+  assert_ok solver (eq x (cons h nil));
+  print_result (Solver.solve solver);
+  Solver.pop solver;
+  print_result (Solver.solve solver);
+  [%expect {|
+    Unsat
+    Sat
+    |}]
+;;
+
 let%expect_test "ADT proof certificates" =
   let cases =
     [ ( "injectivity"

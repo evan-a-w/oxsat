@@ -11,6 +11,7 @@ let neq left right : Formula.any = Not (eq left right)
 let ite condition then_ else_ : Formula.any = Ite (condition, then_, else_)
 let app f args : Formula.any = App (Tvar.of_string f, args)
 let select array index : Formula.any = Select (array, index)
+let store array index value : Formula.any = Store (array, index, value)
 
 let assert_ok solver formula =
   match Or_error.ok_exn (Solver.assert_formula solver formula) with
@@ -97,6 +98,80 @@ let%expect_test "ite as an array term selects the chosen array" =
        (select (v "a") (v "i")));
   print_solver_result (Solver.solve solver);
   [%expect {| Unsat |}]
+;;
+
+let%expect_test "ite under not and or follows the selected branch" =
+  let condition = eq (v "c1") (v "c2") in
+  let solver = Solver.create () in
+  assert_ok
+    solver
+    (Not (ite condition (eq (v "x") (v "y")) (eq (v "y") (v "z"))));
+  assert_ok solver condition;
+  assert_ok solver (eq (v "x") (v "y"));
+  print_solver_result (Solver.solve solver);
+  let solver = Solver.create () in
+  assert_ok
+    solver
+    (Or
+       [ ite condition (eq (v "x") (v "y")) (eq (v "y") (v "z"))
+       ; eq (v "u") (v "w")
+       ]);
+  assert_ok solver condition;
+  assert_ok solver (neq (v "x") (v "y"));
+  assert_ok solver (neq (v "u") (v "w"));
+  print_solver_result (Solver.solve solver);
+  [%expect {|
+    Unsat
+    Unsat
+    |}]
+;;
+
+let%expect_test "same-condition ite equality respects branch constraints" =
+  let condition = eq (v "c1") (v "c2") in
+  let solver = Solver.create () in
+  assert_ok solver condition;
+  assert_ok solver (neq (v "x") (v "z"));
+  (match
+     Or_error.ok_exn
+       (Solver.assert_formula
+          solver
+          (eq (ite condition (v "x") (v "y")) (ite condition (v "z") (v "y"))))
+   with
+   | `Unsat _ -> print_endline "Unsat"
+   | `Ok -> print_solver_result (Solver.solve solver));
+  [%expect {| Unsat |}]
+;;
+
+let%expect_test "ite in store still satisfies read-over-write" =
+  let condition = eq (v "c1") (v "c2") in
+  let solver = Solver.create () in
+  assert_ok
+    solver
+    (neq
+       (select
+          (store (ite condition (v "a") (v "b")) (v "i") (v "value"))
+          (v "i"))
+       (v "value"));
+  print_solver_result (Solver.solve solver);
+  [%expect {| Unsat |}]
+;;
+
+let%expect_test "scoped boolean contradiction can be popped" =
+  let solver = Solver.create () in
+  let p = eq (v "p1") (v "p2") in
+  let q = eq (v "q1") (v "q2") in
+  Solver.push solver;
+  assert_ok solver (Or [ p; q ]);
+  assert_ok solver (Or [ Not p; q ]);
+  assert_ok solver (Or [ p; Not q ]);
+  assert_ok solver (Or [ Not p; Not q ]);
+  print_solver_result (Solver.solve solver);
+  Solver.pop solver;
+  print_solver_result (Solver.solve solver);
+  [%expect {|
+    Unsat
+    Sat
+    |}]
 ;;
 
 let%expect_test "ite under a quantifier body is lowered after instantiation" =

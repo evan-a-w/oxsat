@@ -170,6 +170,36 @@ let%expect_test "EUF class map inconsistent with a true equality is rejected" =
     |}]
 ;;
 
+let%expect_test "array row axiom violation in a corrupted model is rejected" =
+  let solver = Solver.create () in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let i : Formula.any = Var (Tvar.of_string "i") in
+  let value : Formula.any = Var (Tvar.of_string "value") in
+  let row = Formula.Select (Store (a, i, value), i) in
+  assert_ok solver (eq row row);
+  (match Solver.solve solver with
+   | Unsat _ -> print_endline "unexpectedly unsat"
+   | Sat { model } ->
+     let row_value_atom = Atom.normalize (`Eq (row, value)) in
+     let corrupted =
+       { model with
+         Model.atom_values =
+           Map.mapi model.atom_values ~f:(fun ~key ~data ->
+             if [%compare.equal: Atom.t] (Atom.normalize key) row_value_atom
+             then false
+             else data)
+       ; euf_classes = Map.mapi model.euf_classes ~f:(fun ~key ~data:_ -> key)
+       }
+     in
+     print_s [%sexp (Solver.check_model solver corrupted : unit Or_error.t)]);
+  [%expect
+    {|
+    (Error
+     ("array read-over-write/same-index axiom is violated" (array (Var a))
+      (index (Var i)) (value (Var value))))
+    |}]
+;;
+
 (* A satisfiable type disequality between differently-typed variables checks;
    corrupting a witness so the two share a type makes the checker reject it. *)
 let%expect_test "type disequality checks; corrupted type witness is rejected" =

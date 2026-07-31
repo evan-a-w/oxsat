@@ -125,6 +125,44 @@ let%expect_test "read over write at a different index" =
   [%expect {| Unsat |}]
 ;;
 
+let%expect_test "scoped row lemma premise can be popped" =
+  let solver = Solver.create () in
+  assert_ok solver (neq (select (store a i value) j) (select a j));
+  Solver.push solver;
+  assert_ok solver (neq i j);
+  print_solver_result (Solver.solve solver);
+  Solver.pop solver;
+  print_solver_result (Solver.solve solver);
+  [%expect {|
+    Unsat
+    Sat
+    |}]
+;;
+
+let%expect_test "scoped array type premise does not leak through retained \
+                 lemmas"
+  =
+  let solver = Solver.create () in
+  let b_var = Tvar.of_string "b" in
+  assert_ok solver (neq a b);
+  assert_ok solver (eq (select a i) (select a i));
+  Solver.push solver;
+  assert_ok solver (has_int_int_array_type b_var);
+  print_solver_result (Solver.solve solver);
+  print_s
+    [%message
+      "in scope" ~type_:(Solver.get_type solver b_var : Type_expr.t option)];
+  Solver.pop solver;
+  assert_ok solver (Not (has_int_int_array_type b_var));
+  print_solver_result (Solver.solve solver);
+  [%expect
+    {|
+    Sat
+    ("in scope" (type_ ((Array_type (Base Int) (Base Int)))))
+    Sat
+    |}]
+;;
+
 let%expect_test "array extensionality with a universal select equality" =
   let solver = Quantifier_solver.create () in
   let k = Tvar.of_string "k" in
