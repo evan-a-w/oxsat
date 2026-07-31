@@ -29,7 +29,15 @@ open! Import
     still present for the combined-theory interface; no decision-level-local
     array facts are stored here. Equivalence classes and declared sorts can both
     change under backtracking, so array class membership is recomputed when
-    looking for an extensionality lemma instead of cached in this module. *)
+    looking for an extensionality lemma instead of cached in this module.
+
+    [maybe_get_lemma] is called on every theory propagation even for problems
+    that never mention arrays, so it starts from an O(1) check: if no
+    array-shaped term has ever appeared in a registered atom and no declared
+    array sort has ever been seen, no lemma is possible and it returns
+    immediately without scanning the egraph. Both signals are only ever added to
+    and are re-checked on every call, so an array term or declared sort that
+    arrives later disables the fast path rather than latching it off. *)
 
 type t
 

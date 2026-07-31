@@ -13,6 +13,7 @@ end
 
 type t =
   { array_terms : Formula.Any.Hash_set.t
+  ; mutable has_declared_array_type : bool
   ; atoms : Atom.Equality.Hash_set.t
   ; row1_emitted : Formula.Any.Hash_set.t
   ; row2_emitted : Formula.Any.Hash_set.t
@@ -23,6 +24,7 @@ type t =
 
 let create () =
   { array_terms = Formula.Any.Hash_set.create ()
+  ; has_declared_array_type = false
   ; atoms = Atom.Equality.Hash_set.create ()
   ; row1_emitted = Formula.Any.Hash_set.create ()
   ; row2_emitted = Formula.Any.Hash_set.create ()
@@ -44,6 +46,9 @@ let rec note_array_shapes t (term : Formula.any) =
     note_array_shapes t array;
     note_array_shapes t index;
     note_array_shapes t value
+  | Array_type _ ->
+    t.has_declared_array_type <- true;
+    List.iter (Formula.args term) ~f:(note_array_shapes t)
   | _ -> List.iter (Formula.args term) ~f:(note_array_shapes t)
 ;;
 
@@ -205,16 +210,26 @@ let extensionality t egraph ~get_type =
 
 let maybe_get_lemma t ~egraph ~get_type =
   t.last_certificate <- None;
-  let terms = Formula_egraph_uf.registered_terms egraph in
-  match row1 t egraph terms with
-  | Some lemma -> lemma
-  | None ->
-    (match row2 t egraph terms with
-     | Some lemma -> lemma
-     | None ->
-       (match extensionality t egraph ~get_type with
-        | Some lemma -> lemma
-        | None -> `Consistent))
+  (* Every array lemma needs an array-shaped registered term: the row lemmas
+     need a registered [store]/[select (store ...)] term, and extensionality
+     additionally requires an array-shaped member in at least one of the two
+     classes. [array_terms] records every array-shaped subterm of a registered
+     atom, so with it (and any declared array sort) absent no lemma is possible.
+     Both are only ever added to and are re-checked on every call, so a term or
+     sort that arrives later disables this fast path. *)
+  if Hash_set.is_empty t.array_terms && not t.has_declared_array_type
+  then `Consistent
+  else (
+    let terms = Formula_egraph_uf.registered_terms egraph in
+    match row1 t egraph terms with
+    | Some lemma -> lemma
+    | None ->
+      (match row2 t egraph terms with
+       | Some lemma -> lemma
+       | None ->
+         (match extensionality t egraph ~get_type with
+          | Some lemma -> lemma
+          | None -> `Consistent)))
 ;;
 
 let last_certificate t = t.last_certificate
