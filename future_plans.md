@@ -1,21 +1,5 @@
 # Future plans
 
-## Testing baseline
-
-The immediate testing hardening pass is complete:
-
-- Bogus proof/certificate rejection covers the current proof-producing theories,
-  including array and ADT certificates.
-- Representative proof-producing paths print human-readable proof/certificate
-  text in expect tests, not only `Proof.check = Ok`.
-- Model-check negative tests cover ADT disjointness, injectivity, selector,
-  tester, and acyclicity invariants in addition to arrays/EUF/arithmetic/types.
-- ADT selector/tester alias regressions cover variables equal to constructor
-  terms.
-- Formula constructor uniqueness is guarded by the representative-constructor
-  compare/rank regression in `test/test_formula.ml`; update that list whenever a
-  formula constructor is added.
-
 ## Arithmetic / big integers
 
 - Integrate the standalone `ds` big integer module into `theory_core/Q.t`.
