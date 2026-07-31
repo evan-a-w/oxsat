@@ -29,6 +29,36 @@ let theory_literal atom positive =
   Proof_literal.create ~atom:(Theory atom) ~positive
 ;;
 
+let check_array clause certificate =
+  let open Proof_theory_certificate.Array in
+  let eq left right = theory_literal (`Eq (left, right)) true in
+  let neq left right = theory_literal (`Eq (left, right)) false in
+  let not_has_type (var, type_expr) =
+    theory_literal (`Type_eq (Type_expr.Var var, type_expr)) false
+  in
+  let expected =
+    match certificate with
+    | Read_over_write_same_index { array; index; value } ->
+      [ eq (Formula.Select (Formula.Store (array, index, value), index)) value ]
+    | Read_over_write_different_index
+        { array; written_index; written_value; read_index } ->
+      [ eq written_index read_index
+      ; eq
+          (Formula.Select
+             (Formula.Store (array, written_index, written_value), read_index))
+          (Formula.Select (array, read_index))
+      ]
+    | Extensionality { left; right; witness; type_premises } ->
+      List.map type_premises ~f:not_has_type
+      @ [ eq left right
+        ; neq (Formula.Select (left, witness)) (Formula.Select (right, witness))
+        ]
+  in
+  if clause_equal clause expected
+  then Ok ()
+  else error "array certificate does not match its clause"
+;;
+
 let check_bare_var_eq clause certificate =
   let open Proof_theory_certificate.Bare_var_eq in
   let uf a b : Atom.t = `Eq (Formula.Var a, Formula.Var b) in
@@ -123,19 +153,37 @@ let structurally_incompatible left right =
   | Type_expr.Base a, Type_expr.Base b -> not (Type_expr.Base.equal a b)
   | Type_expr.App (a, _), Type_expr.App (b, _) -> not (Tvar.equal a b)
   | Type_expr.Function_type _, Type_expr.Function_type _
+  | Type_expr.Array_type _, Type_expr.Array_type _
   | Type_expr.Type, Type_expr.Type -> false
   | Type_expr.Var _, _
   | _, Type_expr.Var _
   | Type_expr.Type_of _, _
   | _, Type_expr.Type_of _ -> false
   | ( Type_expr.Base _
-    , (Type_expr.App _ | Type_expr.Function_type _ | Type_expr.Type) )
+    , ( Type_expr.App _
+      | Type_expr.Function_type _
+      | Type_expr.Array_type _
+      | Type_expr.Type ) )
   | ( Type_expr.App _
-    , (Type_expr.Base _ | Type_expr.Function_type _ | Type_expr.Type) )
+    , ( Type_expr.Base _
+      | Type_expr.Function_type _
+      | Type_expr.Array_type _
+      | Type_expr.Type ) )
   | ( Type_expr.Function_type _
-    , (Type_expr.Base _ | Type_expr.App _ | Type_expr.Type) )
+    , ( Type_expr.Base _
+      | Type_expr.App _
+      | Type_expr.Array_type _
+      | Type_expr.Type ) )
+  | ( Type_expr.Array_type _
+    , ( Type_expr.Base _
+      | Type_expr.App _
+      | Type_expr.Function_type _
+      | Type_expr.Type ) )
   | ( Type_expr.Type
-    , (Type_expr.Base _ | Type_expr.App _ | Type_expr.Function_type _) ) -> true
+    , ( Type_expr.Base _
+      | Type_expr.App _
+      | Type_expr.Function_type _
+      | Type_expr.Array_type _ ) ) -> true
 ;;
 
 let type_assignment atom positive =
@@ -319,5 +367,6 @@ let check ~clause = function
   | Integer_split certificate -> check_integer_split clause certificate
   | Linear_arithmetic certificate -> check_linear_arithmetic clause certificate
   | Type_theory certificate -> check_type_theory clause certificate
+  | Array certificate -> check_array clause certificate
   | Euf certificate -> check_euf clause certificate
 ;;

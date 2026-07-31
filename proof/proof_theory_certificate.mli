@@ -74,6 +74,28 @@ module Type_theory : sig
   [@@deriving sexp, compare]
 end
 
+module Array : sig
+  type t =
+    | Read_over_write_same_index of
+        { array : Formula.any
+        ; index : Formula.any
+        ; value : Formula.any
+        }
+    | Read_over_write_different_index of
+        { array : Formula.any
+        ; written_index : Formula.any
+        ; written_value : Formula.any
+        ; read_index : Formula.any
+        }
+    | Extensionality of
+        { left : Formula.any
+        ; right : Formula.any
+        ; witness : Formula.any
+        ; type_premises : (Tvar.t * Type_expr.t) list
+        }
+  [@@deriving sexp, compare]
+end
+
 module Bare_var_eq : sig
   module Le_direction : sig
     type t =
@@ -98,5 +120,6 @@ type t =
   | Linear_arithmetic of Linear_arithmetic.t
   | Integer_split of Integer_split.t
   | Type_theory of Type_theory.t
+  | Array of Array.t
   | Bare_var_eq of Bare_var_eq.t
 [@@deriving sexp, compare]

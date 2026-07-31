@@ -38,6 +38,10 @@ module Linear_arithmetic : sig
   type t = { combination : (Atom.t * Q.t) list }
 end
 
+module Array : sig
+  type t = Proof.Theory_certificate.Array.t
+end
+
 module Type_theory : sig
   type t =
     { left : Type_expr.t
@@ -51,6 +55,7 @@ type t =
   | Linear_arithmetic of Linear_arithmetic.t
   | Integer_split of Proof.Theory_certificate.Integer_split.t
   | Type_theory of Type_theory.t
+  | Array of Array.t
   | Bare_var_eq of Proof.Theory_certificate.Bare_var_eq.t
 
 (** Resolves the certificate's atom references to positional indices in

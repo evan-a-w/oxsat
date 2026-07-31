@@ -526,6 +526,17 @@ let decay_clause_activities t =
   t.clause_act_inc <- t.clause_act_inc /. clause_act_decay_factor
 ;;
 
+let clause_assignment_level t clause =
+  let decision_level = ref 0 in
+  Vec.Value.iter clause.Clause.clause ~f:(fun literal ->
+    let var = literal_var t ~literal in
+    match%optional_u (var.trail_entry : Trail_entry.Option_u.t) with
+    | None -> ()
+    | Some trail_entry ->
+      decision_level := Int.max !decision_level trail_entry.#decision_level);
+  !decision_level
+;;
+
 let mark_literal t ~seen ~literal ~(local_ path_count) ~learned_literals =
   let var = Int.abs literal in
   if not (Stamp_set.is_seen seen ~var)
@@ -573,7 +584,19 @@ let propagate_theory t = exclave_
           if Trail_entry.Vec.length t.trail > trail_length_before
           then `Continue
           else `Consistent
-        | `Conflict _ as res -> res))
+        | `Conflict clause_idx ->
+          let conflict_level =
+            clause_assignment_level t (Vec.Value.get t.clauses clause_idx)
+          in
+          if conflict_level < t.decision_level
+          then
+            (* A theory may discover a globally-valid lemma from data that is
+               not decision-level local. If the new lemma is already false below
+               the current level, current-level 1UIP analysis has no UIP to
+               find; analyze the conflict at the highest level that falsifies
+               the lemma instead. *)
+            remove_greater_than_decision_level t ~decision_level:conflict_level;
+          `Conflict clause_idx))
 ;;
 
 let rec propagate' t : int or_null =

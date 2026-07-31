@@ -37,8 +37,10 @@ For common modules in Core, like [Table], [Set] etc., you should refer the re-ex
 
 Types should typically be in a module like [Type] and be [Type.t], rather than [type type_].
 
+Use the import.ml module to import things.
+
 Only write comments for things that are truly hard to understand without them.
-Don't just restate things that can be intuited based on context, names, etc.
+Don't just restate things that can be intuited based on context, names, code, etc.
 
 If you see that I have changed a module, do not revert those changes, but apply
 the ideas elsewhere. For instance, I might change the API slightly to make it

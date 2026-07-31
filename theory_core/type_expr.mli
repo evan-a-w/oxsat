@@ -19,6 +19,7 @@ type t =
   | Type_of of Tvar.t
   | App of Tvar.t * t list
   | Function_type of t * t
+  | Array_type of t * t
   | Type
 [@@deriving sexp, compare, hash]
 

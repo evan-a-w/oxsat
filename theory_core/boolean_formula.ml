@@ -16,6 +16,7 @@ module Shape = struct
     | Uf
     | Type
     | La
+    | Array
     | Var
     (* Unreachable via [of_formula] -- [Formula.any] structurally excludes
        [Forall]/[Exists] -- but [shape_of] is generic over any phantom tag, so
@@ -29,11 +30,13 @@ let shape_of (type a) (formula : a Formula.t) : Shape.t =
   | Eq _ | True | False | Not _ | And _ | Or _ -> Bool
   | Forall _ | Exists _ -> Quantified
   | App _ -> Uf
+  | Select _ | Store _ -> Array
   | Bool
   | Int
   | Float
   | Type
   | Function_type _
+  | Array_type _
   | Type_of _
   | Type_var _
   | Type_app _ -> Type
@@ -62,6 +65,10 @@ let rec type_expr_of : type a. a Formula.t -> Type_expr.t Or_error.t =
     let%bind.Or_error a = type_expr_of a in
     let%bind.Or_error b = type_expr_of b in
     Ok (Type_expr.Function_type (a, b))
+  | Array_type (index, element) ->
+    let%bind.Or_error index = type_expr_of index in
+    let%bind.Or_error element = type_expr_of element in
+    Ok (Type_expr.Array_type (index, element))
   | Type_of (Var v) -> Ok (Type_expr.Type_of v)
   | Type_of _ ->
     Or_error.error_s
@@ -70,6 +77,19 @@ let rec type_expr_of : type a. a Formula.t -> Type_expr.t Or_error.t =
     let%bind.Or_error args = Or_error.all (List.map args ~f:type_expr_of) in
     Ok (Type_expr.App (f, args))
   | _ -> Or_error.error_s [%message "formula is not a type expression"]
+;;
+
+let rec array_term_of : type a. a Formula.t -> Formula.any Or_error.t =
+  fun formula ->
+  match formula with
+  | Var v -> Ok (Formula.Var v)
+  | Select (array, index) ->
+    let%bind.Or_error array = array_term_of array in
+    Ok (Formula.Select (array, Formula.widen index))
+  | Store (array, index, value) ->
+    let%bind.Or_error array = array_term_of array in
+    Ok (Formula.Store (array, Formula.widen index, Formula.widen value))
+  | _ -> Or_error.error_s [%message "formula is not an array term"]
 ;;
 
 let rec linear_expr_of : type a. a Formula.t -> Linear_expr.t Or_error.t =
@@ -142,6 +162,10 @@ and eq_formula_of : type a. a Formula.t -> a Formula.t -> t Or_error.t =
     let%bind.Or_error a = linear_expr_of a in
     let%map.Or_error b = linear_expr_of b in
     And (List.map (le_atoms_of_eq a b) ~f:(fun atom -> Atom atom))
+  | Array, _ | _, Array ->
+    let%bind.Or_error a = array_term_of a in
+    let%map.Or_error b = array_term_of b in
+    Atom (`Eq (a, b))
   | Uf, _ | _, Uf | Var, Var ->
     let%bind.Or_error a = uf_term_of a in
     let%map.Or_error b = uf_term_of b in
@@ -163,6 +187,10 @@ and neq_formula_of : type a. a Formula.t -> a Formula.t -> t Or_error.t =
     let%bind.Or_error a = linear_expr_of a in
     let%map.Or_error b = linear_expr_of b in
     Not (And (List.map (le_atoms_of_eq a b) ~f:(fun atom -> Atom atom)))
+  | Array, _ | _, Array ->
+    let%bind.Or_error a = array_term_of a in
+    let%map.Or_error b = array_term_of b in
+    Not (Atom (`Eq (a, b)))
   | Uf, _ | _, Uf | Var, Var ->
     let%bind.Or_error a = uf_term_of a in
     let%map.Or_error b = uf_term_of b in

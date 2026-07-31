@@ -1,3 +1,27 @@
+array-theory early-out: maybe_get_lemma returns Consistent up front when no
+array-shaped term has ever been registered and no declared array sort has been
+seen (both re-checked per call), so array-free problems stop paying for the
+per-propagation registered-terms scan and class-info rebuild
+
+$ dune exec --profile=release bench/feel_bench.exe -- -bench smt
+LP feasible (n=10, m=30): Mean: 129.65 μs  StdDev: 952.52 ns  p50: 128.97 μs  p75: 130.99 μs  p90: 130.99 μs  p95: 130.99 μs  p99: 130.99 μs  (n=3)
+LP feasible (n=20, m=60): Mean: 328.32 μs  StdDev: 2.73 μs  p50: 326.65 μs  p75: 332.17 μs  p90: 332.17 μs  p95: 332.17 μs  p99: 332.17 μs  (n=3)
+LP feasible (n=50, m=150): Mean: 1.21 ms  StdDev: 4.02 μs  p50: 1.21 ms  p75: 1.22 ms  p90: 1.22 ms  p95: 1.22 ms  p99: 1.22 ms  (n=3)
+LP tight OR (n=5): Mean: 101.42 μs  StdDev: 5.41 μs  p50: 103.06 μs  p75: 107.06 μs  p90: 107.06 μs  p95: 107.06 μs  p99: 107.06 μs  (n=3)
+LP tight OR (n=7): Mean: 141.51 μs  StdDev: 1.09 μs  p50: 141.87 μs  p75: 142.62 μs  p90: 142.62 μs  p95: 142.62 μs  p99: 142.62 μs  (n=3)
+LP tight OR (n=9): Mean: 195.64 μs  StdDev: 3.47 μs  p50: 194.27 μs  p75: 200.40 μs  p90: 200.40 μs  p95: 200.40 μs  p99: 200.40 μs  (n=3)
+Bin packing (items=10, bins=3): Mean: 2.35 ms  StdDev: 8.91 μs  p50: 2.35 ms  p75: 2.37 ms  p90: 2.37 ms  p95: 2.37 ms  p99: 2.37 ms  (n=3)
+Bin packing (items=15, bins=4): Mean: 19.79 ms  StdDev: 59.79 μs  p50: 19.75 ms  p75: 19.88 ms  p90: 19.88 ms  p95: 19.88 ms  p99: 19.88 ms  (n=3)
+Bin packing (items=20, bins=4): Mean: 42.66 ms  StdDev: 197.32 μs  p50: 42.53 ms  p75: 42.94 ms  p90: 42.94 ms  p95: 42.94 ms  p99: 42.94 ms  (n=3)
+EUF chain UNSAT (n=50): Mean: 117.21 μs  StdDev: 3.45 μs  p50: 115.47 μs  p75: 122.03 μs  p90: 122.03 μs  p95: 122.03 μs  p99: 122.03 μs  (n=3)
+EUF chain UNSAT (n=200): Mean: 593.57 μs  StdDev: 2.15 μs  p50: 593.18 μs  p75: 596.38 μs  p90: 596.38 μs  p95: 596.38 μs  p99: 596.38 μs  (n=3)
+EUF chain UNSAT (n=1000): Mean: 4.84 ms  StdDev: 35.93 μs  p50: 4.85 ms  p75: 4.88 ms  p90: 4.88 ms  p95: 4.88 ms  p99: 4.88 ms  (n=3)
+EUF two-group SAT (n=50): Mean: 135.23 μs  StdDev: 1.24 μs  p50: 134.36 μs  p75: 136.99 μs  p90: 136.99 μs  p95: 136.99 μs  p99: 136.99 μs  (n=3)
+EUF two-group SAT (n=200): Mean: 692.73 μs  StdDev: 3.63 μs  p50: 691.93 μs  p75: 697.53 μs  p90: 697.53 μs  p95: 697.53 μs  p99: 697.53 μs  (n=3)
+EUF web (n=20, f=3): Mean: 81.18 μs  StdDev: 73.26 ns  p50: 81.15 μs  p75: 81.29 μs  p90: 81.29 μs  p95: 81.29 μs  p99: 81.29 μs  (n=3)
+EUF web (n=50, f=5): Mean: 251.28 μs  StdDev: 1.15 μs  p50: 250.66 μs  p75: 252.89 μs  p90: 252.89 μs  p95: 252.89 μs  p99: 252.89 μs  (n=3)
+
+
 lazy raw-formula egraph registration (restores plain solving performance; raw
 formula trees are registered only when Solver.egraph is requested)
 

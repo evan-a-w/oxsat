@@ -106,11 +106,14 @@ let rec go
   | ( Var _
     | Eq _
     | App _
+    | Select _
+    | Store _
     | Bool
     | Int
     | Float
     | Type
     | Function_type _
+    | Array_type _
     | Type_of _
     | Type_var _
     | Type_app _

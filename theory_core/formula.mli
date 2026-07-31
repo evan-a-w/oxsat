@@ -6,6 +6,7 @@ type any_theory =
   | `Uf
   | `Type
   | `La
+  | `Array
   | `Term
   | `Atom
   ]
@@ -41,12 +42,16 @@ type _ t =
   | Exists : Tvar.t list * any_theory t -> ([> `Quantified ] as 'a) t
   (* UF *)
   | App : Tvar.t * 'a t list -> ([> `Uf ] as 'a) t
+  (* Arrays *)
+  | Select : 'a t * 'a t -> ([> `Array ] as 'a) t
+  | Store : 'a t * 'a t * 'a t -> ([> `Array ] as 'a) t
   (* Types *)
   | Bool : [> `Type ] t
   | Int : [> `Type ] t
   | Float : [> `Type ] t
   | Type : [> `Type ] t
   | Function_type : 'a t * 'a t -> ([> `Type ] as 'a) t
+  | Array_type : 'a t * 'a t -> ([> `Type ] as 'a) t
   | Type_of : 'a t -> ([> `Type ] as 'a) t
   | Type_var : Tvar.t -> [> `Type ] t
   | Type_app : Tvar.t * 'a t list -> ([> `Type ] as 'a) t
@@ -67,6 +72,7 @@ module Theory : sig
     | Uf : [ `Uf | `Atom | `Term ] t
     | Type : [ `Type | `Atom | `Term ] t
     | La : [ `La | `Atom | `Term ] t
+    | Array : [ `Array | `Atom | `Term ] t
     | Boolean : [ `Boolean | `Atom | `Term ] t
     | Shared : any_theory t
 
@@ -135,11 +141,14 @@ module Op : sig
     | And
     | Or
     | App of Tvar.t
+    | Select
+    | Store
     | Bool
     | Int
     | Float
     | Type
     | Function_type
+    | Array_type
     | Type_of
     | Type_var of Tvar.t
     | Type_app of Tvar.t

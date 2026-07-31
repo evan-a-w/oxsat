@@ -48,3 +48,5 @@ bench/flamegraph.txt
 bench/*.json.gz
 *.ctf
 */perf.data*
+
+.pi-subagents/

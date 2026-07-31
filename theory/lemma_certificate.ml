@@ -41,6 +41,10 @@ module Linear_arithmetic = struct
   type t = { combination : (Atom.t * Q.t) list }
 end
 
+module Array = struct
+  type t = Proof.Theory_certificate.Array.t
+end
+
 module Type_theory = struct
   type t =
     { left : Type_expr.t
@@ -54,6 +58,7 @@ type t =
   | Linear_arithmetic of Linear_arithmetic.t
   | Integer_split of Proof.Theory_certificate.Integer_split.t
   | Type_theory of Type_theory.t
+  | Array of Array.t
   | Bare_var_eq of Proof.Theory_certificate.Bare_var_eq.t
 
 (* Index of the clause literal whose theory atom is [atom] (up to
@@ -63,7 +68,7 @@ let index_of_atom clause (atom : Atom.t) =
   let normalized = Atom.normalize atom in
   let literals = Proof.Clause.literals clause in
   match
-    Array.findi literals ~f:(fun _ (literal : Proof.Literal.t) ->
+    Core.Array.findi literals ~f:(fun _ (literal : Proof.Literal.t) ->
       match literal.atom with
       | Theory theory_atom ->
         [%compare.equal: Atom.t] (Atom.normalize theory_atom) normalized
@@ -126,5 +131,6 @@ let to_theory_certificate clause (t : t) : Proof.Theory_certificate.t =
       ; right
       ; premise_literals = List.map premises ~f:(index_of_atom clause)
       }
+  | Array certificate -> Array certificate
   | Bare_var_eq certificate -> Bare_var_eq certificate
 ;;

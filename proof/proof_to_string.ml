@@ -28,6 +28,11 @@ let rec type_expr_to_string (t : Type_expr.t) =
       (String.concat ~sep:", " (List.map args ~f:type_expr_to_string))
   | Function_type (a, b) ->
     sprintf "(%s -> %s)" (type_expr_to_string a) (type_expr_to_string b)
+  | Array_type (index, element) ->
+    sprintf
+      "array[%s, %s]"
+      (type_expr_to_string index)
+      (type_expr_to_string element)
   | Type -> "type"
 ;;
 
@@ -51,7 +56,8 @@ let linear_expr_to_string ({ coeffs; const } : Linear_expr.t) =
 
 let is_concrete_type (formula : Formula.any) =
   match formula with
-  | Bool | Int | Float | Type | Function_type _ | Type_app _ -> true
+  | Bool | Int | Float | Type | Function_type _ | Array_type _ | Type_app _ ->
+    true
   | _ -> false
 ;;
 
@@ -82,12 +88,25 @@ let rec formula_to_string (formula : Formula.any) =
       "%s(%s)"
       (Tvar.to_string f)
       (String.concat ~sep:", " (List.map args ~f:formula_to_string))
+  | Select (array, index) ->
+    sprintf "select(%s, %s)" (formula_to_string array) (formula_to_string index)
+  | Store (array, index, value) ->
+    sprintf
+      "store(%s, %s, %s)"
+      (formula_to_string array)
+      (formula_to_string index)
+      (formula_to_string value)
   | Bool -> "bool"
   | Int -> "int"
   | Float -> "float"
   | Type -> "type"
   | Function_type (a, b) ->
     sprintf "(%s -> %s)" (formula_to_string a) (formula_to_string b)
+  | Array_type (index, element) ->
+    sprintf
+      "array[%s, %s]"
+      (formula_to_string index)
+      (formula_to_string element)
   | Type_of a -> sprintf "typeof(%s)" (formula_to_string a)
   (* A bare [Type_var v] is the *type of* value [v]; render as [typeof(v)] to
      distinguish it from a UF-role [Var v] (which prints as just [v]). A
@@ -179,7 +198,7 @@ let type_expr_judgement (a : Type_expr.t) (b : Type_expr.t) =
   let concrete (t : Type_expr.t) =
     match t with
     | Var _ | Type_of _ -> false
-    | Base _ | App _ | Function_type _ | Type -> true
+    | Base _ | App _ | Function_type _ | Array_type _ | Type -> true
   in
   match a, b with
   | Var v, _ when concrete b ->
@@ -369,6 +388,52 @@ let certificate_to_string ~clause (certificate : Proof_theory_certificate.t) =
       (String.concat
          ~sep:", "
          (List.map premise_literals ~f:(cited_atom ~clause)))
+  | Array certificate ->
+    (match certificate with
+     | Read_over_write_same_index { array; index; value } ->
+       sprintf
+         "array row1: select(store(%s, %s, %s), %s) = %s"
+         (formula_to_string array)
+         (formula_to_string index)
+         (formula_to_string value)
+         (formula_to_string index)
+         (formula_to_string value)
+     | Read_over_write_different_index
+         { array; written_index; written_value; read_index } ->
+       sprintf
+         "array row2: %s ≠ %s ⟹ select(store(%s, %s, %s), %s) = select(%s, %s)"
+         (formula_to_string written_index)
+         (formula_to_string read_index)
+         (formula_to_string array)
+         (formula_to_string written_index)
+         (formula_to_string written_value)
+         (formula_to_string read_index)
+         (formula_to_string array)
+         (formula_to_string read_index)
+     | Extensionality { left; right; witness; type_premises } ->
+       let guards =
+         match type_premises with
+         | [] -> ""
+         | _ ->
+           sprintf
+             " if %s"
+             (String.concat
+                ~sep:" and "
+                (List.map type_premises ~f:(fun (var, type_expr) ->
+                   sprintf
+                     "%s : %s"
+                     (Tvar.to_string var)
+                     (type_expr_to_string type_expr))))
+       in
+       sprintf
+         "array extensionality%s: %s ≠ %s ⟹ select(%s, %s) ≠ select(%s, %s)"
+         guards
+         (formula_to_string left)
+         (formula_to_string right)
+         (formula_to_string left)
+         (formula_to_string witness)
+         (formula_to_string right)
+         (formula_to_string witness))
   | Bare_var_eq certificate ->
     (match certificate with
      | Equality_implies_type_equality (a, b) ->
