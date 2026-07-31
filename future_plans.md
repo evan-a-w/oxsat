@@ -1,18 +1,5 @@
 # Future plans
 
-## Immediate testing follow-ups
-
-- Keep hardening solver/proof tests before adding more features.
-- Add more negative proof-kernel tests for bogus certificates and malformed proofs,
-  especially for newly-added theories.
-- Add tests that print representative human proof/certificate text, not only
-  `Proof.check = Ok`, for every proof-producing path.
-- Add model-check negative tests for ADTs, not just arrays/EUF.
-- Add ADT alias tests where selector/tester arguments are variables equal to
-  constructor terms.
-- Add a small regression for `Formula.rank` uniqueness whenever new formula
-  constructors are introduced.
-
 ## Arithmetic / big integers
 
 - Integrate the standalone `ds` big integer module into `theory_core/Q.t`.

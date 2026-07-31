@@ -7,14 +7,40 @@ open! Theory
    [Solver.check_model], which evaluates the asserted formulas under the model's
    atom values and cross-checks the numeric/type witnesses. *)
 
-let x : Formula.any = Var (Tvar.of_string "x")
-let y : Formula.any = Var (Tvar.of_string "y")
-let z : Formula.any = Var (Tvar.of_string "z")
+let v name : Formula.any = Var (Tvar.of_string name)
+let x : Formula.any = v "x"
+let y : Formula.any = v "y"
+let z : Formula.any = v "z"
 let f arg : Formula.any = App (Tvar.of_string "f", [ arg ])
 let eq a b : Formula.any = Eq (a, b)
 let neq a b : Formula.any = Not (eq a b)
 let xv = Tvar.of_string "x"
 let yv = Tvar.of_string "y"
+let list_datatype = Datatype.Datatype.{ name = Tvar.of_string "list" }
+
+let nil_constructor =
+  Datatype.Constructor.
+    { datatype = list_datatype; name = Tvar.of_string "Nil"; arity = 0 }
+;;
+
+let cons_constructor =
+  Datatype.Constructor.
+    { datatype = list_datatype; name = Tvar.of_string "Cons"; arity = 2 }
+;;
+
+let head_selector =
+  Datatype.Selector.
+    { constructor = cons_constructor; name = Tvar.of_string "head"; index = 0 }
+;;
+
+let nil : Formula.any = Datatype_constructor (nil_constructor, [])
+
+let cons head tail : Formula.any =
+  Datatype_constructor (cons_constructor, [ head; tail ])
+;;
+
+let head value : Formula.any = Datatype_selector (head_selector, value)
+let is_nil value : Formula.any = Datatype_tester (nil_constructor, value)
 
 let assert_ok solver formula =
   match Or_error.ok_exn (Solver.assert_formula solver formula) with
@@ -198,6 +224,143 @@ let%expect_test "array row axiom violation in a corrupted model is rejected" =
      ("array read-over-write/same-index axiom is violated" (array (Var a))
       (index (Var i)) (value (Var value))))
     |}]
+;;
+
+let set_euf_class model term representative =
+  { model with
+    Model.euf_classes =
+      Map.set model.Model.euf_classes ~key:term ~data:representative
+  }
+;;
+
+let check_corrupted_model solver ~f =
+  match Solver.solve solver with
+  | Unsat _ -> print_endline "unexpectedly unsat"
+  | Sat { model } ->
+    print_s [%sexp (Solver.check_model solver (f model) : unit Or_error.t)]
+;;
+
+let%expect_test "ADT constructor disjointness violation in a corrupted model \
+                 is rejected"
+  =
+  let solver = Solver.create () in
+  let h = v "h" in
+  let t = v "t" in
+  let cons_ht = cons h t in
+  assert_ok solver (eq nil nil);
+  assert_ok solver (eq cons_ht cons_ht);
+  check_corrupted_model solver ~f:(fun model -> set_euf_class model cons_ht nil);
+  [%expect
+    {|
+    (Error
+     ("ADT constructor disjointness is violated"
+      (left
+       (Datatype_constructor ((datatype ((name list))) (name Nil) (arity 0)) ()))
+      (right
+       (Datatype_constructor ((datatype ((name list))) (name Cons) (arity 2))
+        ((Var h) (Var t))))))
+    |}]
+;;
+
+let%expect_test "ADT constructor injectivity violation in a corrupted model is \
+                 rejected"
+  =
+  let solver = Solver.create () in
+  let a = v "a" in
+  let c = v "c" in
+  let left = cons a nil in
+  let right = cons c nil in
+  assert_ok solver (eq left left);
+  assert_ok solver (eq right right);
+  assert_ok solver (neq a c);
+  check_corrupted_model solver ~f:(fun model -> set_euf_class model right left);
+  [%expect
+    {|
+    (Error
+     ("ADT constructor injectivity is violated"
+      (left
+       (Datatype_constructor ((datatype ((name list))) (name Cons) (arity 2))
+        ((Var a)
+         (Datatype_constructor ((datatype ((name list))) (name Nil) (arity 0))
+          ()))))
+      (right
+       (Datatype_constructor ((datatype ((name list))) (name Cons) (arity 2))
+        ((Var c)
+         (Datatype_constructor ((datatype ((name list))) (name Nil) (arity 0))
+          ()))))))
+    |}]
+;;
+
+let%expect_test "ADT selector projection violation in a corrupted model is \
+                 rejected"
+  =
+  let solver = Solver.create () in
+  let h = v "h" in
+  let other = v "other" in
+  let cons_h = cons h nil in
+  let selector = head cons_h in
+  assert_ok solver (eq selector selector);
+  assert_ok solver (neq h other);
+  check_corrupted_model solver ~f:(fun model ->
+    { (set_euf_class model selector other) with
+      Model.atom_values =
+        Map.set
+          model.Model.atom_values
+          ~key:(Atom.normalize (`Eq (h, selector)))
+          ~data:false
+    });
+  [%expect
+    {|
+    (Error
+     ("ADT selector projection is violated"
+      (selector_term
+       (Datatype_selector
+        ((constructor ((datatype ((name list))) (name Cons) (arity 2)))
+         (name head) (index 0))
+        (Datatype_constructor ((datatype ((name list))) (name Cons) (arity 2))
+         ((Var h)
+          (Datatype_constructor ((datatype ((name list))) (name Nil) (arity 0))
+           ())))))
+      (projected (Var h))))
+    |}]
+;;
+
+let%expect_test "ADT tester value violation in a corrupted model is rejected" =
+  let solver = Solver.create () in
+  let h = v "h" in
+  let cons_h = cons h nil in
+  let tester = is_nil cons_h in
+  assert_ok solver (eq tester tester);
+  assert_ok solver (eq True True);
+  check_corrupted_model solver ~f:(fun model ->
+    { (set_euf_class model tester True) with
+      Model.atom_values =
+        Map.set
+          model.Model.atom_values
+          ~key:(Atom.normalize (`Eq (tester, True)))
+          ~data:true
+    });
+  [%expect
+    {|
+    (Error
+     ("ADT tester value is violated"
+      (tester
+       (Datatype_tester ((datatype ((name list))) (name Nil) (arity 0))
+        (Datatype_constructor ((datatype ((name list))) (name Cons) (arity 2))
+         ((Var h)
+          (Datatype_constructor ((datatype ((name list))) (name Nil) (arity 0))
+           ())))))
+      (expected false)))
+    |}]
+;;
+
+let%expect_test "ADT acyclicity violation in a corrupted model is rejected" =
+  let solver = Solver.create () in
+  let x = v "x" in
+  let cons_x = cons x nil in
+  assert_ok solver (eq cons_x cons_x);
+  check_corrupted_model solver ~f:(fun model -> set_euf_class model x cons_x);
+  [%expect {| (Error "ADT acyclicity is violated") |}]
 ;;
 
 (* A satisfiable type disequality between differently-typed variables checks;
