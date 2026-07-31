@@ -6,6 +6,7 @@ type any_theory =
   | `Uf
   | `Type
   | `La
+  | `Array
   | `Term
   | `Atom
   ]
@@ -33,12 +34,16 @@ type _ t =
   | Exists : Tvar.t list * any_theory t -> ([> `Quantified ] as 'a) t
   (* UF *)
   | App : Tvar.t * 'a t list -> ([> `Uf ] as 'a) t
+  (* Arrays *)
+  | Select : 'a t * 'a t -> ([> `Array ] as 'a) t
+  | Store : 'a t * 'a t * 'a t -> ([> `Array ] as 'a) t
   (* Types *)
   | Bool : [> `Type ] t
   | Int : [> `Type ] t
   | Float : [> `Type ] t
   | Type : [> `Type ] t
   | Function_type : 'a t * 'a t -> ([> `Type ] as 'a) t
+  | Array_type : 'a t * 'a t -> ([> `Type ] as 'a) t
   | Type_of : 'a t -> ([> `Type ] as 'a) t
   | Type_var : Tvar.t -> [> `Type ] t
   | Type_app : Tvar.t * 'a t list -> ([> `Type ] as 'a) t
@@ -64,11 +69,14 @@ module Op = struct
     | And
     | Or
     | App of Tvar.t
+    | Select
+    | Store
     | Bool
     | Int
     | Float
     | Type
     | Function_type
+    | Array_type
     | Type_of
     | Type_var of Tvar.t
     | Type_app of Tvar.t
@@ -97,11 +105,14 @@ let op : type a. a t -> Op.t =
   | Forall (bound, _, _) -> Forall bound
   | Exists (bound, _) -> Exists bound
   | App (v, _) -> App v
+  | Select _ -> Select
+  | Store _ -> Store
   | Bool -> Bool
   | Int -> Int
   | Float -> Float
   | Type -> Type
   | Function_type _ -> Function_type
+  | Array_type _ -> Array_type
   | Type_of _ -> Type_of
   | Type_var v -> Type_var v
   | Type_app (v, _) -> Type_app v
@@ -116,6 +127,7 @@ module Theory = struct
     | Uf : [ `Uf | `Atom | `Term ] t
     | Type : [ `Type | `Atom | `Term ] t
     | La : [ `La | `Atom | `Term ] t
+    | Array : [ `Array | `Atom | `Term ] t
     | Boolean : [ `Boolean | `Atom | `Term ] t
     | Shared : any_theory t
 
@@ -129,14 +141,20 @@ module Theory = struct
       | Uf -> Sexp.Atom "Uf"
       | Type -> Sexp.Atom "Type"
       | La -> Sexp.Atom "La"
+      | Array -> Sexp.Atom "Array"
       | Boolean -> Sexp.Atom "Boolean"
       | Shared -> Sexp.Atom "Shared"
     ;;
 
     let equal (T a) (T b) =
       match a, b with
-      | Uf, Uf | Type, Type | La, La | Boolean, Boolean | Shared, Shared -> true
-      | (Uf | Type | La | Boolean | Shared), _ -> false
+      | Uf, Uf
+      | Type, Type
+      | La, La
+      | Array, Array
+      | Boolean, Boolean
+      | Shared, Shared -> true
+      | (Uf | Type | La | Array | Boolean | Shared), _ -> false
     ;;
 
     let join a b = if equal a b then a else T Shared
@@ -163,11 +181,14 @@ let args (type a) (t : a t) : any list =
   | Forall (_, triggers, body) -> List.concat triggers @ [ body ]
   | Exists (_, body) -> [ body ]
   | App (_, l) -> widen_list l
+  | Select (array, index) -> [ widen array; widen index ]
+  | Store (array, index, value) -> [ widen array; widen index; widen value ]
   | Bool -> []
   | Int -> []
   | Float -> []
   | Type -> []
   | Function_type (a, b) -> [ widen a; widen b ]
+  | Array_type (index, element) -> [ widen index; widen element ]
   | Type_of x -> [ widen x ]
   | Type_var _ -> []
   | Type_app (_, l) -> widen_list l
@@ -191,11 +212,14 @@ let make_opt ~(op : Op.t) ~(args : any list) : any option =
   | Forall _, _ -> None
   | Exists _, _ -> None
   | App v, l -> Some (App (v, l))
+  | Select, [ array; index ] -> Some (Select (array, index))
+  | Store, [ array; index; value ] -> Some (Store (array, index, value))
   | Bool, [] -> Some Bool
   | Int, [] -> Some Int
   | Float, [] -> Some Float
   | Type, [] -> Some Type
   | Function_type, [ a; b ] -> Some (Function_type (a, b))
+  | Array_type, [ index; element ] -> Some (Array_type (index, element))
   | Type_of, [ a ] -> Some (Type_of a)
   | Type_var v, [] -> Some (Type_var v)
   | Type_app v, l -> Some (Type_app (v, l))
@@ -208,11 +232,14 @@ let make_opt ~(op : Op.t) ~(args : any list) : any option =
       | True
       | False
       | Not
+      | Select
+      | Store
       | Bool
       | Int
       | Float
       | Type
       | Function_type
+      | Array_type
       | Type_of
       | Type_var _
       | La_const _
@@ -268,12 +295,18 @@ let rec sexp_of_t : type a. (a -> Sexp.t) -> a t -> Sexp.t =
       [ [%sexp_of: Tvar.t] f
       ; [%sexp_of: Sexp.t list] (List.map args ~f:sexp_of_sub)
       ]
+  | Select (array, index) ->
+    node "Select" [ sexp_of_sub array; sexp_of_sub index ]
+  | Store (array, index, value) ->
+    node "Store" [ sexp_of_sub array; sexp_of_sub index; sexp_of_sub value ]
   | Bool -> Sexp.Atom "Bool"
   | Int -> Sexp.Atom "Int"
   | Float -> Sexp.Atom "Float"
   | Type -> Sexp.Atom "Type"
   | Function_type (a, b) ->
     node "Function_type" [ sexp_of_sub a; sexp_of_sub b ]
+  | Array_type (index, element) ->
+    node "Array_type" [ sexp_of_sub index; sexp_of_sub element ]
   | Type_of f -> node "Type_of" [ sexp_of_sub f ]
   | Type_var v -> node "Type_var" [ [%sexp_of: Tvar.t] v ]
   | Type_app (f, args) ->
@@ -332,7 +365,13 @@ let rec any_of_sexp sexp : any =
        App
          ( [%of_sexp: Tvar.t] f
          , [%of_sexp: Sexp.t list] args |> List.map ~f:any_of_sexp )
+     | "Select", [ array; index ] ->
+       Select (any_of_sexp array, any_of_sexp index)
+     | "Store", [ array; index; value ] ->
+       Store (any_of_sexp array, any_of_sexp index, any_of_sexp value)
      | "Function_type", [ a; b ] -> Function_type (any_of_sexp a, any_of_sexp b)
+     | "Array_type", [ index; element ] ->
+       Array_type (any_of_sexp index, any_of_sexp element)
      | "Type_of", [ f ] -> Type_of (any_of_sexp f)
      | "Type_var", [ v ] -> Type_var ([%of_sexp: Tvar.t] v)
      | "Type_app", [ f; args ] ->
@@ -381,20 +420,23 @@ let rank : type a. a t -> int = function
   | And _ -> 5
   | Or _ -> 6
   | Forall _ -> 20
-  | Exists _ -> 21
+  | Exists _ -> 24
   | App _ -> 7
-  | Bool -> 8
-  | Int -> 9
-  | Float -> 10
-  | Type -> 11
-  | Function_type _ -> 12
-  | Type_of _ -> 13
-  | Type_var _ -> 14
-  | Type_app _ -> 15
-  | La_const _ -> 16
-  | La_scale_const _ -> 17
-  | La_add _ -> 18
-  | La_compare _ -> 19
+  | Select _ -> 8
+  | Store _ -> 9
+  | Bool -> 10
+  | Int -> 11
+  | Float -> 12
+  | Type -> 13
+  | Function_type _ -> 14
+  | Array_type _ -> 15
+  | Type_of _ -> 16
+  | Type_var _ -> 17
+  | Type_app _ -> 18
+  | La_const _ -> 19
+  | La_scale_const _ -> 20
+  | La_add _ -> 21
+  | La_compare _ -> 22
 ;;
 
 let lex first second = if first <> 0 then first else second ()
@@ -432,12 +474,19 @@ let rec compare_poly : type a b. a t -> b t -> int =
     lex
       ([%compare: Tvar.t] f1 f2)
       (fun () -> compare_list_poly compare_poly args1 args2)
+  | Select (a1, i1), Select (a2, i2) ->
+    lex (compare_poly a1 a2) (fun () -> compare_poly i1 i2)
+  | Store (a1, i1, v1), Store (a2, i2, v2) ->
+    lex (compare_poly a1 a2) (fun () ->
+      lex (compare_poly i1 i2) (fun () -> compare_poly v1 v2))
   | Bool, Bool -> 0
   | Int, Int -> 0
   | Float, Float -> 0
   | Type, Type -> 0
   | Function_type (a1, b1), Function_type (a2, b2) ->
     lex (compare_poly a1 a2) (fun () -> compare_poly b1 b2)
+  | Array_type (i1, e1), Array_type (i2, e2) ->
+    lex (compare_poly i1 i2) (fun () -> compare_poly e1 e2)
   | Type_of f1, Type_of f2 -> compare_poly f1 f2
   | Type_var v1, Type_var v2 -> [%compare: Tvar.t] v1 v2
   | Type_app (f1, args1), Type_app (f2, args2) ->
@@ -464,11 +513,14 @@ let rec compare_poly : type a b. a t -> b t -> int =
   | Forall _, _
   | Exists _, _
   | App _, _
+  | Select _, _
+  | Store _, _
   | Bool, _
   | Int, _
   | Float, _
   | Type, _
   | Function_type _, _
+  | Array_type _, _
   | Type_of _, _
   | Type_var _, _
   | Type_app _, _
@@ -515,7 +567,12 @@ let rec hash_fold_poly : type a. Hash.state -> a t -> Hash.state =
     hash_fold_poly ([%hash_fold: Tvar.t list] state bound) body
   | App (f, args) ->
     hash_fold_list_poly hash_fold_poly ([%hash_fold: Tvar.t] state f) args
+  | Select (array, index) -> hash_fold_poly (hash_fold_poly state array) index
+  | Store (array, index, value) ->
+    hash_fold_poly (hash_fold_poly (hash_fold_poly state array) index) value
   | Function_type (a, b) -> hash_fold_poly (hash_fold_poly state a) b
+  | Array_type (index, element) ->
+    hash_fold_poly (hash_fold_poly state index) element
   | Type_of f -> hash_fold_poly state f
   | Type_var v -> [%hash_fold: Tvar.t] state v
   | Type_app (f, args) ->

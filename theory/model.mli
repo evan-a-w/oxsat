@@ -17,6 +17,9 @@ type t =
     the model's atom values, and that each assigned atom's truth value agrees
     with its witness: linear atoms against the numeric values, type equalities
     against the assigned types, and EUF equalities against [euf_classes] (whose
-    equivalence relation is also checked to be a genuine congruence). Returns an
-    error naming the first inconsistency. *)
+    equivalence relation is also checked to be a genuine congruence). Array
+    select/store axioms and extensionality are checked over the registered array
+    terms in [euf_classes]; this is the same finite ground universe the solver's
+    lazy array instantiation uses, not a full evaluator for arbitrary
+    unregistered array reads. Returns an error naming the first inconsistency. *)
 val check : t -> asserted_formulas:Formula.any list -> unit Or_error.t

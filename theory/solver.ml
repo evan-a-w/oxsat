@@ -41,6 +41,7 @@ module Combined_theory = struct
     ; bb : Branch_and_bound.t
     ; encoding : Encoding.t
     ; bare_var_eq : Bare_var_eq.t
+    ; arrays : Arrays.t
     ; shared_tvars : Tvar.Hash_set.t
     ; produce_proofs : bool
     ; certificate_by_atoms : Lemma_certificate.t Atoms_key.Table.t
@@ -201,47 +202,60 @@ module Combined_theory = struct
       lemma_to_clause literals ~sat_var_for_atom:(fun atom ->
         Encoding.sat_var_for_atom t.encoding (atom :> Atom.t))
     | `Consistent ->
-      (match Tvar_types.maybe_get_lemma t.tt [@nontail] with
+      (match Arrays.maybe_get_lemma t.arrays ~egraph:t.egraph [@nontail] with
        | `Lemma literals ->
-         record_certificate
-           t
-           ~atoms:(List.map literals ~f:(fun (atom, _) -> (atom :> Atom.t)))
-           ~certificate:(type_theory_certificate literals);
-         lemma_to_clause
-           literals
-           ~sat_var_for_atom:(fun (`Type_eq (a, b) : Tvar_types.Atom.t) ->
-             Encoding.sat_var_for_atom t.encoding (`Type_eq (a, b)))
+         let atoms = List.map literals ~f:(fun (atom, _) -> (atom :> Atom.t)) in
+         if t.produce_proofs
+         then (
+           match Arrays.last_certificate t.arrays with
+           | Some array ->
+             record_certificate t ~atoms ~certificate:(Array array)
+           | None -> raise_s [%message "array lemma without a certificate"]);
+         lemma_to_clause literals ~sat_var_for_atom:(fun atom ->
+           Encoding.sat_var_for_atom t.encoding (atom :> Atom.t))
        | `Consistent ->
-         (match Branch_and_bound.maybe_get_lemma t.bb [@nontail] with
+         (match Tvar_types.maybe_get_lemma t.tt [@nontail] with
           | `Lemma literals ->
             record_certificate
               t
               ~atoms:(List.map literals ~f:(fun (atom, _) -> (atom :> Atom.t)))
-              ~certificate:(bb_certificate t);
+              ~certificate:(type_theory_certificate literals);
             lemma_to_clause
               literals
-              ~sat_var_for_atom:(fun (atom : Branch_and_bound.Atom.t) ->
-                Encoding.sat_var_for_atom t.encoding (atom :> Atom.t))
+              ~sat_var_for_atom:(fun (`Type_eq (a, b) : Tvar_types.Atom.t) ->
+                Encoding.sat_var_for_atom t.encoding (`Type_eq (a, b)))
           | `Consistent ->
-            register_shared_candidates t;
-            (match
-               Bare_var_eq.maybe_get_lemma
-                 t.bare_var_eq
-                 ~eq_value:(fun a b ->
-                   Formula_egraph_uf.atom_value
-                     t.egraph
-                     ~atom:(`Eq (Formula.Var a, Formula.Var b)))
-                 ~theory_of:(Encoding.theory_for_tvar t.encoding)
-                 ~get_type:(Tvar_types.get_type t.tt)
-             with
-             | `Consistent -> `Consistent
+            (match Branch_and_bound.maybe_get_lemma t.bb [@nontail] with
              | `Lemma literals ->
                record_certificate
                  t
-                 ~atoms:(List.map literals ~f:fst)
-                 ~certificate:(bare_var_eq_certificate literals);
-               lemma_to_clause literals ~sat_var_for_atom:(fun atom ->
-                 Encoding.sat_var_for_atom t.encoding atom))))
+                 ~atoms:
+                   (List.map literals ~f:(fun (atom, _) -> (atom :> Atom.t)))
+                 ~certificate:(bb_certificate t);
+               lemma_to_clause
+                 literals
+                 ~sat_var_for_atom:(fun (atom : Branch_and_bound.Atom.t) ->
+                   Encoding.sat_var_for_atom t.encoding (atom :> Atom.t))
+             | `Consistent ->
+               register_shared_candidates t;
+               (match
+                  Bare_var_eq.maybe_get_lemma
+                    t.bare_var_eq
+                    ~eq_value:(fun a b ->
+                      Formula_egraph_uf.atom_value
+                        t.egraph
+                        ~atom:(`Eq (Formula.Var a, Formula.Var b)))
+                    ~theory_of:(Encoding.theory_for_tvar t.encoding)
+                    ~get_type:(Tvar_types.get_type t.tt)
+                with
+                | `Consistent -> `Consistent
+                | `Lemma literals ->
+                  record_certificate
+                    t
+                    ~atoms:(List.map literals ~f:fst)
+                    ~certificate:(bare_var_eq_certificate literals);
+                  lemma_to_clause literals ~sat_var_for_atom:(fun atom ->
+                    Encoding.sat_var_for_atom t.encoding atom)))))
   ;;
 
   let certificate_for_atoms t atoms =
@@ -251,7 +265,8 @@ module Combined_theory = struct
   let undo t ~to_decision_level_excl =
     Formula_egraph_uf.undo t.egraph ~to_decision_level_excl;
     Tvar_types.undo t.tt ~to_decision_level_excl;
-    Branch_and_bound.undo t.bb ~to_decision_level_excl
+    Branch_and_bound.undo t.bb ~to_decision_level_excl;
+    Arrays.undo t.arrays ~to_decision_level_excl
   ;;
 
   let on_new_var t ~var =
@@ -259,11 +274,13 @@ module Combined_theory = struct
     | None | Some (`Le _) -> ()
     | Some (`Eq (a, b)) ->
       Formula_egraph_uf.add_atom t.egraph ~atom:(`Eq (a, b));
+      Arrays.add_atom t.arrays ~atom:(`Eq (a, b));
       (match a, b with
        | Formula.Var a, Formula.Var b -> Bare_var_eq.register t.bare_var_eq a b
        | _ -> ())
     | Some (`Type_eq (a, b)) ->
-      Formula_egraph_uf.add_atom t.egraph ~atom:(`Type_eq (a, b))
+      Formula_egraph_uf.add_atom t.egraph ~atom:(`Type_eq (a, b));
+      Arrays.add_atom t.arrays ~atom:(`Type_eq (a, b))
   ;;
 end
 
@@ -293,12 +310,14 @@ let create ?(config = Config.default) () =
   let bb = Branch_and_bound.create () in
   let encoding = Encoding.create ~produce_proofs:config.produce_proofs () in
   let bare_var_eq = Bare_var_eq.create () in
+  let arrays = Arrays.create () in
   let combined =
     { Combined_theory.egraph
     ; tt
     ; bb
     ; encoding
     ; bare_var_eq
+    ; arrays
     ; shared_tvars = Tvar.Hash_set.create ()
     ; produce_proofs = config.produce_proofs
     ; certificate_by_atoms = Atoms_key.Table.create ()

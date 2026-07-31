@@ -107,7 +107,7 @@ let rec is_ground (type_expr : Type_expr.t) =
   | Var _ | Type_of _ -> false
   | Base _ | Type -> true
   | App (_, args) -> List.for_all args ~f:is_ground
-  | Function_type (a, b) -> is_ground a && is_ground b
+  | Function_type (a, b) | Array_type (a, b) -> is_ground a && is_ground b
 ;;
 
 (* Resolves a type expression to its assigned type when it is a variable with a
@@ -180,6 +180,101 @@ let check_atom_consistency t ~atom ~value =
    class-equal arguments must be in the same class. Checked over all registered
    terms so the equivalence classes constitute a genuine congruence, not just an
    arbitrary partition consistent with the asserted (dis)equalities. *)
+let reps_equal t a b =
+  match repr t a, repr t b with
+  | Some ra, Some rb -> Formula.compare_any ra rb = 0
+  | _ -> false
+;;
+
+let check_arrays t =
+  let terms = Map.keys t.euf_classes in
+  let known_arrays = Formula.Any.Hash_set.create () in
+  let rec note = function
+    | Formula.Select (array, index) ->
+      Hash_set.add known_arrays array;
+      note array;
+      note index
+    | Store (array, index, value) as store ->
+      Hash_set.add known_arrays store;
+      Hash_set.add known_arrays array;
+      note array;
+      note index;
+      note value
+    | term -> List.iter (Formula.args term) ~f:note
+  in
+  List.iter terms ~f:note;
+  let is_array = function
+    | Formula.Store _ -> true
+    | term -> Hash_set.mem known_arrays term
+  in
+  let%bind.Or_error () =
+    List.fold_result terms ~init:() ~f:(fun () -> function
+      | Formula.Select
+          ((Formula.Store (array, index, value) as store), read_index) as select
+        ->
+        let same_index_select = Formula.Select (store, index) in
+        let%bind.Or_error () =
+          if Formula.equal_any index read_index || reps_equal t index read_index
+          then
+            if reps_equal t select value
+            then Ok ()
+            else
+              error
+                [%message
+                  "array read-over-write/same-index axiom is violated"
+                    (array : Formula.any)
+                    (index : Formula.any)
+                    (value : Formula.any)]
+          else Ok ()
+        in
+        if Map.mem t.euf_classes same_index_select
+           && not (reps_equal t same_index_select value)
+        then
+          error
+            [%message
+              "array read-over-write/same-index axiom is violated"
+                (array : Formula.any)
+                (index : Formula.any)
+                (value : Formula.any)]
+        else if Formula.equal_any index read_index
+                || reps_equal t index read_index
+        then Ok ()
+        else if reps_equal t select (Formula.Select (array, read_index))
+        then Ok ()
+        else
+          error
+            [%message
+              "array read-over-write/different-index axiom is violated"
+                (array : Formula.any)
+                (index : Formula.any)
+                (read_index : Formula.any)]
+      | _ -> Ok ())
+  in
+  Map.fold t.atom_values ~init:(Ok ()) ~f:(fun ~key:atom ~data:value acc ->
+    let%bind.Or_error () = acc in
+    match atom, value with
+    | `Eq (left, right), false when is_array left && is_array right ->
+      let has_witness =
+        List.exists terms ~f:(function
+          | Formula.Select (select_left, witness)
+            when Formula.equal_any select_left left ->
+            let left_select = Formula.Select (left, witness) in
+            let right_select = Formula.Select (right, witness) in
+            Map.mem t.euf_classes right_select
+            && not (reps_equal t left_select right_select)
+          | _ -> false)
+      in
+      if has_witness
+      then Ok ()
+      else
+        error
+          [%message
+            "array extensionality axiom is not witnessed in the model"
+              (left : Formula.any)
+              (right : Formula.any)]
+    | _ -> Ok ())
+;;
+
 let check_congruence t =
   let terms = Map.keys t.euf_classes in
   let args_class_equal xs ys =
@@ -233,5 +328,6 @@ let check t ~asserted_formulas =
       let%bind.Or_error () = acc in
       check_atom_consistency t ~atom ~value)
   in
-  check_congruence t
+  let%bind.Or_error () = check_congruence t in
+  check_arrays t
 ;;

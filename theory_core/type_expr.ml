@@ -18,6 +18,7 @@ type t =
   | Type_of of Tvar.t
   | App of Tvar.t * t list
   | Function_type of t * t
+  | Array_type of t * t
   | Type
 [@@deriving sexp, compare, hash]
 
@@ -26,7 +27,7 @@ include functor Comparable.Make
 
 let split_function = function
   | App (function_, args) -> Some (function_, args)
-  | Base _ | Var _ | Type_of _ | Function_type _ | Type -> None
+  | Base _ | Var _ | Type_of _ | Function_type _ | Array_type _ | Type -> None
 ;;
 
 let rec to_formula : t -> Formula.any = function
@@ -38,6 +39,8 @@ let rec to_formula : t -> Formula.any = function
   | App (f, args) -> Type_app (f, List.map args ~f:to_formula)
   | Type -> Formula.Type
   | Function_type (a, b) -> Function_type (to_formula a, to_formula b)
+  | Array_type (index, element) ->
+    Array_type (to_formula index, to_formula element)
 ;;
 
 let garbage_for_vec = Var (Tvar.of_string "")

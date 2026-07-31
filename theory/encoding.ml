@@ -81,11 +81,24 @@ let rec record_uf_term_tvars t (formula : Formula.any) =
   | _ -> ()
 ;;
 
+let rec record_array_term_tvars t (formula : Formula.any) =
+  match formula with
+  | Var v -> record_tvar t v Formula.Theory.(Packed.T Array)
+  | Select (array, index) ->
+    record_array_term_tvars t array;
+    record_array_term_tvars t index
+  | Store (array, index, value) ->
+    record_array_term_tvars t array;
+    record_array_term_tvars t index;
+    record_array_term_tvars t value
+  | _ -> ()
+;;
+
 let rec record_type_expr_tvars t (type_expr : Type_expr.t) =
   match type_expr with
   | Var v | Type_of v -> record_tvar t v Formula.Theory.(Packed.T Type)
   | Base _ | Type -> ()
-  | Function_type (a, b) ->
+  | Function_type (a, b) | Array_type (a, b) ->
     record_type_expr_tvars t a;
     record_type_expr_tvars t b
   | App (f, args) ->
@@ -98,6 +111,10 @@ let rec record_type_expr_tvars t (type_expr : Type_expr.t) =
 let record_atom_tvars t (atom : Atom.t) =
   match atom with
   | `Eq (Var _, Var _) -> ()
+  | `Eq (((Select _ | Store _) as a), b) | `Eq (a, ((Select _ | Store _) as b))
+    ->
+    record_array_term_tvars t a;
+    record_array_term_tvars t b
   | `Eq (a, b) ->
     record_uf_term_tvars t a;
     record_uf_term_tvars t b
@@ -197,6 +214,7 @@ module Shape = struct
     | Uf
     | Type
     | La
+    | Array
     | Var of Tvar.t
     (* Unreachable in practice: [encode] only ever takes a
        [[> `Boolean] Formula.t], which structurally excludes [Forall]/[Exists].
@@ -214,8 +232,10 @@ let shape_of (type a) (formula : a Formula.t) : Shape.t =
   | True | False | Not _ | And _ | Or _ -> Bool
   | Forall (_, _, _) | Exists (_, _) -> Quantified
   | App (_, _) -> Uf
+  | Select (_, _) | Store (_, _, _) -> Array
   | Bool | Int | Float | Type
   | Function_type (_, _)
+  | Array_type (_, _)
   | Type_of _ | Type_var _
   | Type_app (_, _) -> Type
   | La_const _ | La_scale_const (_, _) | La_add (_, _) | La_compare (_, _, _) ->
@@ -245,6 +265,10 @@ let rec type_expr_of : type a. a Formula.t -> Type_expr.t Or_error.t =
     let%bind.Or_error a = type_expr_of a in
     let%bind.Or_error b = type_expr_of b in
     Ok (Type_expr.Function_type (a, b))
+  | Array_type (index, element) ->
+    let%bind.Or_error index = type_expr_of index in
+    let%bind.Or_error element = type_expr_of element in
+    Ok (Type_expr.Array_type (index, element))
   | Type_of a ->
     (match a with
      | Var v -> Ok (Type_expr.Type_of v)
@@ -255,6 +279,19 @@ let rec type_expr_of : type a. a Formula.t -> Type_expr.t Or_error.t =
     let%bind.Or_error args = args |> List.map ~f:type_expr_of |> Or_error.all in
     Ok (Type_expr.App (f, args))
   | _ -> Or_error.error_s [%message "formula is not a type expression"]
+;;
+
+let rec array_term_of : type a. a Formula.t -> Formula.any Or_error.t =
+  fun formula ->
+  match formula with
+  | Var v -> Ok (Formula.Var v)
+  | Select (array, index) ->
+    let%bind.Or_error array = array_term_of array in
+    Ok (Formula.Select (array, Formula.widen index))
+  | Store (array, index, value) ->
+    let%bind.Or_error array = array_term_of array in
+    Ok (Formula.Store (array, Formula.widen index, Formula.widen value))
+  | _ -> Or_error.error_s [%message "formula is not an array term"]
 ;;
 
 let rec linear_expr_of : type a. a Formula.t -> Linear_expr.t Or_error.t =
@@ -338,6 +375,10 @@ and eq_formula_of
     let%bind.Or_error a = linear_expr_of a in
     let%bind.Or_error b = linear_expr_of b in
     Ok (F.And (List.map (le_atoms_of_eq a b) ~f:(fun atom -> F.Atom atom)))
+  | Array, _ | _, Array ->
+    let%bind.Or_error a = array_term_of a in
+    let%bind.Or_error b = array_term_of b in
+    Ok (F.Atom (`Eq (a, b)))
   | Uf, _ | _, Uf ->
     let%bind.Or_error a = uf_term_of a in
     let%bind.Or_error b = uf_term_of b in
@@ -373,6 +414,10 @@ and neq_formula_of
     Ok
       (F.Not
          (F.And (List.map (le_atoms_of_eq a b) ~f:(fun atom -> F.Atom atom))))
+  | Array, _ | _, Array ->
+    let%bind.Or_error a = array_term_of a in
+    let%bind.Or_error b = array_term_of b in
+    Ok (F.Not (F.Atom (`Eq (a, b))))
   | Uf, _ | _, Uf ->
     let%bind.Or_error a = uf_term_of a in
     let%bind.Or_error b = uf_term_of b in
