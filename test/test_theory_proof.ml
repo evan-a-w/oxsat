@@ -15,7 +15,7 @@ let neq a b : Formula.any = Not (eq a b)
 let xv = Tvar.of_string "x"
 let yv = Tvar.of_string "y"
 let int_type : Type_expr.t = Base Int
-let config = { Solver.Config.produce_proofs = true }
+let config = { Solver.Config.default with produce_proofs = true }
 
 let assert_ok solver formula =
   match Or_error.ok_exn (Solver.assert_formula solver formula) with

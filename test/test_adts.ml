@@ -23,7 +23,66 @@ let tail_selector =
     { constructor = cons_constructor; name = Tvar.of_string "tail"; index = 1 }
 ;;
 
+let list_declaration =
+  Datatype.Declaration.
+    { datatype
+    ; constructors =
+        [ { constructor = nil_constructor; selectors = [] }
+        ; { constructor = cons_constructor
+          ; selectors = [ head_selector; tail_selector ]
+          }
+        ]
+    }
+;;
+
+let datatype_env =
+  Or_error.ok_exn (Datatype.Env.of_declarations [ list_declaration ])
+;;
+
+let create_solver ?(produce_proofs = false) () =
+  Solver.create ~config:{ produce_proofs; datatype_env } ()
+;;
+
+let color_datatype = Datatype.Datatype.{ name = Tvar.of_string "color" }
+
+let red_constructor =
+  Datatype.Constructor.
+    { datatype = color_datatype; name = Tvar.of_string "Red"; arity = 0 }
+;;
+
+let green_constructor =
+  Datatype.Constructor.
+    { datatype = color_datatype; name = Tvar.of_string "Green"; arity = 0 }
+;;
+
+let blue_constructor =
+  Datatype.Constructor.
+    { datatype = color_datatype; name = Tvar.of_string "Blue"; arity = 0 }
+;;
+
+let color_declaration =
+  Datatype.Declaration.
+    { datatype = color_datatype
+    ; constructors =
+        List.map
+          [ red_constructor; green_constructor; blue_constructor ]
+          ~f:(fun constructor ->
+            { Datatype.Constructor_declaration.constructor; selectors = [] })
+    }
+;;
+
+let color_env =
+  Or_error.ok_exn (Datatype.Env.of_declarations [ color_declaration ])
+;;
+
+let create_color_solver ?(produce_proofs = false) () =
+  Solver.create ~config:{ produce_proofs; datatype_env = color_env } ()
+;;
+
 let v name : Formula.any = Var (Tvar.of_string name)
+let red : Formula.any = Datatype_constructor (red_constructor, [])
+let green : Formula.any = Datatype_constructor (green_constructor, [])
+let blue : Formula.any = Datatype_constructor (blue_constructor, [])
 let nil : Formula.any = Datatype_constructor (nil_constructor, [])
 
 let cons head tail : Formula.any =
@@ -67,7 +126,7 @@ let clause_exn literals =
 ;;
 
 let%expect_test "constructor injectivity" =
-  let solver = Solver.create () in
+  let solver = create_solver () in
   let a = v "a" in
   let b = v "b" in
   let c = v "c" in
@@ -79,14 +138,14 @@ let%expect_test "constructor injectivity" =
 ;;
 
 let%expect_test "constructor disjointness" =
-  let solver = Solver.create () in
+  let solver = create_solver () in
   assert_ok solver (eq nil (cons (v "h") (v "t")));
   print_result (Solver.solve solver);
   [%expect {| Unsat |}]
 ;;
 
 let%expect_test "testers on matching and non-matching constructors" =
-  let solver = Solver.create () in
+  let solver = create_solver () in
   assert_ok solver (is_nil nil);
   assert_ok solver (Not (is_cons nil));
   assert_ok solver (is_cons (cons (v "h") (v "t")));
@@ -96,14 +155,14 @@ let%expect_test "testers on matching and non-matching constructors" =
 ;;
 
 let%expect_test "tester contradiction" =
-  let solver = Solver.create () in
+  let solver = create_solver () in
   assert_ok solver (is_nil (cons (v "h") (v "t")));
   print_result (Solver.solve solver);
   [%expect {| Unsat |}]
 ;;
 
 let%expect_test "selector projection on matching constructor" =
-  let solver = Solver.create () in
+  let solver = create_solver () in
   let h = v "h" in
   let t = v "t" in
   assert_ok solver (neq (head (cons h t)) h);
@@ -112,16 +171,130 @@ let%expect_test "selector projection on matching constructor" =
 ;;
 
 let%expect_test "selector on wrong constructor is underspecified" =
-  let solver = Solver.create () in
+  let solver = create_solver () in
   assert_ok solver (neq (head nil) (v "anything"));
   print_result (Solver.solve solver);
   [%expect {| Sat |}]
 ;;
 
+let%expect_test "undeclared ADT terms are rejected" =
+  let solver = Solver.create () in
+  print_s [%sexp (Solver.assert_formula solver (eq red red) : _ Or_error.t)];
+  [%expect
+    {|
+    (Error
+     ("undeclared ADT constructor"
+      (constructor ((datatype ((name color))) (name Red) (arity 0)))))
+    |}]
+;;
+
+let%expect_test "enum exhaustiveness" =
+  let solver = create_color_solver () in
+  let x = v "x" in
+  assert_ok solver (neq x red);
+  print_result (Solver.solve solver);
+  assert_ok solver (neq x green);
+  assert_ok solver (neq x blue);
+  print_result (Solver.solve solver);
+  [%expect {|
+    Sat
+    Unsat
+    |}]
+;;
+
+let%expect_test "scoped enum exhaustiveness can be popped" =
+  let solver = create_color_solver () in
+  let x = v "x" in
+  assert_ok solver (neq x red);
+  assert_ok solver (neq x green);
+  Solver.push solver;
+  assert_ok solver (neq x blue);
+  print_result (Solver.solve solver);
+  Solver.pop solver;
+  print_result (Solver.solve solver);
+  [%expect {|
+    Unsat
+    Sat
+    |}]
+;;
+
+let%expect_test "non-enum constructor completeness" =
+  let solver = create_solver () in
+  let x = v "x" in
+  assert_ok solver (Not (is_nil x));
+  assert_ok solver (Not (is_cons x));
+  print_result (Solver.solve solver);
+  [%expect {| Unsat |}]
+;;
+
+let%expect_test "scoped datatype declarations can be popped" =
+  let solver = Solver.create () in
+  Solver.push solver;
+  print_s
+    [%sexp (Solver.declare_datatype solver color_declaration : unit Or_error.t)];
+  print_s [%sexp (Solver.assert_formula solver (eq red red) : _ Or_error.t)];
+  assert_ok solver (neq (v "x") red);
+  (match Solver.solve solver with
+   | Sat _ -> print_endline "scoped solve sat"
+   | Unsat { core; _ } ->
+     print_s [%sexp (core : Solver_result.Core_step.t list)]);
+  Solver.pop solver;
+  print_s [%sexp (Solver.assert_formula solver (eq red red) : _ Or_error.t)];
+  [%expect
+    {|
+    (Ok ())
+    (Ok _)
+    scoped solve sat
+    (Error
+     ("undeclared ADT constructor"
+      (constructor ((datatype ((name color))) (name Red) (arity 0)))))
+    |}]
+;;
+
+let%expect_test "ADT declarations are validated" =
+  let bad_selector =
+    Datatype.Selector.
+      { constructor = nil_constructor; name = Tvar.of_string "bad"; index = 0 }
+  in
+  let duplicate_constructor_name =
+    Datatype.Constructor.
+      { datatype; name = nil_constructor.name; arity = cons_constructor.arity }
+  in
+  let cases =
+    [ ("empty", Datatype.Declaration.{ datatype; constructors = [] })
+    ; ( "wrong selector index"
+      , { datatype
+        ; constructors =
+            [ { constructor = nil_constructor; selectors = [ bad_selector ] } ]
+        } )
+    ; ( "duplicate constructor name"
+      , { datatype
+        ; constructors =
+            [ { constructor = nil_constructor; selectors = [] }
+            ; { constructor = duplicate_constructor_name; selectors = [] }
+            ]
+        } )
+    ]
+  in
+  List.iter cases ~f:(fun (name, declaration) ->
+    print_s
+      [%message
+        (name : string)
+          ~is_error:
+            (Or_error.is_error (Datatype.Env.of_declarations [ declaration ])
+             : bool)]);
+  [%expect
+    {|
+    ((name empty) (is_error true))
+    ((name "wrong selector index") (is_error true))
+    ((name "duplicate constructor name") (is_error true))
+    |}]
+;;
+
 let%expect_test "ADT selector alias projects through variable equal to \
                  constructor"
   =
-  let solver = Solver.create () in
+  let solver = create_solver () in
   let x = v "x" in
   let h = v "h" in
   assert_ok solver (eq x (cons h nil));
@@ -131,13 +304,13 @@ let%expect_test "ADT selector alias projects through variable equal to \
 ;;
 
 let%expect_test "ADT tester alias follows variable equal to constructor" =
-  let solver = Solver.create () in
+  let solver = create_solver () in
   let x = v "x" in
   let h = v "h" in
   assert_ok solver (eq x (cons h nil));
   assert_ok solver (is_nil x);
   print_result (Solver.solve solver);
-  let solver = Solver.create () in
+  let solver = create_solver () in
   let x = v "x" in
   let h = v "h" in
   assert_ok solver (eq x (cons h nil));
@@ -150,7 +323,7 @@ let%expect_test "ADT tester alias follows variable equal to constructor" =
 ;;
 
 let%expect_test "direct acyclicity" =
-  let solver = Solver.create () in
+  let solver = create_solver () in
   let x = v "x" in
   assert_ok solver (eq x (cons x nil));
   print_result (Solver.solve solver);
@@ -158,7 +331,7 @@ let%expect_test "direct acyclicity" =
 ;;
 
 let%expect_test "multi-step acyclicity" =
-  let solver = Solver.create () in
+  let solver = create_solver () in
   let x = v "x" in
   let y = v "y" in
   assert_ok solver (eq x (cons y nil));
@@ -168,7 +341,7 @@ let%expect_test "multi-step acyclicity" =
 ;;
 
 let%expect_test "satisfiable ADT problem has a checkable model" =
-  let solver = Solver.create () in
+  let solver = create_solver () in
   let h = v "h" in
   let t = v "t" in
   assert_ok solver (is_cons (cons h t));
@@ -185,7 +358,7 @@ let%expect_test "satisfiable ADT problem has a checkable model" =
 ;;
 
 let%expect_test "scoped ADT selector premise can be popped" =
-  let solver = Solver.create () in
+  let solver = create_solver () in
   let x = v "x" in
   let h = v "h" in
   assert_ok solver (neq (head x) h);
@@ -201,7 +374,7 @@ let%expect_test "scoped ADT selector premise can be popped" =
 ;;
 
 let%expect_test "scoped ADT tester premise can be popped" =
-  let solver = Solver.create () in
+  let solver = create_solver () in
   let x = v "x" in
   let h = v "h" in
   assert_ok solver (is_nil x);
@@ -218,16 +391,23 @@ let%expect_test "scoped ADT tester premise can be popped" =
 
 let%expect_test "ADT proof certificates" =
   let cases =
-    [ ( "injectivity"
+    [ ( create_solver
+      , "injectivity"
       , [ eq (cons (v "a") nil) (cons (v "c") nil); neq (v "a") (v "c") ] )
-    ; "disjointness", [ eq nil (cons (v "h") (v "t")) ]
-    ; "selector", [ neq (head (cons (v "h") nil)) (v "h") ]
-    ; "tester", [ is_nil (cons (v "h") nil) ]
-    ; "acyclicity", [ eq (v "x") (cons (v "x") nil) ]
+    ; create_solver, "disjointness", [ eq nil (cons (v "h") (v "t")) ]
+    ; create_solver, "selector", [ neq (head (cons (v "h") nil)) (v "h") ]
+    ; create_solver, "tester", [ is_nil (cons (v "h") nil) ]
+    ; create_solver, "acyclicity", [ eq (v "x") (cons (v "x") nil) ]
+    ; ( create_solver
+      , "constructor completeness"
+      , [ Not (is_nil (v "x")); Not (is_cons (v "x")) ] )
+    ; ( create_color_solver
+      , "enum completeness"
+      , [ neq (v "x") red; neq (v "x") green; neq (v "x") blue ] )
     ]
   in
-  List.iter cases ~f:(fun (name, formulas) ->
-    let solver = Solver.create ~config:{ produce_proofs = true } () in
+  List.iter cases ~f:(fun (create_solver, name, formulas) ->
+    let solver = create_solver ~produce_proofs:true () in
     List.iter formulas ~f:(assert_ok solver);
     print_string name;
     print_string ": ";
@@ -239,11 +419,13 @@ let%expect_test "ADT proof certificates" =
     selector: (Unsat (proof_check (Ok ())))
     tester: (Unsat (proof_check (Ok ())))
     acyclicity: (Unsat (proof_check (Ok ())))
+    constructor completeness: (Unsat (proof_check (Ok ())))
+    enum completeness: (Unsat (proof_check (Ok ())))
     |}]
 ;;
 
 let%expect_test "ADT payloads interact with linear arithmetic" =
-  let solver = Solver.create () in
+  let solver = create_solver () in
   let a = v "a" in
   let c = v "c" in
   assert_ok solver (eq (cons a nil) (cons c nil));
@@ -263,7 +445,7 @@ let%expect_test "ADT proofs print human-readable certificate text" =
     ]
   in
   List.iter cases ~f:(fun (name, formulas) ->
-    let solver = Solver.create ~config:{ produce_proofs = true } () in
+    let solver = create_solver ~produce_proofs:true () in
     List.iter formulas ~f:(assert_ok solver);
     match Solver.solve solver with
     | Sat _ -> print_endline (name ^ ": sat")
@@ -319,10 +501,10 @@ let%expect_test "ADT proofs print human-readable certificate text" =
           steps:
             r0: Nil() = Cons(h, t)   [s3]
             r1: Nil() ≠ Cons(h, t)   [ADT: (Disjointness
-     (left_constructor ((datatype ((name list))) (name Cons) (arity 2)))
-     (left_args ((Var h) (Var t)))
-     (right_constructor ((datatype ((name list))) (name Nil) (arity 0)))
-     (right_args ()))]
+     (left_constructor ((datatype ((name list))) (name Nil) (arity 0)))
+     (left_args ())
+     (right_constructor ((datatype ((name list))) (name Cons) (arity 2)))
+     (right_args ((Var h) (Var t))))]
             r2: ⊥   [RUP over [r0, r1]]
     Conclusion: s4
 
@@ -417,8 +599,8 @@ let%expect_test "bogus ADT certificates are rejected" =
   let t = v "t" in
   let a = v "a" in
   let c = v "c" in
-  let check clause certificate =
-    Proof.check_theory_certificate ~clause (Adt certificate)
+  let check ?(datatype_env = Datatype.Env.empty) clause certificate =
+    Proof.check_theory_certificate ~datatype_env ~clause (Adt certificate)
   in
   let disjointness_clause =
     clause_exn
@@ -450,6 +632,12 @@ let%expect_test "bogus ADT certificates are rejected" =
             , Formula.Datatype_constructor (cons_constructor, [ c; nil ]) ))
           ~positive:false
       ; theory_literal (`Eq (a, c)) ~positive:true
+      ]
+  in
+  let enum_completeness_clause =
+    clause_exn
+      [ theory_literal (`Eq (a, red)) ~positive:true
+      ; theory_literal (`Eq (a, green)) ~positive:true
       ]
   in
   print_s
@@ -507,6 +695,29 @@ let%expect_test "bogus ADT certificates are rejected" =
                    ; right_args = [ c; nil ]
                    ; field_index = 3
                    }))
+           : bool)
+        ~completeness_missing_constructor:
+          (Or_error.is_error
+             (check
+                ~datatype_env:color_env
+                enum_completeness_clause
+                (Completeness
+                   { declaration = color_declaration
+                   ; subject = a
+                   ; guard = None
+                   ; form = Enum_equalities
+                   }))
+           : bool)
+        ~completeness_undeclared:
+          (Or_error.is_error
+             (check
+                enum_completeness_clause
+                (Completeness
+                   { declaration = color_declaration
+                   ; subject = a
+                   ; guard = None
+                   ; form = Enum_equalities
+                   }))
            : bool)];
   print_s
     [%sexp
@@ -523,7 +734,8 @@ let%expect_test "bogus ADT certificates are rejected" =
     {|
     ("bogus ADT certificates" (disjointness_same_constructor true)
      (selector_wrong_field true) (acyclicity_not_a_constructor true)
-     (acyclicity_field_not_in_args true) (injectivity_field_out_of_bounds true))
+     (acyclicity_field_not_in_args true) (injectivity_field_out_of_bounds true)
+     (completeness_missing_constructor true) (completeness_undeclared true))
     (Error "ADT certificate does not match its clause")
     |}]
 ;;

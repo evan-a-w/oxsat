@@ -275,7 +275,7 @@ let check_arrays t =
     | _ -> Ok ())
 ;;
 
-let check_adts t =
+let check_adts t ~datatype_env ~adt_observations =
   let terms = Map.keys t.euf_classes in
   let constructors =
     List.filter_map terms ~f:(function
@@ -399,12 +399,64 @@ let check_adts t =
       let seen = Set.add seen node in
       Hashtbl.find_multi adjacency node |> List.exists ~f:(reaches ~start seen))
   in
-  match
-    List.find edges ~f:(fun (source, target) ->
-      reaches ~start:source Formula.Any.Set.empty target)
-  with
-  | None -> Ok ()
-  | Some _ -> error [%message "ADT acyclicity is violated"]
+  let%bind.Or_error () =
+    match
+      List.find edges ~f:(fun (source, target) ->
+        reaches ~start:source Formula.Any.Set.empty target)
+    with
+    | None -> Ok ()
+    | Some _ -> error [%message "ADT acyclicity is violated"]
+  in
+  Map.fold
+    adt_observations
+    ~init:(Ok ())
+    ~f:(fun ~key:subject ~data:datatypes acc ->
+      let%bind.Or_error () = acc in
+      Set.fold datatypes ~init:(Ok ()) ~f:(fun acc datatype ->
+        let%bind.Or_error () = acc in
+        match Datatype.Env.find datatype_env datatype with
+        | None -> Ok ()
+        | Some declaration ->
+          let constructor_declarations = declaration.constructors in
+          if List.for_all constructor_declarations ~f:(fun cd ->
+               cd.constructor.arity = 0)
+          then (
+            let is_equal_to_some_constructor =
+              List.exists constructor_declarations ~f:(fun cd ->
+                reps_equal
+                  t
+                  subject
+                  (Formula.Datatype_constructor (cd.constructor, [])))
+            in
+            if is_equal_to_some_constructor
+            then Ok ()
+            else
+              error
+                [%message
+                  "ADT enum exhaustiveness is violated"
+                    (subject : Formula.any)
+                    (datatype : Datatype.Datatype.t)])
+          else (
+            let all_testers_false =
+              List.for_all constructor_declarations ~f:(fun cd ->
+                match
+                  atom_value
+                    t
+                    (`Eq
+                      ( Formula.Datatype_tester (cd.constructor, subject)
+                      , Formula.True ))
+                with
+                | False -> true
+                | True | Unknown -> false)
+            in
+            if all_testers_false
+            then
+              error
+                [%message
+                  "ADT constructor completeness is violated"
+                    (subject : Formula.any)
+                    (datatype : Datatype.Datatype.t)]
+            else Ok ())))
 ;;
 
 let check_congruence t =
@@ -437,7 +489,12 @@ let check_congruence t =
       else Ok ()))
 ;;
 
-let check t ~asserted_formulas =
+let check
+  ?(datatype_env = Datatype.Env.empty)
+  ?(adt_observations = Formula.Any.Map.empty)
+  t
+  ~asserted_formulas
+  =
   let%bind.Or_error () =
     List.fold_result asserted_formulas ~init:() ~f:(fun () formula ->
       let%bind.Or_error boolean =
@@ -460,7 +517,7 @@ let check t ~asserted_formulas =
       let%bind.Or_error () = acc in
       check_atom_consistency t ~atom ~value)
   in
+  let%bind.Or_error () = check_adts t ~datatype_env ~adt_observations in
   let%bind.Or_error () = check_congruence t in
-  let%bind.Or_error () = check_arrays t in
-  check_adts t
+  check_arrays t
 ;;

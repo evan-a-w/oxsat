@@ -29,6 +29,7 @@ end
 type t =
   { inputs : Formula.any array
   ; extensions : Proof_extension.t array
+  ; datatype_env : Datatype.Env.t
   ; steps : Step.t array
   ; contradiction : Proof_id.Refutation_step.t
   }
@@ -173,7 +174,10 @@ let check t =
         | Input_clause input -> check_input_clause t step.clause input
         | Extension_definition id -> check_extension_clause t step.clause id
         | Theory_lemma certificate ->
-          Proof_theory_certificate_check.check ~clause:step.clause certificate
+          Proof_theory_certificate_check.check
+            ~datatype_env:t.datatype_env
+            ~clause:step.clause
+            certificate
         | Rup { hints } -> check_rup t.steps ~step_index:index step.clause hints)
     in
     let contradiction = Proof_id.Refutation_step.to_int t.contradiction in

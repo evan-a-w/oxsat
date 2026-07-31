@@ -36,6 +36,7 @@ end
 type t =
   { inputs : Formula.any array
   ; extensions : Proof_extension.t array
+  ; datatype_env : Datatype.Env.t
   ; steps : Step.t array
   ; contradiction : Proof_id.Refutation_step.t
   }

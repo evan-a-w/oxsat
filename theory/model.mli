@@ -21,5 +21,12 @@ type t =
     select/store axioms and extensionality are checked over the registered array
     terms in [euf_classes]; this is the same finite ground universe the solver's
     lazy array instantiation uses, not a full evaluator for arbitrary
-    unregistered array reads. Returns an error naming the first inconsistency. *)
-val check : t -> asserted_formulas:Formula.any list -> unit Or_error.t
+    unregistered array reads. ADT declaration checks are likewise finite-ground
+    over observed terms, not a full ADT model representation. Returns an error
+    naming the first inconsistency. *)
+val check
+  :  ?datatype_env:Datatype.Env.t
+  -> ?adt_observations:Datatype.Datatype.Set.t Formula.Any.Map.t
+  -> t
+  -> asserted_formulas:Formula.any list
+  -> unit Or_error.t

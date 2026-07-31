@@ -5,6 +5,10 @@ This project is built with OxCaml, using the following opam repositories:
 - ox: git+https://github.com/oxcaml/opam-repository.git
 - default: https://opam.ocaml.org
 
+ADT note: algebraic datatypes are checked against explicit datatype declarations.
+Model checking for ADTs is finite-ground over the terms observed by the solver's
+lazy ADT lemmas; it is not a full non-ground ADT model representation.
+
 Create a local switch:
 
 ```sh

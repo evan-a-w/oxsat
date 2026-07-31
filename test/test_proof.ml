@@ -111,6 +111,7 @@ let refutation_of_false_input () =
   ; extensions =
       [| { Proof.Extension.id = extension_id; definition = Proof.Boolean.False }
       |]
+  ; datatype_env = Datatype.Env.empty
   ; steps
   ; contradiction = step_id 2
   }
@@ -238,6 +239,7 @@ let%expect_test "RUP propagates through input and extension clauses" =
          ; extension 1 (Or [ Not (Atom p_atom); Atom q_atom ])
          ; extension 2 (Not (Atom q_atom))
         |]
+    ; datatype_env = Datatype.Env.empty
     ; steps
     ; contradiction = step_id 6
     }
@@ -585,7 +587,11 @@ let%expect_test "a multi-rule proof DAG is checked" =
 ;;
 
 let%expect_test "a solver refutation proof prints as human-readable text" =
-  let solver = Solver.create ~config:{ produce_proofs = true } () in
+  let solver =
+    Solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
+  in
   let a : Formula.any = Var (Tvar.of_string "a") in
   let b : Formula.any = Var (Tvar.of_string "b") in
   let c : Formula.any = Var (Tvar.of_string "c") in

@@ -24,15 +24,8 @@
 
 ## Algebraic datatypes follow-ups
 
-- Add a datatype declaration environment rather than relying only on
-  self-describing constructor metadata in formula nodes.
-- Use declarations for constructor exhaustiveness / finite-domain reasoning, e.g.
-  refuting `x != Red && x != Green && x != Blue` for an exhaustive enum.
-- Add constructor-completeness lemmas lazily from the ADT/egraph layer, not as
-  external quantified axioms.
-- Keep selectors on wrong constructors underspecified.
-- Document ADT model checking as finite-ground unless/until a full model
-  representation is implemented.
+- Implement a full non-ground ADT model representation. Current ADT model
+  checking is intentionally finite-ground over observed solver terms.
 
 ## Nested quantifiers
 

@@ -51,6 +51,7 @@ val unsat_proof
   -> encoding:Encoding.t
   -> certificate_for_atoms:(Atom.t list -> Lemma_certificate.t option)
   -> formula_by_root_lit:(int, Formula.any) Hashtbl.t
+  -> datatype_env:Datatype.Env.t
   -> scope_vars:int list
   -> refutation_clauses:Feel.Solver.Refutation_clause.t list
   -> Proof.t option

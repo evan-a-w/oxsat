@@ -1051,11 +1051,15 @@ let%expect_test "proof production is optional and yields checked proofs" =
   contradiction (Solver.create ());
   [%expect {| (("Option.is_some proof" false) (checks false)) |}];
   contradiction
-    (Solver.create ~config:{ Solver.Config.produce_proofs = true } ());
+    (Solver.create
+       ~config:{ Solver.Config.default with produce_proofs = true }
+       ());
   [%expect {| (("Option.is_some proof" true) (checks true)) |}];
   (* A theory (linear-arithmetic) contradiction also yields a checked proof. *)
   let theory_contradiction =
-    Solver.create ~config:{ Solver.Config.produce_proofs = true } ()
+    Solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
   in
   assert_ok theory_contradiction (Formula.La_compare (x, `Lt, x));
   (match Solver.solve theory_contradiction with
@@ -1064,7 +1068,9 @@ let%expect_test "proof production is optional and yields checked proofs" =
   [%expect {| (("Option.is_some proof" true) (checks true)) |}];
   (* Assertions inside a [push] scope are not yet proof-supported: [None]. *)
   let scoped =
-    Solver.create ~config:{ Solver.Config.produce_proofs = true } ()
+    Solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
   in
   Solver.push scoped;
   assert_ok scoped (eq x y);

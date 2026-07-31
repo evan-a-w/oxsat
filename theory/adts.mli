@@ -1,12 +1,13 @@
 open! Core
 open! Import
 
-(** Lazy lemmas for algebraic datatypes over the shared congruence closure.
+(** Lazy lemmas for declared algebraic datatypes over the shared congruence
+    closure.
 
-    Formula nodes carry self-describing constructor, selector, and tester
-    metadata; there is intentionally no global declaration table yet. This
-    module watches equality atoms for ADT-shaped terms and emits only lemmas
-    relevant to currently registered egraph terms:
+    Formula nodes carry constructor, selector, and tester metadata, but every
+    ADT shape used by the solver must be present in the current declaration
+    environment. This module watches equality atoms for ADT-shaped terms and
+    emits only lemmas relevant to currently registered egraph terms:
 
     - equal applications of the same constructor imply equality of each field;
     - applications of distinct constructors of the same datatype are disjoint;
@@ -22,7 +23,19 @@ open! Import
 
 type t
 
-val create : unit -> t
+val create : ?env:Datatype.Env.t -> unit -> t
+val push : t -> unit
+val pop : t -> unit
+
+val declare
+  :  t
+  -> ?guard:Atom.Equality.t
+  -> Datatype.Declaration.t
+  -> unit Or_error.t
+
+val env : t -> Datatype.Env.t
+val validate_formula : t -> Formula.any -> unit Or_error.t
+val datatype_observations : t -> Datatype.Datatype.Set.t Formula.Any.Map.t
 val add_atom : t -> atom:Atom.Equality.t -> unit
 
 val maybe_get_lemma

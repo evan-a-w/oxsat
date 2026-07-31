@@ -111,7 +111,11 @@ let%expect_test "read over write at the same index" =
 ;;
 
 let%expect_test "array lemmas have checkable proof certificates" =
-  let solver = Solver.create ~config:{ produce_proofs = true } () in
+  let solver =
+    Solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
+  in
   assert_ok solver (neq (select (store a i value) i) value);
   print_proof_result (Solver.solve solver);
   [%expect {| (Unsat (proof_check (Ok ()))) |}]
@@ -220,7 +224,11 @@ let%expect_test "array indices interact with linear arithmetic" =
 ;;
 
 let%expect_test "array indices interact with linear arithmetic with proofs" =
-  let solver = Solver.create ~config:{ produce_proofs = true } () in
+  let solver =
+    Solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
+  in
   assert_ok solver (La_compare (i, `Lt, j));
   assert_ok solver (neq (select (store a i value) j) (select a j));
   print_proof_result (Solver.solve solver);
@@ -268,7 +276,11 @@ let%expect_test "extensionality through aliased array variables" =
 ;;
 
 let%expect_test "extensionality through aliased array variables with proofs" =
-  let solver = Quantifier_solver.create ~config:{ produce_proofs = true } () in
+  let solver =
+    Quantifier_solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
+  in
   let x = v "x" in
   let y = v "y" in
   let k = Tvar.of_string "k" in
@@ -312,7 +324,11 @@ let%expect_test "extensionality uses declared array types" =
 ;;
 
 let%expect_test "extensionality uses declared array types with proofs" =
-  let solver = Quantifier_solver.create ~config:{ produce_proofs = true } () in
+  let solver =
+    Quantifier_solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
+  in
   let b_var = Tvar.of_string "b" in
   let k = Tvar.of_string "k" in
   let assert_q f =
@@ -345,7 +361,11 @@ let%expect_test "client variable named like the old array witness does not \
 ;;
 
 let%expect_test "row1 proof prints human-readable certificate text" =
-  let solver = Solver.create ~config:{ produce_proofs = true } () in
+  let solver =
+    Solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
+  in
   assert_ok solver (neq (select (store a i value) i) value);
   (match Solver.solve solver with
    | Sat _ -> print_endline "sat"
@@ -375,7 +395,11 @@ let%expect_test "row1 proof prints human-readable certificate text" =
 ;;
 
 let%expect_test "row2 proof prints human-readable certificate text" =
-  let solver = Solver.create ~config:{ produce_proofs = true } () in
+  let solver =
+    Solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
+  in
   assert_ok solver (neq i j);
   assert_ok solver (neq (select (store a i value) j) (select a j));
   (match Solver.solve solver with
@@ -409,7 +433,11 @@ let%expect_test "row2 proof prints human-readable certificate text" =
 ;;
 
 let%expect_test "extensionality proof prints certificate lines" =
-  let solver = Quantifier_solver.create ~config:{ produce_proofs = true } () in
+  let solver =
+    Quantifier_solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
+  in
   let x = v "x" in
   let y = v "y" in
   let k = Tvar.of_string "k" in

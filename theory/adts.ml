@@ -43,6 +43,8 @@ module Emitted_key = struct
       | Tester of Formula.any * Formula.any * Formula.any
       | Selector of Formula.any * Formula.any
       | Acyclicity of (Formula.any * Formula.any) list
+      | Completeness of
+          Formula.any * Datatype.Datatype.t * Atom.Equality.t option
     [@@deriving sexp, compare, hash]
   end
 
@@ -50,23 +52,103 @@ module Emitted_key = struct
   include functor Hashable.Make
 end
 
+module Declared = struct
+  type t =
+    { declaration : Datatype.Declaration.t
+    ; guard : Atom.Equality.t option
+    }
+  [@@deriving sexp_of]
+end
+
+module Scope = struct
+  type t =
+    { has_adt : bool
+    ; env : Datatype.Env.t
+    ; declared : Declared.t Datatype.Datatype.Map.t
+    ; observations : Datatype.Datatype.Set.t Formula.Any.Map.t
+    }
+  [@@deriving sexp_of]
+end
+
 type t =
   { mutable has_adt : bool
   ; emitted : Emitted_key.Hash_set.t
   ; mutable last_certificate : Proof.Theory_certificate.Adt.t option
+  ; mutable env : Datatype.Env.t
+  ; mutable declared : Declared.t Datatype.Datatype.Map.t
+  ; mutable scopes : Scope.t list
+  ; mutable observations : Datatype.Datatype.Set.t Formula.Any.Map.t
   }
 
-let create () =
+let create ?(env = Datatype.Env.empty) () =
+  let declared =
+    Datatype.Env.declarations env
+    |> List.map ~f:(fun declaration ->
+      ( declaration.Datatype.Declaration.datatype
+      , { Declared.declaration; guard = None } ))
+    |> Datatype.Datatype.Map.of_alist_exn
+  in
   { has_adt = false
   ; emitted = Emitted_key.Hash_set.create ()
   ; last_certificate = None
+  ; env
+  ; declared
+  ; scopes = []
+  ; observations = Formula.Any.Map.empty
   }
+;;
+
+let push t =
+  t.scopes
+  <- { Scope.has_adt = t.has_adt
+     ; env = t.env
+     ; declared = t.declared
+     ; observations = t.observations
+     }
+     :: t.scopes
+;;
+
+let pop t =
+  match t.scopes with
+  | [] -> assert false
+  | scope :: scopes ->
+    t.has_adt <- scope.has_adt;
+    t.env <- scope.env;
+    t.declared <- scope.declared;
+    t.observations <- scope.observations;
+    t.scopes <- scopes
+;;
+
+let declare t ?guard declaration =
+  let%map.Or_error env = Datatype.Env.add t.env declaration in
+  t.env <- env;
+  t.declared
+  <- Map.set
+       t.declared
+       ~key:declaration.datatype
+       ~data:{ Declared.declaration; guard }
+;;
+
+let env t = t.env
+
+let observe t subject datatype =
+  t.observations
+  <- Map.update t.observations subject ~f:(function
+       | None -> Datatype.Datatype.Set.singleton datatype
+       | Some datatypes -> Set.add datatypes datatype)
 ;;
 
 let rec note_adt_shapes t (term : Formula.any) =
   (match term with
-   | Datatype_constructor _ | Datatype_selector _ | Datatype_tester _ ->
-     t.has_adt <- true
+   | Datatype_constructor (constructor, _) ->
+     t.has_adt <- true;
+     observe t term constructor.datatype
+   | Datatype_selector (selector, argument) ->
+     t.has_adt <- true;
+     observe t argument selector.constructor.datatype
+   | Datatype_tester (constructor, argument) ->
+     t.has_adt <- true;
+     observe t argument constructor.datatype
    | _ -> ());
   List.iter (Formula.args term) ~f:(note_adt_shapes t)
 ;;
@@ -74,7 +156,51 @@ let rec note_adt_shapes t (term : Formula.any) =
 let add_atom t ~atom =
   let left, right = Atom.Equality.endpoints (Atom.Equality.normalize atom) in
   note_adt_shapes t left;
-  note_adt_shapes t right
+  note_adt_shapes t right;
+  match left, right with
+  | Datatype_constructor (constructor, _), other
+  | other, Datatype_constructor (constructor, _) ->
+    observe t other constructor.datatype
+  | _ -> ()
+;;
+
+let datatype_observations t = t.observations
+
+let rec validate_formula t (formula : Formula.any) =
+  let%bind.Or_error () =
+    match formula with
+    | Datatype_constructor (constructor, args) ->
+      if not (Datatype.Env.mem_constructor t.env constructor)
+      then
+        Or_error.error_s
+          [%message
+            "undeclared ADT constructor" (constructor : Datatype.Constructor.t)]
+      else if List.length args <> constructor.arity
+      then
+        Or_error.error_s
+          [%message
+            "ADT constructor application has the wrong arity"
+              (constructor : Datatype.Constructor.t)
+              ~actual:(List.length args : int)]
+      else Ok ()
+    | Datatype_selector (selector, _) ->
+      if Datatype.Env.mem_selector t.env selector
+      then Ok ()
+      else
+        Or_error.error_s
+          [%message "undeclared ADT selector" (selector : Datatype.Selector.t)]
+    | Datatype_tester (constructor, _) ->
+      if Datatype.Env.mem_constructor t.env constructor
+      then Ok ()
+      else
+        Or_error.error_s
+          [%message
+            "undeclared ADT tester constructor"
+              (constructor : Datatype.Constructor.t)]
+    | _ -> Ok ()
+  in
+  List.fold_result (Formula.args formula) ~init:() ~f:(fun () arg ->
+    validate_formula t arg)
 ;;
 
 let eq left right : Atom.Equality.t = `Eq (left, right)
@@ -373,6 +499,62 @@ let find_acyclicity t egraph constructors =
     emit t egraph key literals certificate
 ;;
 
+let constructor_term constructor = Formula.Datatype_constructor (constructor, [])
+
+let completeness_literals ~guard subject declaration form =
+  let guard_literals =
+    match guard with
+    | None -> []
+    | Some atom -> [ atom, false ]
+  in
+  let constructor_declarations =
+    declaration.Datatype.Declaration.constructors
+  in
+  match (form : Proof.Theory_certificate.Adt.Completeness_form.t) with
+  | Enum_equalities ->
+    guard_literals
+    @ List.map constructor_declarations ~f:(fun cd ->
+      eq subject (constructor_term cd.constructor), true)
+  | Testers ->
+    guard_literals
+    @ List.map constructor_declarations ~f:(fun cd ->
+      tester_atom cd.constructor subject, true)
+;;
+
+let completeness_form declaration =
+  if List.for_all declaration.Datatype.Declaration.constructors ~f:(fun cd ->
+       cd.Datatype.Constructor_declaration.constructor.arity = 0)
+  then Proof.Theory_certificate.Adt.Completeness_form.Enum_equalities
+  else Testers
+;;
+
+let find_completeness t egraph terms =
+  let registered_terms = Formula.Any.Set.of_list terms in
+  Map.to_alist t.observations
+  |> List.find_map ~f:(fun (subject, datatypes) ->
+    match subject with
+    | Formula.Datatype_constructor _ -> None
+    | _ ->
+      if not (Set.mem registered_terms subject)
+      then None
+      else
+        Set.to_list datatypes
+        |> List.find_map ~f:(fun datatype ->
+          match Map.find t.declared datatype with
+          | None -> None
+          | Some { Declared.declaration; guard } ->
+            let form = completeness_form declaration in
+            let key = Emitted_key.Completeness (subject, datatype, guard) in
+            let literals =
+              completeness_literals ~guard subject declaration form
+            in
+            let certificate =
+              Proof.Theory_certificate.Adt.Completeness
+                { declaration; subject; guard; form }
+            in
+            emit t egraph key literals certificate))
+;;
+
 let maybe_get_lemma t ~egraph =
   t.last_certificate <- None;
   if not t.has_adt
@@ -396,7 +578,10 @@ let maybe_get_lemma t ~egraph =
              | None ->
                (match find_acyclicity t egraph constructors with
                 | Some lemma -> lemma
-                | None -> `Consistent)))))
+                | None ->
+                  (match find_completeness t egraph terms with
+                   | Some lemma -> lemma
+                   | None -> `Consistent))))))
 ;;
 
 let last_certificate t = t.last_certificate

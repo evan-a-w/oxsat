@@ -33,6 +33,60 @@ let head_selector =
     { constructor = cons_constructor; name = Tvar.of_string "head"; index = 0 }
 ;;
 
+let list_declaration =
+  Datatype.Declaration.
+    { datatype = list_datatype
+    ; constructors =
+        [ { constructor = nil_constructor; selectors = [] }
+        ; { constructor = cons_constructor; selectors = [ head_selector ] }
+        ]
+    }
+;;
+
+let list_datatype_env =
+  Or_error.ok_exn (Datatype.Env.of_declarations [ list_declaration ])
+;;
+
+let adt_solver () =
+  Solver.create
+    ~config:{ Solver.Config.default with datatype_env = list_datatype_env }
+    ()
+;;
+
+let color_datatype = Datatype.Datatype.{ name = Tvar.of_string "color" }
+
+let red_constructor =
+  Datatype.Constructor.
+    { datatype = color_datatype; name = Tvar.of_string "Red"; arity = 0 }
+;;
+
+let green_constructor =
+  Datatype.Constructor.
+    { datatype = color_datatype; name = Tvar.of_string "Green"; arity = 0 }
+;;
+
+let color_declaration =
+  Datatype.Declaration.
+    { datatype = color_datatype
+    ; constructors =
+        [ { constructor = red_constructor; selectors = [] }
+        ; { constructor = green_constructor; selectors = [] }
+        ]
+    }
+;;
+
+let color_datatype_env =
+  Or_error.ok_exn (Datatype.Env.of_declarations [ color_declaration ])
+;;
+
+let color_solver () =
+  Solver.create
+    ~config:{ Solver.Config.default with datatype_env = color_datatype_env }
+    ()
+;;
+
+let red : Formula.any = Datatype_constructor (red_constructor, [])
+let green : Formula.any = Datatype_constructor (green_constructor, [])
 let nil : Formula.any = Datatype_constructor (nil_constructor, [])
 
 let cons head tail : Formula.any =
@@ -243,7 +297,7 @@ let check_corrupted_model solver ~f =
 let%expect_test "ADT constructor disjointness violation in a corrupted model \
                  is rejected"
   =
-  let solver = Solver.create () in
+  let solver = adt_solver () in
   let h = v "h" in
   let t = v "t" in
   let cons_ht = cons h t in
@@ -265,7 +319,7 @@ let%expect_test "ADT constructor disjointness violation in a corrupted model \
 let%expect_test "ADT constructor injectivity violation in a corrupted model is \
                  rejected"
   =
-  let solver = Solver.create () in
+  let solver = adt_solver () in
   let a = v "a" in
   let c = v "c" in
   let left = cons a nil in
@@ -294,7 +348,7 @@ let%expect_test "ADT constructor injectivity violation in a corrupted model is \
 let%expect_test "ADT selector projection violation in a corrupted model is \
                  rejected"
   =
-  let solver = Solver.create () in
+  let solver = adt_solver () in
   let h = v "h" in
   let other = v "other" in
   let cons_h = cons h nil in
@@ -326,7 +380,7 @@ let%expect_test "ADT selector projection violation in a corrupted model is \
 ;;
 
 let%expect_test "ADT tester value violation in a corrupted model is rejected" =
-  let solver = Solver.create () in
+  let solver = adt_solver () in
   let h = v "h" in
   let cons_h = cons h nil in
   let tester = is_nil cons_h in
@@ -355,12 +409,66 @@ let%expect_test "ADT tester value violation in a corrupted model is rejected" =
 ;;
 
 let%expect_test "ADT acyclicity violation in a corrupted model is rejected" =
-  let solver = Solver.create () in
+  let solver = adt_solver () in
   let x = v "x" in
   let cons_x = cons x nil in
   assert_ok solver (eq cons_x cons_x);
   check_corrupted_model solver ~f:(fun model -> set_euf_class model x cons_x);
   [%expect {| (Error "ADT acyclicity is violated") |}]
+;;
+
+let%expect_test "ADT enum exhaustiveness violation in a corrupted model is \
+                 rejected"
+  =
+  let solver = color_solver () in
+  assert_ok solver (neq x red);
+  check_corrupted_model solver ~f:(fun model ->
+    { (set_euf_class
+         (set_euf_class (set_euf_class model x x) red red)
+         green
+         green)
+      with
+      Model.atom_values =
+        model.atom_values
+        |> Map.set ~key:(Atom.normalize (`Eq (x, red))) ~data:false
+        |> Map.set ~key:(Atom.normalize (`Eq (x, green))) ~data:false
+    });
+  [%expect
+    {|
+    (Error
+     ("ADT enum exhaustiveness is violated" (subject (Var x))
+      (datatype ((name color)))))
+    |}]
+;;
+
+let%expect_test "ADT constructor completeness violation in a corrupted model \
+                 is rejected"
+  =
+  let solver = adt_solver () in
+  assert_ok solver (Not (is_nil x));
+  check_corrupted_model solver ~f:(fun model ->
+    let is_nil_x = is_nil x in
+    let is_cons_x = Formula.Datatype_tester (cons_constructor, x) in
+    { (set_euf_class
+         (set_euf_class model is_nil_x is_nil_x)
+         is_cons_x
+         is_cons_x)
+      with
+      Model.atom_values =
+        model.atom_values
+        |> Map.set
+             ~key:(Atom.normalize (`Eq (is_nil_x, Formula.True)))
+             ~data:false
+        |> Map.set
+             ~key:(Atom.normalize (`Eq (is_cons_x, Formula.True)))
+             ~data:false
+    });
+  [%expect
+    {|
+    (Error
+     ("ADT constructor completeness is violated" (subject (Var x))
+      (datatype ((name list)))))
+    |}]
 ;;
 
 (* A satisfiable type disequality between differently-typed variables checks;

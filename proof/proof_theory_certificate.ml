@@ -102,6 +102,13 @@ module Adt = struct
     [@@deriving sexp, compare]
   end
 
+  module Completeness_form = struct
+    type t =
+      | Enum_equalities
+      | Testers
+    [@@deriving sexp, compare]
+  end
+
   type t =
     | Injectivity of
         { constructor : Datatype.Constructor.t
@@ -128,6 +135,12 @@ module Adt = struct
         ; constructor_args : Formula.any list
         }
     | Acyclicity of { cycle : Cycle_edge.t list }
+    | Completeness of
+        { declaration : Datatype.Declaration.t
+        ; subject : Formula.any
+        ; guard : Atom.Equality.t option
+        ; form : Completeness_form.t
+        }
   [@@deriving sexp, compare]
 end
 

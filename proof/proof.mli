@@ -105,6 +105,7 @@ val check : t -> unit Or_error.t
 val to_string_hum : t -> string
 
 val check_theory_certificate
-  :  clause:Clause.t
+  :  ?datatype_env:Datatype.Env.t
+  -> clause:Clause.t
   -> Theory_certificate.t
   -> unit Or_error.t

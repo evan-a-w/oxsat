@@ -62,7 +62,7 @@ let check_array clause certificate =
   else error "array certificate does not match its clause"
 ;;
 
-let check_adt clause certificate =
+let check_adt clause certificate ~datatype_env =
   let open Proof_theory_certificate.Adt in
   let constructor_term constructor args =
     Formula.Datatype_constructor (constructor, args)
@@ -81,23 +81,34 @@ let check_adt clause certificate =
   let field args index =
     if index < 0 || index >= List.length args then None else List.nth args index
   in
+  let constructor_is_declared constructor =
+    Datatype.Env.mem_constructor datatype_env constructor
+  in
+  let selector_is_declared selector =
+    Datatype.Env.mem_selector datatype_env selector
+  in
   let expected =
     match certificate with
     | Injectivity { constructor; left_args; right_args; field_index } ->
-      Option.map2
-        (field left_args field_index)
-        (field right_args field_index)
-        ~f:(fun left right ->
-          [ neq_literal
-              (constructor_term constructor left_args)
-              (constructor_term constructor right_args)
-          ; eq_literal left right
-          ])
+      if not (constructor_is_declared constructor)
+      then None
+      else
+        Option.map2
+          (field left_args field_index)
+          (field right_args field_index)
+          ~f:(fun left right ->
+            [ neq_literal
+                (constructor_term constructor left_args)
+                (constructor_term constructor right_args)
+            ; eq_literal left right
+            ])
     | Disjointness
         { left_constructor; left_args; right_constructor; right_args } ->
-      if Datatype.Datatype.equal
-           left_constructor.datatype
-           right_constructor.datatype
+      if constructor_is_declared left_constructor
+         && constructor_is_declared right_constructor
+         && Datatype.Datatype.equal
+              left_constructor.datatype
+              right_constructor.datatype
          && not (Datatype.Constructor.equal left_constructor right_constructor)
       then
         Some
@@ -114,9 +125,11 @@ let check_adt clause certificate =
         ; value
         } ->
       let witness = constructor_term witness_constructor witness_args in
-      if Datatype.Datatype.equal
-           tester_constructor.datatype
-           witness_constructor.datatype
+      if constructor_is_declared tester_constructor
+         && constructor_is_declared witness_constructor
+         && Datatype.Datatype.equal
+              tester_constructor.datatype
+              witness_constructor.datatype
          && Bool.equal
               value
               (Datatype.Constructor.equal
@@ -131,9 +144,12 @@ let check_adt clause certificate =
     | Selector { selector; argument; constructor_args } ->
       let constructor = selector.constructor in
       let witness = constructor_term constructor constructor_args in
-      Option.map (field constructor_args selector.index) ~f:(fun projected ->
-        guard argument witness
-        @ [ eq_literal (selector_term selector argument) projected ])
+      if not (selector_is_declared selector)
+      then None
+      else
+        Option.map (field constructor_args selector.index) ~f:(fun projected ->
+          guard argument witness
+          @ [ eq_literal (selector_term selector argument) projected ])
     | Acyclicity { cycle } ->
       (match cycle with
        | [] -> None
@@ -157,6 +173,39 @@ let check_adt clause certificate =
              (List.map2_exn cycle previous_fields ~f:(fun edge previous_field ->
                 neq_literal edge.constructor_term previous_field))
          else None)
+    | Completeness { declaration; subject; guard; form } ->
+      let declaration_is_active =
+        match Datatype.Env.find datatype_env declaration.datatype with
+        | Some active -> Datatype.Declaration.equal active declaration
+        | None -> false
+      in
+      let guard_literals =
+        match guard with
+        | None -> []
+        | Some atom -> [ theory_literal (atom :> Atom.t) false ]
+      in
+      let constructor_declarations = declaration.constructors in
+      let constructors =
+        List.map constructor_declarations ~f:(fun cd -> cd.constructor)
+      in
+      if not declaration_is_active
+      then None
+      else (
+        match (form : Completeness_form.t) with
+        | Enum_equalities ->
+          if List.for_all constructors ~f:(fun constructor ->
+               constructor.arity = 0)
+          then
+            Some
+              (guard_literals
+               @ List.map constructors ~f:(fun constructor ->
+                 eq_literal subject (constructor_term constructor [])))
+          else None
+        | Testers ->
+          Some
+            (guard_literals
+             @ List.map constructors ~f:(fun constructor ->
+               theory_literal (tester_atom constructor subject) true)))
   in
   match expected with
   | Some expected when clause_equal clause expected -> Ok ()
@@ -465,13 +514,13 @@ let check_euf clause certificate =
         error "EUF disequality premise is not an assumed disequality")
 ;;
 
-let check ~clause = function
+let check ?(datatype_env = Datatype.Env.empty) ~clause = function
   | Proof_theory_certificate.Bare_var_eq certificate ->
     check_bare_var_eq clause certificate
   | Integer_split certificate -> check_integer_split clause certificate
   | Linear_arithmetic certificate -> check_linear_arithmetic clause certificate
   | Type_theory certificate -> check_type_theory clause certificate
   | Array certificate -> check_array clause certificate
-  | Adt certificate -> check_adt clause certificate
+  | Adt certificate -> check_adt clause certificate ~datatype_env
   | Euf certificate -> check_euf clause certificate
 ;;
