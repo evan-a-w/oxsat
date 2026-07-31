@@ -275,11 +275,12 @@ let build
            Input_clause { input; literal = Resolver.literal resolver lit }
          | _ ->
            let def_var =
-             Array.find_map rc.literals ~f:(fun lit ->
+             Array.filter_map rc.literals ~f:(fun lit ->
                let var = Int.abs lit in
                Option.some_if
                  (Option.is_some (Encoding.tseitin_def encoding var))
                  var)
+             |> Array.max_elt ~compare:Int.compare
            in
            (match def_var with
             | Some var ->
@@ -398,5 +399,7 @@ let unsat_proof
     match Proof.check proof with
     | Ok () -> Some proof
     | Error error ->
-      raise_s [%message "generated proof failed to check" (error : Error.t)])
+      raise_s
+        [%message
+          "generated proof failed to check" (error : Error.t) (proof : Proof.t)])
 ;;

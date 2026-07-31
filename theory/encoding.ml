@@ -223,13 +223,15 @@ module Shape = struct
     | Quantified
 end
 
-let shape_of (type a) (formula : a Formula.t) : Shape.t =
+let rec shape_of : type a. a Formula.t -> Shape.t =
+  fun formula ->
   match formula with
   | Var v -> Var v
   | Eq (_, _) ->
     Bool
     (* unreachable: [shape_of] is only ever called on [Eq]'s own arguments *)
   | True | False | Not _ | And _ | Or _ -> Bool
+  | Ite (_, then_, _) -> shape_of then_
   | Forall (_, _, _) | Exists (_, _) -> Quantified
   | App (_, _) -> Uf
   | Select (_, _) | Store (_, _, _) -> Array
@@ -249,6 +251,7 @@ let rec uf_term_of : type a. a Formula.t -> Formula.any Or_error.t =
   | App (function_, args) ->
     let%bind.Or_error args = Or_error.all (List.map args ~f:uf_term_of) in
     Ok (Formula.App (function_, args))
+  | Ite _ -> uf_term_of (Formula.expand_term_ites (Formula.widen formula))
   | _ -> Or_error.error_s [%message "formula is not a UF term"]
 ;;
 
@@ -278,6 +281,7 @@ let rec type_expr_of : type a. a Formula.t -> Type_expr.t Or_error.t =
   | Type_app (f, args) ->
     let%bind.Or_error args = args |> List.map ~f:type_expr_of |> Or_error.all in
     Ok (Type_expr.App (f, args))
+  | Ite _ -> type_expr_of (Formula.expand_term_ites (Formula.widen formula))
   | _ -> Or_error.error_s [%message "formula is not a type expression"]
 ;;
 
@@ -291,6 +295,7 @@ let rec array_term_of : type a. a Formula.t -> Formula.any Or_error.t =
   | Store (array, index, value) ->
     let%bind.Or_error array = array_term_of array in
     Ok (Formula.Store (array, Formula.widen index, Formula.widen value))
+  | Ite _ -> array_term_of (Formula.expand_term_ites (Formula.widen formula))
   | _ -> Or_error.error_s [%message "formula is not an array term"]
 ;;
 
@@ -306,6 +311,7 @@ let rec linear_expr_of : type a. a Formula.t -> Linear_expr.t Or_error.t =
     let%bind.Or_error a = linear_expr_of a in
     let%bind.Or_error b = linear_expr_of b in
     Ok Linear_expr.(a + b)
+  | Ite _ -> linear_expr_of (Formula.expand_term_ites (Formula.widen formula))
   | _ -> Or_error.error_s [%message "formula is not a linear expression"]
 ;;
 
@@ -332,7 +338,7 @@ let rec bool_formula_of
   =
   fun formula ->
   let module F = Formula_with_no_shared_theories in
-  match formula with
+  match Formula.expand_term_ites (Formula.widen formula) with
   | True -> Ok F.True
   | False -> Ok F.False
   | Not (Eq (a, b)) -> neq_formula_of a b
