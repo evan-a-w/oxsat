@@ -33,6 +33,9 @@ let check_array clause certificate =
   let open Proof_theory_certificate.Array in
   let eq left right = theory_literal (`Eq (left, right)) true in
   let neq left right = theory_literal (`Eq (left, right)) false in
+  let not_has_type (var, type_expr) =
+    theory_literal (`Type_eq (Type_expr.Var var, type_expr)) false
+  in
   let expected =
     match certificate with
     | Read_over_write_same_index { array; index; value } ->
@@ -45,10 +48,11 @@ let check_array clause certificate =
              (Formula.Store (array, written_index, written_value), read_index))
           (Formula.Select (array, read_index))
       ]
-    | Extensionality { left; right; witness } ->
-      [ eq left right
-      ; neq (Formula.Select (left, witness)) (Formula.Select (right, witness))
-      ]
+    | Extensionality { left; right; witness; type_premises } ->
+      List.map type_premises ~f:not_has_type
+      @ [ eq left right
+        ; neq (Formula.Select (left, witness)) (Formula.Select (right, witness))
+        ]
   in
   if clause_equal clause expected
   then Ok ()

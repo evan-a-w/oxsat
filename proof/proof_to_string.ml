@@ -410,9 +410,24 @@ let certificate_to_string ~clause (certificate : Proof_theory_certificate.t) =
          (formula_to_string read_index)
          (formula_to_string array)
          (formula_to_string read_index)
-     | Extensionality { left; right; witness } ->
+     | Extensionality { left; right; witness; type_premises } ->
+       let guards =
+         match type_premises with
+         | [] -> ""
+         | _ ->
+           sprintf
+             " if %s"
+             (String.concat
+                ~sep:" and "
+                (List.map type_premises ~f:(fun (var, type_expr) ->
+                   sprintf
+                     "%s : %s"
+                     (Tvar.to_string var)
+                     (type_expr_to_string type_expr))))
+       in
        sprintf
-         "array extensionality: %s ≠ %s ⟹ select(%s, %s) ≠ select(%s, %s)"
+         "array extensionality%s: %s ≠ %s ⟹ select(%s, %s) ≠ select(%s, %s)"
+         guards
          (formula_to_string left)
          (formula_to_string right)
          (formula_to_string left)

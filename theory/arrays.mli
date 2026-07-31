@@ -20,16 +20,20 @@ open! Import
       array position (or is itself a [store] term), or if one of its variable
       members currently has a declared [Array_type] sort. A fresh witness
       variable is introduced for each such class pair, and the emitted clause is
-      the usual [a = b \/ select a k <> select b k]. To avoid pure overhead,
-      declared sorts alone do not make an otherwise-unused pair relevant: at
-      least one of the two classes must also have an array-shaped member.
+      the usual [a = b \/ select a k <> select b k], guarded by negative
+      [has_type] premises for any side whose array-ness came only from a
+      declared sort. To avoid pure overhead, declared sorts alone do not make an
+      otherwise-unused pair relevant: at least one of the two classes must also
+      have an array-shaped member.
 
     Lemmas are globally valid, so the "already emitted" sets are intentionally
     not undone when the SAT solver backtracks. The decision-level [undo] hook is
     still present for the combined-theory interface; no decision-level-local
     array facts are stored here. Equivalence classes and declared sorts can both
     change under backtracking, so array class membership is recomputed when
-    looking for an extensionality lemma instead of cached in this module.
+    looking for an extensionality lemma instead of cached in this module, and
+    scoped declared-sort facts only appear as guarded premises in retained
+    clauses.
 
     [maybe_get_lemma] is called on every theory propagation even for problems
     that never mention arrays, so it starts from an O(1) check: if no

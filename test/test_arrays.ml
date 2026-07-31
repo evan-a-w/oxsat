@@ -218,3 +218,44 @@ let%expect_test "extensionality uses declared array types" =
    | Unknown_but_possibly_sat _ -> print_endline "Unknown");
   [%expect {| Unsat |}]
 ;;
+
+let%expect_test "extensionality uses declared array types with proofs" =
+  let solver = Solver.create ~config:{ produce_proofs = true } () in
+  let b_var = Tvar.of_string "b" in
+  let witness = v "__array_extensionality_0" in
+  let guard_left = v "guard_left" in
+  let guard_right = v "guard_right" in
+  assert_ok solver (eq (select a i) (select a i));
+  assert_ok solver (neq a b);
+  assert_ok solver (has_int_int_array_type b_var);
+  print_solver_result (Solver.solve solver);
+  assert_ok
+    solver
+    (Or [ eq guard_left guard_right; eq (select a witness) (select b witness) ]);
+  assert_ok solver (neq guard_left guard_right);
+  print_proof_result (Solver.solve solver);
+  [%expect {|
+    Sat
+    (Unsat (proof_check (Ok ())))
+    |}]
+;;
+
+let%expect_test "scoped declared array type does not leave unguarded \
+                 extensionality"
+  =
+  let solver = Solver.create () in
+  let b_var = Tvar.of_string "b" in
+  let witness = v "__array_extensionality_0" in
+  assert_ok solver (eq (select a i) (select a i));
+  assert_ok solver (neq a b);
+  Solver.push solver;
+  assert_ok solver (has_int_int_array_type b_var);
+  print_solver_result (Solver.solve solver);
+  Solver.pop solver;
+  assert_ok solver (eq (select a witness) (select b witness));
+  print_solver_result (Solver.solve solver);
+  [%expect {|
+    Sat
+    Sat
+    |}]
+;;

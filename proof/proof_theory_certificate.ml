@@ -88,6 +88,7 @@ module Array = struct
         { left : Formula.any
         ; right : Formula.any
         ; witness : Formula.any
+        ; type_premises : (Tvar.t * Type_expr.t) list
         }
   [@@deriving sexp, compare]
 end

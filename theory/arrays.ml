@@ -1,9 +1,33 @@
 open! Core
 open! Import
 
-module Formula_list = struct
+module Type_premise = struct
   module T = struct
-    type t = Formula.any list [@@deriving sexp, compare, hash]
+    type t =
+      { var : Tvar.t
+      ; type_expr : Type_expr.t
+      }
+    [@@deriving sexp, compare, hash]
+  end
+
+  include T
+  include functor Comparable.Make
+  include functor Hashable.Make
+
+  let atom { var; type_expr } =
+    (Tvar_types.has_type var type_expr :> Atom.Equality.t)
+  ;;
+
+  let to_certificate { var; type_expr } = var, type_expr
+end
+
+module Ext_key = struct
+  module T = struct
+    type t =
+      { pair : Formula.any list
+      ; type_premises : Type_premise.t list
+      }
+    [@@deriving sexp, compare, hash]
   end
 
   include T
@@ -17,7 +41,7 @@ type t =
   ; atoms : Atom.Equality.Hash_set.t
   ; row1_emitted : Formula.Any.Hash_set.t
   ; row2_emitted : Formula.Any.Hash_set.t
-  ; ext_emitted : Formula_list.Hash_set.t
+  ; ext_emitted : Ext_key.Hash_set.t
   ; mutable next_witness : int
   ; mutable last_certificate : Lemma_certificate.Array.t option
   }
@@ -28,7 +52,7 @@ let create () =
   ; atoms = Atom.Equality.Hash_set.create ()
   ; row1_emitted = Formula.Any.Hash_set.create ()
   ; row2_emitted = Formula.Any.Hash_set.create ()
-  ; ext_emitted = Formula_list.Hash_set.create ()
+  ; ext_emitted = Ext_key.Hash_set.create ()
   ; next_witness = 0
   ; last_certificate = None
   }
@@ -65,10 +89,11 @@ let is_syntactic_array_term t = function
   | term -> Hash_set.mem t.array_terms term
 ;;
 
-let has_declared_array_type ~get_type = function
-  | Formula.Var v ->
-    (match get_type v with
-     | Some (Type_expr.Array_type _) -> true
+let declared_array_type_premise ~get_type = function
+  | Formula.Var var ->
+    (match get_type var with
+     | Some (Type_expr.Array_type _ as type_expr) ->
+       Some { Type_premise.var; type_expr }
      | Some
          ( Type_expr.Var _
          | Type_expr.Base _
@@ -76,17 +101,19 @@ let has_declared_array_type ~get_type = function
          | Type_expr.App _
          | Type_expr.Function_type _
          | Type_expr.Type )
-     | None -> false)
-  | _ -> false
+     | None -> None)
+  | _ -> None
 ;;
 
 module Class_info = struct
   type t =
-    { mutable known_array : bool
-    ; mutable syntactic_array : bool
+    { mutable syntactic_array : bool
+    ; mutable type_premise : Type_premise.t option
     }
 
-  let create () = { known_array = false; syntactic_array = false }
+  let create () = { syntactic_array = false; type_premise = None }
+  let known_array t = t.syntactic_array || Option.is_some t.type_premise
+  let type_guard t = if t.syntactic_array then None else t.type_premise
 end
 
 let array_class_info t egraph ~get_type =
@@ -96,11 +123,9 @@ let array_class_info t egraph ~get_type =
     let info =
       Hashtbl.find_or_add info_by_repr repr ~default:Class_info.create
     in
-    if is_syntactic_array_term t term
-    then (
-      info.known_array <- true;
-      info.syntactic_array <- true);
-    if has_declared_array_type ~get_type term then info.known_array <- true);
+    if is_syntactic_array_term t term then info.syntactic_array <- true;
+    Option.iter (declared_array_type_premise ~get_type term) ~f:(fun premise ->
+      if Option.is_none info.type_premise then info.type_premise <- Some premise));
   info_by_repr
 ;;
 
@@ -160,6 +185,13 @@ let normalized_pair left right =
   else [ right; left ]
 ;;
 
+let extensionality_key left right ~type_premises : Ext_key.t =
+  { pair = normalized_pair left right
+  ; type_premises =
+      List.dedup_and_sort type_premises ~compare:Type_premise.compare
+  }
+;;
+
 let fresh_witness t =
   let witness =
     Formula.Var
@@ -176,15 +208,22 @@ let extensionality t egraph ~get_type =
     | `Eq (left, right) as atom ->
       let left_repr, left_info = class_info info_by_repr egraph left in
       let right_repr, right_info = class_info info_by_repr egraph right in
-      let key = normalized_pair left_repr right_repr in
       let both_known_arrays =
-        Option.exists left_info ~f:(fun info -> info.known_array)
-        && Option.exists right_info ~f:(fun info -> info.known_array)
+        Option.exists left_info ~f:Class_info.known_array
+        && Option.exists right_info ~f:Class_info.known_array
       in
       let relevant =
         Option.exists left_info ~f:(fun info -> info.syntactic_array)
         || Option.exists right_info ~f:(fun info -> info.syntactic_array)
       in
+      let type_premises =
+        List.filter_opt
+          [ Option.bind left_info ~f:Class_info.type_guard
+          ; Option.bind right_info ~f:Class_info.type_guard
+          ]
+        |> List.dedup_and_sort ~compare:Type_premise.compare
+      in
+      let key = extensionality_key left_repr right_repr ~type_premises in
       if Hash_set.mem t.ext_emitted key
          || Formula.equal_any left_repr right_repr
          || not (both_known_arrays && relevant)
@@ -195,15 +234,25 @@ let extensionality t egraph ~get_type =
           Hash_set.add t.ext_emitted key;
           let witness = fresh_witness t in
           let literals =
-            [ eq left right, true
-            ; ( eq
-                  (Formula.Select (left, witness))
-                  (Formula.Select (right, witness))
-              , false )
-            ]
+            List.map type_premises ~f:(fun premise ->
+              Type_premise.atom premise, false)
+            @ [ eq left right, true
+              ; ( eq
+                    (Formula.Select (left, witness))
+                    (Formula.Select (right, witness))
+                , false )
+              ]
           in
           register_lemma_atoms egraph literals;
-          t.last_certificate <- Some (Extensionality { left; right; witness });
+          t.last_certificate
+          <- Some
+               (Extensionality
+                  { left
+                  ; right
+                  ; witness
+                  ; type_premises =
+                      List.map type_premises ~f:Type_premise.to_certificate
+                  });
           Some (`Lemma literals)
         | Some true | None -> None))
 ;;
