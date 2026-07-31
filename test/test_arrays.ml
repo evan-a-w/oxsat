@@ -15,6 +15,10 @@ let store array index value : Formula.any = Store (array, index, value)
 let eq left right : Formula.any = Eq (left, right)
 let neq left right : Formula.any = Not (eq left right)
 
+let has_int_int_array_type var : Formula.any =
+  eq (Type_var var) (Array_type (Int, Int))
+;;
+
 let assert_ok solver formula =
   match Or_error.ok_exn (Solver.assert_formula solver formula) with
   | `Ok -> ()
@@ -32,6 +36,17 @@ let print_proof_result = function
     print_s
       [%message "Unsat" ~proof_check:(Proof.check proof : unit Or_error.t)]
   | Unsat { proof = None; _ } -> print_endline "Unsat without proof"
+;;
+
+let print_quantifier_proof_result = function
+  | Quantifier_solver.Result.Sat _ -> print_endline "Sat"
+  | Quantifier_solver.Result.Unknown_but_possibly_sat _ ->
+    print_endline "Unknown"
+  | Quantifier_solver.Result.Unsat { proof = Some proof; _ } ->
+    print_s
+      [%message "Unsat" ~proof_check:(Proof.check proof : unit Or_error.t)]
+  | Quantifier_solver.Result.Unsat { proof = None; _ } ->
+    print_endline "Unsat without proof"
 ;;
 
 let%expect_test "read over write at the same index" =
@@ -152,6 +167,50 @@ let%expect_test "extensionality through aliased array variables" =
   assert_q (Formula.widen_quantified (eq (select y i) (select y i)));
   assert_q (Formula.widen_quantified (eq x a));
   assert_q (Formula.widen_quantified (eq y b));
+  assert_q (Formula.widen_quantified (neq a b));
+  (match Quantifier_solver.solve solver ~max_rounds:6 with
+   | Unsat _ -> print_endline "Unsat"
+   | Sat _ -> print_endline "Sat"
+   | Unknown_but_possibly_sat _ -> print_endline "Unknown");
+  [%expect {| Unsat |}]
+;;
+
+let%expect_test "extensionality through aliased array variables with proofs" =
+  let solver = Quantifier_solver.create ~config:{ produce_proofs = true } () in
+  let x = v "x" in
+  let y = v "y" in
+  let k = Tvar.of_string "k" in
+  let assert_q f =
+    ignore (Quantifier_solver.assert_formula solver f : _ Or_error.t)
+  in
+  assert_q
+    (Forall
+       ( [ k ]
+       , [ [ select x (Var k) ]; [ select y (Var k) ] ]
+       , eq (select x (Var k)) (select y (Var k)) ));
+  assert_q (Formula.widen_quantified (eq (select x i) (select x i)));
+  assert_q (Formula.widen_quantified (eq (select y i) (select y i)));
+  assert_q (Formula.widen_quantified (eq x a));
+  assert_q (Formula.widen_quantified (eq y b));
+  assert_q (Formula.widen_quantified (neq a b));
+  print_quantifier_proof_result (Quantifier_solver.solve solver ~max_rounds:6);
+  [%expect {| (Unsat (proof_check (Ok ()))) |}]
+;;
+
+let%expect_test "extensionality uses declared array types" =
+  let solver = Quantifier_solver.create () in
+  let b_var = Tvar.of_string "b" in
+  let k = Tvar.of_string "k" in
+  let assert_q f =
+    ignore (Quantifier_solver.assert_formula solver f : _ Or_error.t)
+  in
+  assert_q
+    (Forall
+       ( [ k ]
+       , [ [ select b (Var k) ] ]
+       , eq (select a (Var k)) (select b (Var k)) ));
+  assert_q (Formula.widen_quantified (has_int_int_array_type b_var));
+  assert_q (Formula.widen_quantified (eq (select a i) (select a i)));
   assert_q (Formula.widen_quantified (neq a b));
   (match Quantifier_solver.solve solver ~max_rounds:6 with
    | Unsat _ -> print_endline "Unsat"

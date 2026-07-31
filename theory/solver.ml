@@ -202,7 +202,12 @@ module Combined_theory = struct
       lemma_to_clause literals ~sat_var_for_atom:(fun atom ->
         Encoding.sat_var_for_atom t.encoding (atom :> Atom.t))
     | `Consistent ->
-      (match Arrays.maybe_get_lemma t.arrays ~egraph:t.egraph [@nontail] with
+      (match
+         Arrays.maybe_get_lemma
+           t.arrays
+           ~egraph:t.egraph
+           ~get_type:(Tvar_types.get_type t.tt) [@nontail]
+       with
        | `Lemma literals ->
          let atoms = List.map literals ~f:(fun (atom, _) -> (atom :> Atom.t)) in
          if t.produce_proofs

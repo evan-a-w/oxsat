@@ -164,13 +164,25 @@ let fresh_witness t =
   witness
 ;;
 
-let extensionality t egraph =
+let extensionality t egraph ~get_type =
+  let info_by_repr = array_class_info t egraph ~get_type in
   Hash_set.find_map t.atoms ~f:(function
     | `Type_eq _ -> None
     | `Eq (left, right) as atom ->
-      let key = normalized_pair left right in
+      let left_repr, left_info = class_info info_by_repr egraph left in
+      let right_repr, right_info = class_info info_by_repr egraph right in
+      let key = normalized_pair left_repr right_repr in
+      let both_known_arrays =
+        Option.exists left_info ~f:(fun info -> info.known_array)
+        && Option.exists right_info ~f:(fun info -> info.known_array)
+      in
+      let relevant =
+        Option.exists left_info ~f:(fun info -> info.syntactic_array)
+        || Option.exists right_info ~f:(fun info -> info.syntactic_array)
+      in
       if Hash_set.mem t.ext_emitted key
-         || not (is_array_term t left && is_array_term t right)
+         || Formula.equal_any left_repr right_repr
+         || not (both_known_arrays && relevant)
       then None
       else (
         match Formula_egraph_uf.atom_value egraph ~atom with
@@ -191,7 +203,7 @@ let extensionality t egraph =
         | Some true | None -> None))
 ;;
 
-let maybe_get_lemma t ~egraph =
+let maybe_get_lemma t ~egraph ~get_type =
   t.last_certificate <- None;
   let terms = Formula_egraph_uf.registered_terms egraph in
   match row1 t egraph terms with
@@ -200,7 +212,7 @@ let maybe_get_lemma t ~egraph =
     (match row2 t egraph terms with
      | Some lemma -> lemma
      | None ->
-       (match extensionality t egraph with
+       (match extensionality t egraph ~get_type with
         | Some lemma -> lemma
         | None -> `Consistent))
 ;;
