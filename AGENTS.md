@@ -50,3 +50,8 @@ Don't write useless comments.
 
 Please limit usage of claude models. If I have explicitly chosen you to be
 claude, that's fine, but for subagents prefer to use non claude models.
+
+Test comprehensively, such that we can be fully confident in correctness, and
+don't consider work done until tests are present and working. Prefer
+having human readable test output (in expect test style) rather than checking
+(eg. don't just [assert_true] some condition, print something demonstrating it).

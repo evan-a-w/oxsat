@@ -118,6 +118,37 @@ let%expect_test "selector on wrong constructor is underspecified" =
   [%expect {| Sat |}]
 ;;
 
+let%expect_test "ADT selector alias projects through variable equal to \
+                 constructor"
+  =
+  let solver = Solver.create () in
+  let x = v "x" in
+  let h = v "h" in
+  assert_ok solver (eq x (cons h nil));
+  assert_ok solver (neq (head x) h);
+  print_result (Solver.solve solver);
+  [%expect {| Unsat |}]
+;;
+
+let%expect_test "ADT tester alias follows variable equal to constructor" =
+  let solver = Solver.create () in
+  let x = v "x" in
+  let h = v "h" in
+  assert_ok solver (eq x (cons h nil));
+  assert_ok solver (is_nil x);
+  print_result (Solver.solve solver);
+  let solver = Solver.create () in
+  let x = v "x" in
+  let h = v "h" in
+  assert_ok solver (eq x (cons h nil));
+  assert_ok solver (Not (is_cons x));
+  print_result (Solver.solve solver);
+  [%expect {|
+    Unsat
+    Unsat
+    |}]
+;;
+
 let%expect_test "direct acyclicity" =
   let solver = Solver.create () in
   let x = v "x" in

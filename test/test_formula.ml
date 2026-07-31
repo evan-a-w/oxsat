@@ -56,7 +56,8 @@ let representatives : Formula.quantified list =
   ]
 ;;
 
-let%expect_test "formula compare distinguishes constructor representatives" =
+let%expect_test "formula compare/rank distinguishes constructor representatives"
+  =
   let set = Formula.Quantified.Set.of_list representatives in
   print_s
     [%message
