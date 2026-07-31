@@ -26,6 +26,7 @@ type _ t =
   (* always used *)
   | Var : Tvar.t -> [> `Term ] t
   | Eq : 'a t * 'a t -> ([> `Atom ] as 'a) t
+  | Ite : any_theory t * 'a t * 'a t -> 'a t
   (* boolean structure *)
   | True : [> `Boolean ] t
   | False : [> `Boolean ] t
@@ -135,6 +136,7 @@ module Op : sig
   type t =
     | Var of Tvar.t
     | Eq
+    | Ite
     | True
     | False
     | Not
@@ -173,3 +175,8 @@ val make : op:Op.t -> args:any list -> any
     in [subst] with its mapped replacement, leaving everything else structurally
     unchanged. *)
 val substitute : any Tvar.Map.t -> any -> any
+
+(** Rewrites term-level [Ite] nodes into Boolean structure at their enclosing
+    formula position, preserving binder scope when applied to quantifier bodies
+    before ground encoding. The result contains no [Ite] nodes. *)
+val expand_term_ites : any -> any

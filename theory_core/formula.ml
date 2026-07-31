@@ -20,6 +20,7 @@ type _ t =
   (* always used *)
   | Var : Tvar.t -> [> `Term ] t
   | Eq : 'a t * 'a t -> ([> `Atom ] as 'a) t
+  | Ite : any_theory t * 'a t * 'a t -> 'a t
   (* boolean structure *)
   | True : [> `Boolean ] t
   | False : [> `Boolean ] t
@@ -63,6 +64,7 @@ module Op = struct
   type t =
     | Var of Tvar.t
     | Eq
+    | Ite
     | True
     | False
     | Not
@@ -97,6 +99,7 @@ let op : type a. a t -> Op.t =
   match t with
   | Var v -> Var v
   | Eq _ -> Eq
+  | Ite _ -> Ite
   | True -> True
   | False -> False
   | Not _ -> Not
@@ -173,6 +176,7 @@ let args (type a) (t : a t) : any list =
   match t with
   | Var _ -> []
   | Eq (a, b) -> [ widen a; widen b ]
+  | Ite (condition, then_, else_) -> [ condition; widen then_; widen else_ ]
   | True -> []
   | False -> []
   | Not x -> [ widen x ]
@@ -202,6 +206,7 @@ let make_opt ~(op : Op.t) ~(args : any list) : any option =
   match (op : Op.t), args with
   | Var v, [] -> Some (Var v)
   | Eq, [ a; b ] -> Some (Eq (a, b))
+  | Ite, [ condition; then_; else_ ] -> Some (Ite (condition, then_, else_))
   | True, [] -> Some True
   | False, [] -> Some False
   | Not, [ a ] -> Some (Not a)
@@ -229,6 +234,7 @@ let make_opt ~(op : Op.t) ~(args : any list) : any option =
   | La_compare cmp, [ a; b ] -> Some (La_compare (a, cmp, b))
   | ( ( Var _
       | Eq
+      | Ite
       | True
       | False
       | Not
@@ -250,6 +256,55 @@ let make_opt ~(op : Op.t) ~(args : any list) : any option =
 ;;
 
 let make ~op ~args = Option.value_exn (make_opt ~op ~args)
+
+module Ite_case = struct
+  type t =
+    { conditions : any list
+    ; term : any
+    }
+end
+
+let combine_ite_cases (cases_by_arg : Ite_case.t list list) =
+  List.fold
+    cases_by_arg
+    ~init:[ [], [] ]
+    ~f:(fun acc arg_cases ->
+      List.concat_map acc ~f:(fun (conditions, args) ->
+        List.map
+          arg_cases
+          ~f:(fun { Ite_case.conditions = arg_conditions; term } ->
+            conditions @ arg_conditions, args @ [ term ])))
+;;
+
+let conjunct = function
+  | [] -> True
+  | [ formula ] -> formula
+  | formulas -> And formulas
+;;
+
+let rec term_ite_cases (term : any) : Ite_case.t list =
+  match term with
+  | Ite (condition, then_, else_) ->
+    let condition = expand_term_ites condition in
+    let then_cases = term_ite_cases (widen then_) in
+    let else_cases = term_ite_cases (widen else_) in
+    List.map then_cases ~f:(fun case ->
+      { case with conditions = condition :: case.conditions })
+    @ List.map else_cases ~f:(fun case ->
+      { case with conditions = Not condition :: case.conditions })
+  | _ ->
+    let cases_by_arg = List.map (args term) ~f:term_ite_cases in
+    List.map (combine_ite_cases cases_by_arg) ~f:(fun (conditions, args) ->
+      { Ite_case.conditions; term = make ~op:(op term) ~args })
+
+and expand_term_ites (formula : any) : any =
+  match term_ite_cases formula with
+  | [ { conditions = []; term } ] -> term
+  | cases ->
+    Or
+      (List.map cases ~f:(fun { conditions; term } ->
+         conjunct (conditions @ [ term ])))
+;;
 
 let rec substitute (subst : any Tvar.Map.t) (term : any) : any =
   match term with
@@ -273,6 +328,10 @@ let rec sexp_of_t : type a. (a -> Sexp.t) -> a t -> Sexp.t =
   match formula with
   | Var v -> node "Var" [ [%sexp_of: Tvar.t] v ]
   | Eq (a, b) -> node "Eq" [ sexp_of_sub a; sexp_of_sub b ]
+  | Ite (condition, then_, else_) ->
+    node
+      "Ite"
+      [ sexp_of_ground condition; sexp_of_sub then_; sexp_of_sub else_ ]
   | True -> Sexp.Atom "True"
   | False -> Sexp.Atom "False"
   | Not f -> node "Not" [ sexp_of_sub f ]
@@ -357,6 +416,8 @@ let rec any_of_sexp sexp : any =
     (match tag, args with
      | "Var", [ v ] -> Var ([%of_sexp: Tvar.t] v)
      | "Eq", [ a; b ] -> Eq (any_of_sexp a, any_of_sexp b)
+     | "Ite", [ condition; then_; else_ ] ->
+       Ite (any_of_sexp condition, any_of_sexp then_, any_of_sexp else_)
      | "Not", [ f ] -> Not (any_of_sexp f)
      | "And", [ fs ] ->
        And ([%of_sexp: Sexp.t list] fs |> List.map ~f:any_of_sexp)
@@ -414,29 +475,30 @@ let rec quantified_of_sexp sexp : quantified =
 let rank : type a. a t -> int = function
   | Var _ -> 0
   | Eq _ -> 1
-  | True -> 2
-  | False -> 3
-  | Not _ -> 4
-  | And _ -> 5
-  | Or _ -> 6
-  | Forall _ -> 20
-  | Exists _ -> 24
-  | App _ -> 7
-  | Select _ -> 8
-  | Store _ -> 9
-  | Bool -> 10
-  | Int -> 11
-  | Float -> 12
-  | Type -> 13
-  | Function_type _ -> 14
-  | Array_type _ -> 15
-  | Type_of _ -> 16
-  | Type_var _ -> 17
-  | Type_app _ -> 18
-  | La_const _ -> 19
-  | La_scale_const _ -> 20
-  | La_add _ -> 21
-  | La_compare _ -> 22
+  | Ite _ -> 2
+  | True -> 3
+  | False -> 4
+  | Not _ -> 5
+  | And _ -> 6
+  | Or _ -> 7
+  | Forall _ -> 21
+  | Exists _ -> 25
+  | App _ -> 8
+  | Select _ -> 9
+  | Store _ -> 10
+  | Bool -> 11
+  | Int -> 12
+  | Float -> 13
+  | Type -> 14
+  | Function_type _ -> 15
+  | Array_type _ -> 16
+  | Type_of _ -> 17
+  | Type_var _ -> 18
+  | Type_app _ -> 19
+  | La_const _ -> 20
+  | La_scale_const _ -> 21
+  | La_add _ -> 22
+  | La_compare _ -> 23
 ;;
 
 let lex first second = if first <> 0 then first else second ()
@@ -456,6 +518,9 @@ let rec compare_poly : type a b. a t -> b t -> int =
   | Var v1, Var v2 -> [%compare: Tvar.t] v1 v2
   | Eq (a1, b1), Eq (a2, b2) ->
     lex (compare_poly a1 a2) (fun () -> compare_poly b1 b2)
+  | Ite (c1, t1, e1), Ite (c2, t2, e2) ->
+    lex (compare_poly c1 c2) (fun () ->
+      lex (compare_poly t1 t2) (fun () -> compare_poly e1 e2))
   | True, True -> 0
   | False, False -> 0
   | Not f1, Not f2 -> compare_poly f1 f2
@@ -505,6 +570,7 @@ let rec compare_poly : type a b. a t -> b t -> int =
         (fun () -> compare_poly b1 b2))
   | Var _, _
   | Eq _, _
+  | Ite _, _
   | True, _
   | False, _
   | Not _, _
@@ -548,6 +614,8 @@ let rec hash_fold_poly : type a. Hash.state -> a t -> Hash.state =
   match formula with
   | Var v -> [%hash_fold: Tvar.t] state v
   | Eq (a, b) -> hash_fold_poly (hash_fold_poly state a) b
+  | Ite (condition, then_, else_) ->
+    hash_fold_poly (hash_fold_poly (hash_fold_poly state condition) then_) else_
   | True -> state
   | False -> state
   | Bool -> state

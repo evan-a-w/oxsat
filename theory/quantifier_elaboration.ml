@@ -1,16 +1,7 @@
 open! Core
 open! Import
 
-(* Global, monotonically increasing so bound-variable renamings, Skolem
-   constants, and guard atoms are unique across every call to [elaborate], not
-   just within one. *)
-let next_id = ref 0
-
-let fresh_tvar ~hint () =
-  let id = !next_id in
-  incr next_id;
-  Tvar.of_string (sprintf "%s.%d" hint id)
-;;
+let fresh_tvar ~hint () = Theory_core.Fresh_tvar.create ~hint ()
 
 (* Fresh capture-avoiding renaming of a universal's bound variables, so two
    axioms reusing the same source name (and any Skolem constants) never collide. *)
@@ -105,6 +96,7 @@ let rec go
     else register_forall axioms ~bound ~triggers:[] ~body:(Not body)
   | ( Var _
     | Eq _
+    | Ite _
     | App _
     | Select _
     | Store _

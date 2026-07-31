@@ -42,7 +42,6 @@ type t =
   ; row1_emitted : Formula.Any.Hash_set.t
   ; row2_emitted : Formula.Any.Hash_set.t
   ; ext_emitted : Ext_key.Hash_set.t
-  ; mutable next_witness : int
   ; mutable last_certificate : Lemma_certificate.Array.t option
   }
 
@@ -53,7 +52,6 @@ let create () =
   ; row1_emitted = Formula.Any.Hash_set.create ()
   ; row2_emitted = Formula.Any.Hash_set.create ()
   ; ext_emitted = Ext_key.Hash_set.create ()
-  ; next_witness = 0
   ; last_certificate = None
   }
 ;;
@@ -192,13 +190,8 @@ let extensionality_key left right ~type_premises : Ext_key.t =
   }
 ;;
 
-let fresh_witness t =
-  let witness =
-    Formula.Var
-      (Tvar.of_string (sprintf "__array_extensionality_%d" t.next_witness))
-  in
-  t.next_witness <- t.next_witness + 1;
-  witness
+let fresh_witness () =
+  Formula.Var (Theory_core.Fresh_tvar.create ~hint:"array_extensionality" ())
 ;;
 
 let extensionality t egraph ~get_type =
@@ -232,7 +225,7 @@ let extensionality t egraph ~get_type =
         match Formula_egraph_uf.atom_value egraph ~atom with
         | Some false ->
           Hash_set.add t.ext_emitted key;
-          let witness = fresh_witness t in
+          let witness = fresh_witness () in
           let literals =
             List.map type_premises ~f:(fun premise ->
               Type_premise.atom premise, false)

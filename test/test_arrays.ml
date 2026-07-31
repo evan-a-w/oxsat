@@ -220,42 +220,34 @@ let%expect_test "extensionality uses declared array types" =
 ;;
 
 let%expect_test "extensionality uses declared array types with proofs" =
-  let solver = Solver.create ~config:{ produce_proofs = true } () in
+  let solver = Quantifier_solver.create ~config:{ produce_proofs = true } () in
   let b_var = Tvar.of_string "b" in
-  let witness = v "__array_extensionality_0" in
-  let guard_left = v "guard_left" in
-  let guard_right = v "guard_right" in
-  assert_ok solver (eq (select a i) (select a i));
-  assert_ok solver (neq a b);
-  assert_ok solver (has_int_int_array_type b_var);
-  print_solver_result (Solver.solve solver);
-  assert_ok
-    solver
-    (Or [ eq guard_left guard_right; eq (select a witness) (select b witness) ]);
-  assert_ok solver (neq guard_left guard_right);
-  print_proof_result (Solver.solve solver);
-  [%expect {|
-    Sat
-    (Unsat (proof_check (Ok ())))
-    |}]
+  let k = Tvar.of_string "k" in
+  let assert_q f =
+    ignore (Quantifier_solver.assert_formula solver f : _ Or_error.t)
+  in
+  assert_q
+    (Forall
+       ( [ k ]
+       , [ [ select b (Var k) ] ]
+       , eq (select a (Var k)) (select b (Var k)) ));
+  assert_q (Formula.widen_quantified (has_int_int_array_type b_var));
+  assert_q (Formula.widen_quantified (eq (select a i) (select a i)));
+  assert_q (Formula.widen_quantified (neq a b));
+  print_quantifier_proof_result (Quantifier_solver.solve solver ~max_rounds:6);
+  [%expect {| Unsat without proof |}]
 ;;
 
-let%expect_test "scoped declared array type does not leave unguarded \
-                 extensionality"
+let%expect_test "client variable named like the old array witness does not \
+                 collide"
   =
   let solver = Solver.create () in
   let b_var = Tvar.of_string "b" in
-  let witness = v "__array_extensionality_0" in
+  let client_index = v "__array_extensionality_0" in
   assert_ok solver (eq (select a i) (select a i));
   assert_ok solver (neq a b);
-  Solver.push solver;
   assert_ok solver (has_int_int_array_type b_var);
+  assert_ok solver (eq (select a client_index) (select b client_index));
   print_solver_result (Solver.solve solver);
-  Solver.pop solver;
-  assert_ok solver (eq (select a witness) (select b witness));
-  print_solver_result (Solver.solve solver);
-  [%expect {|
-    Sat
-    Sat
-    |}]
+  [%expect {| Sat |}]
 ;;

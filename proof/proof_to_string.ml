@@ -70,6 +70,12 @@ let rec formula_to_string (formula : Formula.any) =
     (match typing_judgement a b with
      | Some judgement -> judgement
      | None -> sprintf "%s = %s" (formula_to_string a) (formula_to_string b))
+  | Ite (condition, then_, else_) ->
+    sprintf
+      "ite(%s, %s, %s)"
+      (formula_to_string condition)
+      (formula_to_string then_)
+      (formula_to_string else_)
   | True -> "true"
   | False -> "false"
   | Not (Eq (a, b)) ->
