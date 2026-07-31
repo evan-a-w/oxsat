@@ -94,6 +94,16 @@ let rec record_array_term_tvars t (formula : Formula.any) =
   | _ -> ()
 ;;
 
+let rec record_adt_term_tvars t (formula : Formula.any) =
+  match formula with
+  | Var v -> record_tvar t v Formula.Theory.(Packed.T Adt)
+  | Datatype_constructor (_, args) ->
+    List.iter args ~f:(record_adt_term_tvars t)
+  | Datatype_selector (_, arg) | Datatype_tester (_, arg) ->
+    record_adt_term_tvars t arg
+  | _ -> List.iter (Formula.args formula) ~f:(record_adt_term_tvars t)
+;;
+
 let rec record_type_expr_tvars t (type_expr : Type_expr.t) =
   match type_expr with
   | Var v | Type_of v -> record_tvar t v Formula.Theory.(Packed.T Type)
@@ -115,6 +125,15 @@ let record_atom_tvars t (atom : Atom.t) =
     ->
     record_array_term_tvars t a;
     record_array_term_tvars t b
+  | `Eq
+      ( ((Datatype_constructor _ | Datatype_selector _ | Datatype_tester _) as a)
+      , b )
+  | `Eq
+      ( a
+      , ((Datatype_constructor _ | Datatype_selector _ | Datatype_tester _) as b)
+      ) ->
+    record_adt_term_tvars t a;
+    record_adt_term_tvars t b
   | `Eq (a, b) ->
     record_uf_term_tvars t a;
     record_uf_term_tvars t b
@@ -215,6 +234,7 @@ module Shape = struct
     | Type
     | La
     | Array
+    | Adt
     | Var of Tvar.t
     (* Unreachable in practice: [encode] only ever takes a
        [[> `Boolean] Formula.t], which structurally excludes [Forall]/[Exists].
@@ -235,6 +255,8 @@ let rec shape_of : type a. a Formula.t -> Shape.t =
   | Forall (_, _, _) | Exists (_, _) -> Quantified
   | App (_, _) -> Uf
   | Select (_, _) | Store (_, _, _) -> Array
+  | Datatype_constructor _ | Datatype_selector _ -> Adt
+  | Datatype_tester _ -> Bool
   | Bool | Int | Float | Type
   | Function_type (_, _)
   | Array_type (_, _)
@@ -299,6 +321,21 @@ let rec array_term_of : type a. a Formula.t -> Formula.any Or_error.t =
   | _ -> Or_error.error_s [%message "formula is not an array term"]
 ;;
 
+let rec adt_term_of : type a. a Formula.t -> Formula.any Or_error.t =
+  fun formula ->
+  match formula with
+  | Var v -> Ok (Formula.Var v)
+  | Datatype_constructor (constructor, args) ->
+    Ok
+      (Formula.Datatype_constructor (constructor, List.map args ~f:Formula.widen))
+  | Datatype_selector (selector, arg) ->
+    Ok (Formula.Datatype_selector (selector, Formula.widen arg))
+  | Datatype_tester (constructor, arg) ->
+    Ok (Formula.Datatype_tester (constructor, Formula.widen arg))
+  | Ite _ -> adt_term_of (Formula.expand_term_ites (Formula.widen formula))
+  | _ -> Or_error.error_s [%message "formula is not an ADT term"]
+;;
+
 let rec linear_expr_of : type a. a Formula.t -> Linear_expr.t Or_error.t =
   fun formula ->
   match formula with
@@ -355,6 +392,7 @@ let rec bool_formula_of
     let%bind.Or_error a = linear_expr_of a in
     let%bind.Or_error b = linear_expr_of b in
     Ok (compare_atom a op b)
+  | Datatype_tester _ as tester -> Ok (F.Atom (`Eq (tester, Formula.True)))
   | Eq (a, b) -> eq_formula_of a b
   | Var _ -> Or_error.error_s [%message "a bare variable is not a formula"]
   | _ -> Or_error.error_s [%message "formula is not boolean"]
@@ -384,6 +422,10 @@ and eq_formula_of
   | Array, _ | _, Array ->
     let%bind.Or_error a = array_term_of a in
     let%bind.Or_error b = array_term_of b in
+    Ok (F.Atom (`Eq (a, b)))
+  | Adt, _ | _, Adt ->
+    let%bind.Or_error a = adt_term_of a in
+    let%bind.Or_error b = adt_term_of b in
     Ok (F.Atom (`Eq (a, b)))
   | Uf, _ | _, Uf ->
     let%bind.Or_error a = uf_term_of a in
@@ -423,6 +465,10 @@ and neq_formula_of
   | Array, _ | _, Array ->
     let%bind.Or_error a = array_term_of a in
     let%bind.Or_error b = array_term_of b in
+    Ok (F.Not (F.Atom (`Eq (a, b))))
+  | Adt, _ | _, Adt ->
+    let%bind.Or_error a = adt_term_of a in
+    let%bind.Or_error b = adt_term_of b in
     Ok (F.Not (F.Atom (`Eq (a, b))))
   | Uf, _ | _, Uf ->
     let%bind.Or_error a = uf_term_of a in

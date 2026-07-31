@@ -100,6 +100,9 @@ let rec go
     | App _
     | Select _
     | Store _
+    | Datatype_constructor _
+    | Datatype_selector _
+    | Datatype_tester _
     | Bool
     | Int
     | Float

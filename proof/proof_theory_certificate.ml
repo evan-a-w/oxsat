@@ -93,6 +93,44 @@ module Array = struct
   [@@deriving sexp, compare]
 end
 
+module Adt = struct
+  module Cycle_edge = struct
+    type t =
+      { constructor_term : Formula.any
+      ; field : Formula.any
+      }
+    [@@deriving sexp, compare]
+  end
+
+  type t =
+    | Injectivity of
+        { constructor : Datatype.Constructor.t
+        ; left_args : Formula.any list
+        ; right_args : Formula.any list
+        ; field_index : int
+        }
+    | Disjointness of
+        { left_constructor : Datatype.Constructor.t
+        ; left_args : Formula.any list
+        ; right_constructor : Datatype.Constructor.t
+        ; right_args : Formula.any list
+        }
+    | Tester of
+        { tester_constructor : Datatype.Constructor.t
+        ; argument : Formula.any
+        ; witness_constructor : Datatype.Constructor.t
+        ; witness_args : Formula.any list
+        ; value : bool
+        }
+    | Selector of
+        { selector : Datatype.Selector.t
+        ; argument : Formula.any
+        ; constructor_args : Formula.any list
+        }
+    | Acyclicity of { cycle : Cycle_edge.t list }
+  [@@deriving sexp, compare]
+end
+
 module Bare_var_eq = struct
   module Le_direction = struct
     type t =
@@ -118,5 +156,6 @@ type t =
   | Integer_split of Integer_split.t
   | Type_theory of Type_theory.t
   | Array of Array.t
+  | Adt of Adt.t
   | Bare_var_eq of Bare_var_eq.t
 [@@deriving sexp, compare]

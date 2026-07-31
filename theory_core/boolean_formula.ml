@@ -17,6 +17,7 @@ module Shape = struct
     | Type
     | La
     | Array
+    | Adt
     | Var
     (* Unreachable via [of_formula] -- [Formula.any] structurally excludes
        [Forall]/[Exists] -- but [shape_of] is generic over any phantom tag, so
@@ -33,6 +34,8 @@ let rec shape_of : type a. a Formula.t -> Shape.t =
   | Forall _ | Exists _ -> Quantified
   | App _ -> Uf
   | Select _ | Store _ -> Array
+  | Datatype_constructor _ | Datatype_selector _ -> Adt
+  | Datatype_tester _ -> Bool
   | Bool
   | Int
   | Float
@@ -97,6 +100,21 @@ let rec array_term_of : type a. a Formula.t -> Formula.any Or_error.t =
   | _ -> Or_error.error_s [%message "formula is not an array term"]
 ;;
 
+let rec adt_term_of : type a. a Formula.t -> Formula.any Or_error.t =
+  fun formula ->
+  match formula with
+  | Var v -> Ok (Formula.Var v)
+  | Datatype_constructor (constructor, args) ->
+    Ok
+      (Formula.Datatype_constructor (constructor, List.map args ~f:Formula.widen))
+  | Datatype_selector (selector, arg) ->
+    Ok (Formula.Datatype_selector (selector, Formula.widen arg))
+  | Datatype_tester (constructor, arg) ->
+    Ok (Formula.Datatype_tester (constructor, Formula.widen arg))
+  | Ite _ -> adt_term_of (Formula.expand_term_ites (Formula.widen formula))
+  | _ -> Or_error.error_s [%message "formula is not an ADT term"]
+;;
+
 let rec linear_expr_of : type a. a Formula.t -> Linear_expr.t Or_error.t =
   fun formula ->
   match formula with
@@ -148,6 +166,7 @@ let rec of_formula (formula : Formula.any) : t Or_error.t =
     let%bind.Or_error a = linear_expr_of a in
     let%map.Or_error b = linear_expr_of b in
     compare_atom a op b
+  | Datatype_tester _ as tester -> Ok (Atom (`Eq (tester, Formula.True)))
   | Eq (a, b) -> eq_formula_of a b
   | Var _ -> Or_error.error_s [%message "a bare variable is not a formula"]
   | _ -> Or_error.error_s [%message "formula is not boolean"]
@@ -173,6 +192,10 @@ and eq_formula_of : type a. a Formula.t -> a Formula.t -> t Or_error.t =
     let%bind.Or_error a = array_term_of a in
     let%map.Or_error b = array_term_of b in
     Atom (`Eq (a, b))
+  | Adt, _ | _, Adt ->
+    let%bind.Or_error a = adt_term_of a in
+    let%map.Or_error b = adt_term_of b in
+    Atom (`Eq (a, b))
   | Uf, _ | _, Uf | Var, Var ->
     let%bind.Or_error a = uf_term_of a in
     let%map.Or_error b = uf_term_of b in
@@ -197,6 +220,10 @@ and neq_formula_of : type a. a Formula.t -> a Formula.t -> t Or_error.t =
   | Array, _ | _, Array ->
     let%bind.Or_error a = array_term_of a in
     let%map.Or_error b = array_term_of b in
+    Not (Atom (`Eq (a, b)))
+  | Adt, _ | _, Adt ->
+    let%bind.Or_error a = adt_term_of a in
+    let%map.Or_error b = adt_term_of b in
     Not (Atom (`Eq (a, b)))
   | Uf, _ | _, Uf | Var, Var ->
     let%bind.Or_error a = uf_term_of a in

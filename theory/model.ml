@@ -275,6 +275,138 @@ let check_arrays t =
     | _ -> Ok ())
 ;;
 
+let check_adts t =
+  let terms = Map.keys t.euf_classes in
+  let constructors =
+    List.filter_map terms ~f:(function
+      | Formula.Datatype_constructor (constructor, args) as term ->
+        Some (constructor, args, term)
+      | _ -> None)
+  in
+  let selectors =
+    List.filter_map terms ~f:(function
+      | Formula.Datatype_selector (selector, argument) as term ->
+        Some (selector, argument, term)
+      | _ -> None)
+  in
+  let testers =
+    List.filter_map terms ~f:(function
+      | Formula.Datatype_tester (constructor, argument) as term ->
+        Some (constructor, argument, term)
+      | _ -> None)
+  in
+  let%bind.Or_error () =
+    List.fold_result
+      constructors
+      ~init:()
+      ~f:(fun () (left_c, left_args, left) ->
+        List.fold_result
+          constructors
+          ~init:()
+          ~f:(fun () (right_c, right_args, right) ->
+            if reps_equal t left right
+            then
+              if Datatype.Datatype.equal left_c.datatype right_c.datatype
+                 && not (Datatype.Constructor.equal left_c right_c)
+              then
+                error
+                  [%message
+                    "ADT constructor disjointness is violated"
+                      (left : Formula.any)
+                      (right : Formula.any)]
+              else if Datatype.Constructor.equal left_c right_c
+              then (
+                match
+                  List.for_all2
+                    left_args
+                    right_args
+                    ~f:(fun left_arg right_arg ->
+                      reps_equal t left_arg right_arg)
+                with
+                | Ok true | Unequal_lengths -> Ok ()
+                | Ok false ->
+                  error
+                    [%message
+                      "ADT constructor injectivity is violated"
+                        (left : Formula.any)
+                        (right : Formula.any)])
+              else Ok ()
+            else Ok ()))
+  in
+  let%bind.Or_error () =
+    List.fold_result selectors ~init:() ~f:(fun () (selector, argument, term) ->
+      List.fold_result
+        constructors
+        ~init:()
+        ~f:(fun () (constructor, args, witness) ->
+          if Datatype.Constructor.equal selector.constructor constructor
+             && reps_equal t argument witness
+          then (
+            match List.nth args selector.index with
+            | Some projected when reps_equal t term projected -> Ok ()
+            | Some projected ->
+              error
+                [%message
+                  "ADT selector projection is violated"
+                    ~selector_term:(term : Formula.any)
+                    (projected : Formula.any)]
+            | None -> Ok ())
+          else Ok ()))
+  in
+  let%bind.Or_error () =
+    List.fold_result
+      testers
+      ~init:()
+      ~f:(fun () (tested_constructor, argument, tester) ->
+        List.fold_result
+          constructors
+          ~init:()
+          ~f:(fun () (constructor, _, witness) ->
+            if Datatype.Datatype.equal
+                 tested_constructor.datatype
+                 constructor.datatype
+               && reps_equal t argument witness
+            then (
+              let expected =
+                Datatype.Constructor.equal tested_constructor constructor
+              in
+              match atom_value t (`Eq (tester, Formula.True)) with
+              | True when expected -> Ok ()
+              | False when not expected -> Ok ()
+              | Unknown -> Ok ()
+              | True | False ->
+                error
+                  [%message
+                    "ADT tester value is violated"
+                      (tester : Formula.any)
+                      (expected : bool)])
+            else Ok ()))
+  in
+  let edges =
+    List.concat_map constructors ~f:(fun (_, args, term) ->
+      let source = Map.find_exn t.euf_classes term in
+      List.map args ~f:(fun field -> source, Map.find_exn t.euf_classes field))
+  in
+  let adjacency = Formula.Any.Table.create () in
+  List.iter edges ~f:(fun (source, target) ->
+    Hashtbl.add_multi adjacency ~key:source ~data:target);
+  let rec reaches ~start seen node =
+    if Formula.equal_any node start
+    then true
+    else if Set.mem seen node
+    then false
+    else (
+      let seen = Set.add seen node in
+      Hashtbl.find_multi adjacency node |> List.exists ~f:(reaches ~start seen))
+  in
+  match
+    List.find edges ~f:(fun (source, target) ->
+      reaches ~start:source Formula.Any.Set.empty target)
+  with
+  | None -> Ok ()
+  | Some _ -> error [%message "ADT acyclicity is violated"]
+;;
+
 let check_congruence t =
   let terms = Map.keys t.euf_classes in
   let args_class_equal xs ys =
@@ -329,5 +461,6 @@ let check t ~asserted_formulas =
       check_atom_consistency t ~atom ~value)
   in
   let%bind.Or_error () = check_congruence t in
-  check_arrays t
+  let%bind.Or_error () = check_arrays t in
+  check_adts t
 ;;
