@@ -32,6 +32,49 @@ module Polling_theory = struct
   let on_new_var _ ~var:_ = ()
 end
 
+module Lemma_falsified_below_current_level_theory = struct
+  type t = { mutable polls : int }
+
+  let assert_literal _ ~decision_level:_ ~literal:_ = ()
+
+  let maybe_get_lemma t =
+    t.polls <- t.polls + 1;
+    match t.polls with
+    | 1 -> `Consistent
+    | _ -> `Lemma { Modes.Global.global = [| 1; 2 |] }
+  ;;
+
+  let undo _ ~to_decision_level_excl:_ = ()
+  let on_new_var _ ~var:_ = ()
+end
+
+let%expect_test "theory lemma falsified below current decision level" =
+  let theory = { Lemma_falsified_below_current_level_theory.polls = 0 } in
+  let solver =
+    Solver.create
+      ~theory:
+        (Theory.pack (module Lemma_falsified_below_current_level_theory) theory)
+      ()
+  in
+  ignore (Solver.add_clause solver ~clause:[| -1 |] : [ `Ok | `Unsat of _ ]);
+  ignore (Solver.add_clause solver ~clause:[| -2 |] : [ `Ok | `Unsat of _ ]);
+  ignore (Solver.add_clause solver ~clause:[| 3; 4 |] : [ `Ok | `Unsat of _ ]);
+  (match Solver.solve solver with
+   | Sat _ ->
+     print_s
+       [%message
+         "SAT"
+           ~polls:(theory.polls : int)
+           ~max_decision_level:((Solver.stats solver).#max_decision_level : int)]
+   | Unsat _ ->
+     print_s
+       [%message
+         "UNSAT"
+           ~polls:(theory.polls : int)
+           ~max_decision_level:((Solver.stats solver).#max_decision_level : int)]);
+  [%expect {| (UNSAT (polls 2) (max_decision_level 1)) |}]
+;;
+
 let%expect_test "a satisfied theory lemma does not mask a later conflict" =
   let theory = { Polling_theory.polls = 0 } in
   let solver =

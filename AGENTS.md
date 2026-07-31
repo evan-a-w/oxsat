@@ -47,3 +47,6 @@ the ideas elsewhere. For instance, I might change the API slightly to make it
 cleaner, or remove/reword comments, and you should respect that.
 
 Don't write useless comments.
+
+Please limit usage of claude models. If I have explicitly chosen you to be
+claude, that's fine, but for subagents prefer to use non claude models.
