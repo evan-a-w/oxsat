@@ -45,6 +45,10 @@ module Array = struct
   type t = Proof.Theory_certificate.Array.t
 end
 
+module Adt = struct
+  type t = Proof.Theory_certificate.Adt.t
+end
+
 module Type_theory = struct
   type t =
     { left : Type_expr.t
@@ -59,6 +63,7 @@ type t =
   | Integer_split of Proof.Theory_certificate.Integer_split.t
   | Type_theory of Type_theory.t
   | Array of Array.t
+  | Adt of Adt.t
   | Bare_var_eq of Proof.Theory_certificate.Bare_var_eq.t
 
 (* Index of the clause literal whose theory atom is [atom] (up to
@@ -132,5 +137,6 @@ let to_theory_certificate clause (t : t) : Proof.Theory_certificate.t =
       ; premise_literals = List.map premises ~f:(index_of_atom clause)
       }
   | Array certificate -> Array certificate
+  | Adt certificate -> Adt certificate
   | Bare_var_eq certificate -> Bare_var_eq certificate
 ;;

@@ -7,6 +7,7 @@ type any_theory =
   | `Type
   | `La
   | `Array
+  | `Adt
   | `Term
   | `Atom
   ]
@@ -38,6 +39,12 @@ type _ t =
   (* Arrays *)
   | Select : 'a t * 'a t -> ([> `Array ] as 'a) t
   | Store : 'a t * 'a t * 'a t -> ([> `Array ] as 'a) t
+  (* Algebraic datatypes *)
+  | Datatype_constructor :
+      Datatype.Constructor.t * 'a t list
+      -> ([> `Adt ] as 'a) t
+  | Datatype_selector : Datatype.Selector.t * 'a t -> ([> `Adt ] as 'a) t
+  | Datatype_tester : Datatype.Constructor.t * 'a t -> ([> `Boolean ] as 'a) t
   (* Types *)
   | Bool : [> `Type ] t
   | Int : [> `Type ] t
@@ -73,6 +80,9 @@ module Op = struct
     | App of Tvar.t
     | Select
     | Store
+    | Datatype_constructor of Datatype.Constructor.t
+    | Datatype_selector of Datatype.Selector.t
+    | Datatype_tester of Datatype.Constructor.t
     | Bool
     | Int
     | Float
@@ -110,6 +120,9 @@ let op : type a. a t -> Op.t =
   | App (v, _) -> App v
   | Select _ -> Select
   | Store _ -> Store
+  | Datatype_constructor (constructor, _) -> Datatype_constructor constructor
+  | Datatype_selector (selector, _) -> Datatype_selector selector
+  | Datatype_tester (constructor, _) -> Datatype_tester constructor
   | Bool -> Bool
   | Int -> Int
   | Float -> Float
@@ -131,6 +144,7 @@ module Theory = struct
     | Type : [ `Type | `Atom | `Term ] t
     | La : [ `La | `Atom | `Term ] t
     | Array : [ `Array | `Atom | `Term ] t
+    | Adt : [ `Adt | `Atom | `Term ] t
     | Boolean : [ `Boolean | `Atom | `Term ] t
     | Shared : any_theory t
 
@@ -145,6 +159,7 @@ module Theory = struct
       | Type -> Sexp.Atom "Type"
       | La -> Sexp.Atom "La"
       | Array -> Sexp.Atom "Array"
+      | Adt -> Sexp.Atom "Adt"
       | Boolean -> Sexp.Atom "Boolean"
       | Shared -> Sexp.Atom "Shared"
     ;;
@@ -155,9 +170,10 @@ module Theory = struct
       | Type, Type
       | La, La
       | Array, Array
+      | Adt, Adt
       | Boolean, Boolean
       | Shared, Shared -> true
-      | (Uf | Type | La | Array | Boolean | Shared), _ -> false
+      | (Uf | Type | La | Array | Adt | Boolean | Shared), _ -> false
     ;;
 
     let join a b = if equal a b then a else T Shared
@@ -187,6 +203,9 @@ let args (type a) (t : a t) : any list =
   | App (_, l) -> widen_list l
   | Select (array, index) -> [ widen array; widen index ]
   | Store (array, index, value) -> [ widen array; widen index; widen value ]
+  | Datatype_constructor (_, args) -> widen_list args
+  | Datatype_selector (_, arg) -> [ widen arg ]
+  | Datatype_tester (_, arg) -> [ widen arg ]
   | Bool -> []
   | Int -> []
   | Float -> []
@@ -219,6 +238,14 @@ let make_opt ~(op : Op.t) ~(args : any list) : any option =
   | App v, l -> Some (App (v, l))
   | Select, [ array; index ] -> Some (Select (array, index))
   | Store, [ array; index; value ] -> Some (Store (array, index, value))
+  | Datatype_constructor constructor, args ->
+    if List.length args = constructor.arity
+    then Some (Datatype_constructor (constructor, args))
+    else None
+  | Datatype_selector selector, [ arg ] ->
+    Some (Datatype_selector (selector, arg))
+  | Datatype_tester constructor, [ arg ] ->
+    Some (Datatype_tester (constructor, arg))
   | Bool, [] -> Some Bool
   | Int, [] -> Some Int
   | Float, [] -> Some Float
@@ -240,6 +267,8 @@ let make_opt ~(op : Op.t) ~(args : any list) : any option =
       | Not
       | Select
       | Store
+      | Datatype_selector _
+      | Datatype_tester _
       | Bool
       | Int
       | Float
@@ -358,6 +387,20 @@ let rec sexp_of_t : type a. (a -> Sexp.t) -> a t -> Sexp.t =
     node "Select" [ sexp_of_sub array; sexp_of_sub index ]
   | Store (array, index, value) ->
     node "Store" [ sexp_of_sub array; sexp_of_sub index; sexp_of_sub value ]
+  | Datatype_constructor (constructor, args) ->
+    node
+      "Datatype_constructor"
+      [ [%sexp_of: Datatype.Constructor.t] constructor
+      ; [%sexp_of: Sexp.t list] (List.map args ~f:sexp_of_sub)
+      ]
+  | Datatype_selector (selector, arg) ->
+    node
+      "Datatype_selector"
+      [ [%sexp_of: Datatype.Selector.t] selector; sexp_of_sub arg ]
+  | Datatype_tester (constructor, arg) ->
+    node
+      "Datatype_tester"
+      [ [%sexp_of: Datatype.Constructor.t] constructor; sexp_of_sub arg ]
   | Bool -> Sexp.Atom "Bool"
   | Int -> Sexp.Atom "Int"
   | Float -> Sexp.Atom "Float"
@@ -430,6 +473,16 @@ let rec any_of_sexp sexp : any =
        Select (any_of_sexp array, any_of_sexp index)
      | "Store", [ array; index; value ] ->
        Store (any_of_sexp array, any_of_sexp index, any_of_sexp value)
+     | "Datatype_constructor", [ constructor; args ] ->
+       Datatype_constructor
+         ( [%of_sexp: Datatype.Constructor.t] constructor
+         , [%of_sexp: Sexp.t list] args |> List.map ~f:any_of_sexp )
+     | "Datatype_selector", [ selector; arg ] ->
+       Datatype_selector
+         ([%of_sexp: Datatype.Selector.t] selector, any_of_sexp arg)
+     | "Datatype_tester", [ constructor; arg ] ->
+       Datatype_tester
+         ([%of_sexp: Datatype.Constructor.t] constructor, any_of_sexp arg)
      | "Function_type", [ a; b ] -> Function_type (any_of_sexp a, any_of_sexp b)
      | "Array_type", [ index; element ] ->
        Array_type (any_of_sexp index, any_of_sexp element)
@@ -481,24 +534,27 @@ let rank : type a. a t -> int = function
   | Not _ -> 5
   | And _ -> 6
   | Or _ -> 7
-  | Forall _ -> 21
-  | Exists _ -> 25
-  | App _ -> 8
-  | Select _ -> 9
-  | Store _ -> 10
-  | Bool -> 11
-  | Int -> 12
-  | Float -> 13
-  | Type -> 14
-  | Function_type _ -> 15
-  | Array_type _ -> 16
-  | Type_of _ -> 17
-  | Type_var _ -> 18
-  | Type_app _ -> 19
-  | La_const _ -> 20
-  | La_scale_const _ -> 21
-  | La_add _ -> 22
-  | La_compare _ -> 23
+  | Forall _ -> 8
+  | Exists _ -> 9
+  | App _ -> 10
+  | Select _ -> 11
+  | Store _ -> 12
+  | Datatype_constructor _ -> 13
+  | Datatype_selector _ -> 14
+  | Datatype_tester _ -> 15
+  | Bool -> 16
+  | Int -> 17
+  | Float -> 18
+  | Type -> 19
+  | Function_type _ -> 20
+  | Array_type _ -> 21
+  | Type_of _ -> 22
+  | Type_var _ -> 23
+  | Type_app _ -> 24
+  | La_const _ -> 25
+  | La_scale_const _ -> 26
+  | La_add _ -> 27
+  | La_compare _ -> 28
 ;;
 
 let lex first second = if first <> 0 then first else second ()
@@ -544,6 +600,16 @@ let rec compare_poly : type a b. a t -> b t -> int =
   | Store (a1, i1, v1), Store (a2, i2, v2) ->
     lex (compare_poly a1 a2) (fun () ->
       lex (compare_poly i1 i2) (fun () -> compare_poly v1 v2))
+  | Datatype_constructor (c1, args1), Datatype_constructor (c2, args2) ->
+    lex
+      ([%compare: Datatype.Constructor.t] c1 c2)
+      (fun () -> compare_list_poly compare_poly args1 args2)
+  | Datatype_selector (s1, a1), Datatype_selector (s2, a2) ->
+    lex ([%compare: Datatype.Selector.t] s1 s2) (fun () -> compare_poly a1 a2)
+  | Datatype_tester (c1, a1), Datatype_tester (c2, a2) ->
+    lex
+      ([%compare: Datatype.Constructor.t] c1 c2)
+      (fun () -> compare_poly a1 a2)
   | Bool, Bool -> 0
   | Int, Int -> 0
   | Float, Float -> 0
@@ -581,6 +647,9 @@ let rec compare_poly : type a b. a t -> b t -> int =
   | App _, _
   | Select _, _
   | Store _, _
+  | Datatype_constructor _, _
+  | Datatype_selector _, _
+  | Datatype_tester _, _
   | Bool, _
   | Int, _
   | Float, _
@@ -638,6 +707,15 @@ let rec hash_fold_poly : type a. Hash.state -> a t -> Hash.state =
   | Select (array, index) -> hash_fold_poly (hash_fold_poly state array) index
   | Store (array, index, value) ->
     hash_fold_poly (hash_fold_poly (hash_fold_poly state array) index) value
+  | Datatype_constructor (constructor, args) ->
+    hash_fold_list_poly
+      hash_fold_poly
+      ([%hash_fold: Datatype.Constructor.t] state constructor)
+      args
+  | Datatype_selector (selector, arg) ->
+    hash_fold_poly ([%hash_fold: Datatype.Selector.t] state selector) arg
+  | Datatype_tester (constructor, arg) ->
+    hash_fold_poly ([%hash_fold: Datatype.Constructor.t] state constructor) arg
   | Function_type (a, b) -> hash_fold_poly (hash_fold_poly state a) b
   | Array_type (index, element) ->
     hash_fold_poly (hash_fold_poly state index) element

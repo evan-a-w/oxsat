@@ -42,6 +42,10 @@ module Array : sig
   type t = Proof.Theory_certificate.Array.t
 end
 
+module Adt : sig
+  type t = Proof.Theory_certificate.Adt.t
+end
+
 module Type_theory : sig
   type t =
     { left : Type_expr.t
@@ -56,6 +60,7 @@ type t =
   | Integer_split of Proof.Theory_certificate.Integer_split.t
   | Type_theory of Type_theory.t
   | Array of Array.t
+  | Adt of Adt.t
   | Bare_var_eq of Proof.Theory_certificate.Bare_var_eq.t
 
 (** Resolves the certificate's atom references to positional indices in

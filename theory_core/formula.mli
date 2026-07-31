@@ -7,6 +7,7 @@ type any_theory =
   | `Type
   | `La
   | `Array
+  | `Adt
   | `Term
   | `Atom
   ]
@@ -46,6 +47,12 @@ type _ t =
   (* Arrays *)
   | Select : 'a t * 'a t -> ([> `Array ] as 'a) t
   | Store : 'a t * 'a t * 'a t -> ([> `Array ] as 'a) t
+  (* Algebraic datatypes *)
+  | Datatype_constructor :
+      Datatype.Constructor.t * 'a t list
+      -> ([> `Adt ] as 'a) t
+  | Datatype_selector : Datatype.Selector.t * 'a t -> ([> `Adt ] as 'a) t
+  | Datatype_tester : Datatype.Constructor.t * 'a t -> ([> `Boolean ] as 'a) t
   (* Types *)
   | Bool : [> `Type ] t
   | Int : [> `Type ] t
@@ -74,6 +81,7 @@ module Theory : sig
     | Type : [ `Type | `Atom | `Term ] t
     | La : [ `La | `Atom | `Term ] t
     | Array : [ `Array | `Atom | `Term ] t
+    | Adt : [ `Adt | `Atom | `Term ] t
     | Boolean : [ `Boolean | `Atom | `Term ] t
     | Shared : any_theory t
 
@@ -145,6 +153,9 @@ module Op : sig
     | App of Tvar.t
     | Select
     | Store
+    | Datatype_constructor of Datatype.Constructor.t
+    | Datatype_selector of Datatype.Selector.t
+    | Datatype_tester of Datatype.Constructor.t
     | Bool
     | Int
     | Float

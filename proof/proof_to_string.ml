@@ -102,6 +102,18 @@ let rec formula_to_string (formula : Formula.any) =
       (formula_to_string array)
       (formula_to_string index)
       (formula_to_string value)
+  | Datatype_constructor (constructor, args) ->
+    sprintf
+      "%s(%s)"
+      (Tvar.to_string constructor.name)
+      (String.concat ~sep:", " (List.map args ~f:formula_to_string))
+  | Datatype_selector (selector, argument) ->
+    sprintf "%s(%s)" (Tvar.to_string selector.name) (formula_to_string argument)
+  | Datatype_tester (constructor, argument) ->
+    sprintf
+      "is-%s(%s)"
+      (Tvar.to_string constructor.name)
+      (formula_to_string argument)
   | Bool -> "bool"
   | Int -> "int"
   | Float -> "float"
@@ -440,6 +452,11 @@ let certificate_to_string ~clause (certificate : Proof_theory_certificate.t) =
          (formula_to_string witness)
          (formula_to_string right)
          (formula_to_string witness))
+  | Adt certificate ->
+    sprintf
+      "ADT: %s"
+      ([%sexp_of: Proof_theory_certificate.Adt.t] certificate
+       |> Sexp.to_string_hum)
   | Bare_var_eq certificate ->
     (match certificate with
      | Equality_implies_type_equality (a, b) ->

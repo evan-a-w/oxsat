@@ -29,10 +29,13 @@ let theory_literal atom positive =
   Proof_literal.create ~atom:(Theory atom) ~positive
 ;;
 
+let eq_literal left right = theory_literal (`Eq (left, right)) true
+let neq_literal left right = theory_literal (`Eq (left, right)) false
+
 let check_array clause certificate =
   let open Proof_theory_certificate.Array in
-  let eq left right = theory_literal (`Eq (left, right)) true in
-  let neq left right = theory_literal (`Eq (left, right)) false in
+  let eq = eq_literal in
+  let neq = neq_literal in
   let not_has_type (var, type_expr) =
     theory_literal (`Type_eq (Type_expr.Var var, type_expr)) false
   in
@@ -57,6 +60,107 @@ let check_array clause certificate =
   if clause_equal clause expected
   then Ok ()
   else error "array certificate does not match its clause"
+;;
+
+let check_adt clause certificate =
+  let open Proof_theory_certificate.Adt in
+  let constructor_term constructor args =
+    Formula.Datatype_constructor (constructor, args)
+  in
+  let tester_atom constructor argument =
+    `Eq (Formula.Datatype_tester (constructor, argument), Formula.True)
+  in
+  let selector_term selector argument =
+    Formula.Datatype_selector (selector, argument)
+  in
+  let guard argument witness =
+    if Formula.equal_any argument witness
+    then []
+    else [ neq_literal argument witness ]
+  in
+  let field args index =
+    if index < 0 || index >= List.length args then None else List.nth args index
+  in
+  let expected =
+    match certificate with
+    | Injectivity { constructor; left_args; right_args; field_index } ->
+      Option.map2
+        (field left_args field_index)
+        (field right_args field_index)
+        ~f:(fun left right ->
+          [ neq_literal
+              (constructor_term constructor left_args)
+              (constructor_term constructor right_args)
+          ; eq_literal left right
+          ])
+    | Disjointness
+        { left_constructor; left_args; right_constructor; right_args } ->
+      if Datatype.Datatype.equal
+           left_constructor.datatype
+           right_constructor.datatype
+         && not (Datatype.Constructor.equal left_constructor right_constructor)
+      then
+        Some
+          [ neq_literal
+              (constructor_term left_constructor left_args)
+              (constructor_term right_constructor right_args)
+          ]
+      else None
+    | Tester
+        { tester_constructor
+        ; argument
+        ; witness_constructor
+        ; witness_args
+        ; value
+        } ->
+      let witness = constructor_term witness_constructor witness_args in
+      if Datatype.Datatype.equal
+           tester_constructor.datatype
+           witness_constructor.datatype
+         && Bool.equal
+              value
+              (Datatype.Constructor.equal
+                 tester_constructor
+                 witness_constructor)
+      then
+        Some
+          (guard argument witness
+           @ [ theory_literal (tester_atom tester_constructor argument) value ]
+          )
+      else None
+    | Selector { selector; argument; constructor_args } ->
+      let constructor = selector.constructor in
+      let witness = constructor_term constructor constructor_args in
+      Option.map (field constructor_args selector.index) ~f:(fun projected ->
+        guard argument witness
+        @ [ eq_literal (selector_term selector argument) projected ])
+    | Acyclicity { cycle } ->
+      (match cycle with
+       | [] -> None
+       | _ ->
+         let fields = List.map cycle ~f:(fun edge -> edge.Cycle_edge.field) in
+         let previous_fields =
+           match List.rev fields with
+           | [] -> []
+           | last :: rev_rest -> last :: List.rev rev_rest
+         in
+         let valid_edges =
+           List.for_all cycle ~f:(fun { Cycle_edge.constructor_term; field } ->
+             match constructor_term with
+             | Formula.Datatype_constructor (_, args) ->
+               List.exists args ~f:(Formula.equal_any field)
+             | _ -> false)
+         in
+         if valid_edges
+         then
+           Some
+             (List.map2_exn cycle previous_fields ~f:(fun edge previous_field ->
+                neq_literal edge.constructor_term previous_field))
+         else None)
+  in
+  match expected with
+  | Some expected when clause_equal clause expected -> Ok ()
+  | Some _ | None -> error "ADT certificate does not match its clause"
 ;;
 
 let check_bare_var_eq clause certificate =
@@ -368,5 +472,6 @@ let check ~clause = function
   | Linear_arithmetic certificate -> check_linear_arithmetic clause certificate
   | Type_theory certificate -> check_type_theory clause certificate
   | Array certificate -> check_array clause certificate
+  | Adt certificate -> check_adt clause certificate
   | Euf certificate -> check_euf clause certificate
 ;;
