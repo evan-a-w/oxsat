@@ -193,6 +193,31 @@ let%expect_test "undeclared ADT terms are rejected" =
     |}]
 ;;
 
+let%expect_test "wrong-arity ADT constructor applications are rejected" =
+  let solver = create_solver () in
+  let wrong_nil : Formula.any =
+    Datatype_constructor (nil_constructor, [ v "x" ])
+  in
+  let wrong_cons : Formula.any =
+    Datatype_constructor (cons_constructor, [ nil ])
+  in
+  print_s
+    [%sexp
+      (Solver.assert_formula solver (eq wrong_nil wrong_nil) : _ Or_error.t)];
+  print_s
+    [%sexp
+      (Solver.assert_formula solver (eq wrong_cons wrong_cons) : _ Or_error.t)];
+  [%expect
+    {|
+    (Error
+     ("ADT constructor application has the wrong arity"
+      (constructor ((datatype ((name list))) (name Nil) (arity 0))) (actual 1)))
+    (Error
+     ("ADT constructor application has the wrong arity"
+      (constructor ((datatype ((name list))) (name Cons) (arity 2))) (actual 1)))
+    |}]
+;;
+
 let%expect_test "enum exhaustiveness" =
   let solver = create_color_solver () in
   let x = v "x" in
@@ -544,6 +569,21 @@ let%expect_test "scoped ADT tester premise can be popped" =
     Unsat
     Sat
     |}]
+;;
+
+let%expect_test "scoped ADT completeness proof certificate" =
+  let solver =
+    Solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
+  in
+  Solver.push solver;
+  Or_error.ok_exn (Solver.declare_datatype solver color_declaration);
+  assert_ok solver (neq (v "x") red);
+  assert_ok solver (neq (v "x") green);
+  assert_ok solver (neq (v "x") blue);
+  print_proof_result (Solver.solve solver);
+  [%expect {| (Unsat (proof_check (Ok ()))) |}]
 ;;
 
 let%expect_test "ADT proof certificates" =
