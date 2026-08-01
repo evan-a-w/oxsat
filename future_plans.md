@@ -22,18 +22,6 @@
 - Keep wall-clock timeout as an emergency escape hatch, not the reproducibility
   mechanism.
 
-## Algebraic datatypes follow-ups
-
-- Add a datatype declaration environment rather than relying only on
-  self-describing constructor metadata in formula nodes.
-- Use declarations for constructor exhaustiveness / finite-domain reasoning, e.g.
-  refuting `x != Red && x != Green && x != Blue` for an exhaustive enum.
-- Add constructor-completeness lemmas lazily from the ADT/egraph layer, not as
-  external quantified axioms.
-- Keep selectors on wrong constructors underspecified.
-- Document ADT model checking as finite-ground unless/until a full model
-  representation is implemented.
-
 ## Nested quantifiers
 
 - Widen quantifier bodies so nested quantifiers and alternation are expressible.

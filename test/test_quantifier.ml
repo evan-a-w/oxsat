@@ -282,7 +282,9 @@ let%expect_test "produce_proofs: a quantifier-driven unsat yields a checked \
                  proof, with zero special-casing needed for instances"
   =
   let qs =
-    Quantifier_solver.create ~config:{ Solver.Config.produce_proofs = true } ()
+    Quantifier_solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
   in
   let f_sym = Tvar.of_string "f" in
   let f arg : Formula.any = App (f_sym, [ arg ]) in
@@ -346,7 +348,9 @@ let%expect_test "produce_proofs: a bare existential drives a checked, fully \
                  printed proof"
   =
   let qs =
-    Quantifier_solver.create ~config:{ Solver.Config.produce_proofs = true } ()
+    Quantifier_solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
   in
   let f arg : Formula.any = App (Tvar.of_string "f", [ arg ]) in
   let g arg : Formula.any = App (Tvar.of_string "g", [ arg ]) in
@@ -406,7 +410,9 @@ let%expect_test "produce_proofs: forall + existential in one top-level \
                  conjunction, both cited"
   =
   let qs =
-    Quantifier_solver.create ~config:{ Solver.Config.produce_proofs = true } ()
+    Quantifier_solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
   in
   let f_sym = Tvar.of_string "f" in
   let f arg : Formula.any = App (f_sym, [ arg ]) in
@@ -467,7 +473,9 @@ let%expect_test "produce_proofs: a nested quantifier still solves but declines \
                  a proof"
   =
   let qs =
-    Quantifier_solver.create ~config:{ Solver.Config.produce_proofs = true } ()
+    Quantifier_solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
   in
   let f_sym = Tvar.of_string "f" in
   let f arg : Formula.any = App (f_sym, [ arg ]) in
@@ -504,7 +512,9 @@ let%expect_test "produce_proofs: a nested quantifier still solves but declines \
    contradict the disequality. Two [∀-instantiation] steps feed one refutation. *)
 let%expect_test "produce_proofs: one universal instantiated at two terms" =
   let qs =
-    Quantifier_solver.create ~config:{ Solver.Config.produce_proofs = true } ()
+    Quantifier_solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
   in
   let f arg : Formula.any = App (Tvar.of_string "f", [ arg ]) in
   let c : Formula.any = Var (Tvar.of_string "c") in
@@ -562,7 +572,9 @@ let%expect_test "produce_proofs: one universal instantiated at two terms" =
    trusting rather than verifying. *)
 let%expect_test "produce_proofs: the checker rejects mutations of a real proof" =
   let qs =
-    Quantifier_solver.create ~config:{ Solver.Config.produce_proofs = true } ()
+    Quantifier_solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
   in
   let f arg : Formula.any = App (Tvar.of_string "f", [ arg ]) in
   let c : Formula.any = Var (Tvar.of_string "c") in

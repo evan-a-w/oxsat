@@ -418,7 +418,9 @@ let check proof =
          proof's conclusion (eigenvariable condition)")
 ;;
 
-let check_theory_certificate = Proof_theory_certificate_check.check
+let check_theory_certificate ?datatype_env ~clause certificate =
+  Proof_theory_certificate_check.check ?datatype_env ~clause certificate
+;;
 
 let subst_to_string pairs =
   String.concat

@@ -2,9 +2,13 @@ open! Core
 open! Import
 
 module Config = struct
-  type t = { produce_proofs : bool } [@@deriving sexp_of]
+  type t =
+    { produce_proofs : bool
+    ; datatype_env : Datatype.Env.t
+    }
+  [@@deriving sexp_of]
 
-  let default = { produce_proofs = false }
+  let default = { produce_proofs = false; datatype_env = Datatype.Env.empty }
 end
 
 let lemma_to_clause literals ~sat_var_for_atom =
@@ -334,7 +338,7 @@ let create ?(config = Config.default) () =
   let encoding = Encoding.create ~produce_proofs:config.produce_proofs () in
   let bare_var_eq = Bare_var_eq.create () in
   let arrays = Arrays.create () in
-  let adts = Adts.create () in
+  let adts = Adts.create ~env:config.datatype_env () in
   let combined =
     { Combined_theory.egraph
     ; tt
@@ -403,41 +407,90 @@ let guard_clauses ~activation clauses =
   List.map clauses ~f:(fun clause -> Array.append [| -activation |] clause)
 ;;
 
-let assert_formula t (formula : Formula.any)
+let rec assert_formula t (formula : Formula.any)
   : [ `Ok | `Unsat of Feel.Sat_result.Core_clause.t list ] Or_error.t
   =
-  let encoded_formula = Formula.expand_term_ites formula in
-  let%bind.Or_error clauses =
-    Encoding.encode t.encoding ~formula:encoded_formula
+  let%bind.Or_error () = Adts.validate_formula t.combined.adts formula in
+  let%bind.Or_error type_constraints =
+    Adts.type_constraints t.combined.adts formula
   in
-  Vec.Value.push t.pending_egraph_terms encoded_formula;
-  let root_lit = (List.last_exn clauses).(0) in
-  Hashtbl.set t.formula_by_root_lit ~key:root_lit ~data:encoded_formula;
-  (match t.asserted_scopes with
-   | current :: outer ->
-     t.asserted_scopes <- (encoded_formula :: current) :: outer
-   | [] -> assert false);
-  let clauses =
-    match t.scopes with
-    | [] -> clauses
-    | activation :: _ -> guard_clauses ~activation clauses
-  in
-  let result =
+  let%bind.Or_error type_result =
     List.fold_until
-      clauses
+      type_constraints
       ~init:`Ok
-      ~f:(fun (`Ok : [ `Ok ]) clause ->
-        match Feel.Solver.add_clause t.solver ~clause with
-        | `Ok -> Continue `Ok
-        | `Unsat _ as unsat -> Stop unsat)
-      ~finish:(fun (`Ok : [ `Ok ]) -> `Ok)
+      ~f:(fun (`Ok : [ `Ok ]) (var, type_expr) ->
+        match
+          assert_formula
+            t
+            (Encoding.atom_to_formula
+               (Tvar_types.has_type var type_expr :> Atom.t))
+        with
+        | Error error -> Stop (Error error)
+        | Ok `Ok -> Continue `Ok
+        | Ok (`Unsat _ as unsat) -> Stop (Ok unsat))
+      ~finish:(fun (`Ok : [ `Ok ]) -> Ok `Ok)
   in
-  (match result, t.proof_generation with
-   | `Ok, Some proof_generation ->
-     Proof_generation.assert_formula proof_generation encoded_formula
-   | (`Ok | `Unsat _), None | `Unsat _, Some _ -> ());
-  Ok result
+  match type_result with
+  | `Unsat _ as unsat -> Ok unsat
+  | `Ok ->
+    let encoded_formula = Formula.expand_term_ites formula in
+    let%bind.Or_error clauses =
+      Encoding.encode t.encoding ~formula:encoded_formula
+    in
+    Vec.Value.push t.pending_egraph_terms encoded_formula;
+    let root_lit = (List.last_exn clauses).(0) in
+    Hashtbl.set t.formula_by_root_lit ~key:root_lit ~data:encoded_formula;
+    (match t.asserted_scopes with
+     | current :: outer ->
+       t.asserted_scopes <- (encoded_formula :: current) :: outer
+     | [] -> assert false);
+    let clauses =
+      match t.scopes with
+      | [] -> clauses
+      | activation :: _ -> guard_clauses ~activation clauses
+    in
+    let result =
+      List.fold_until
+        clauses
+        ~init:`Ok
+        ~f:(fun (`Ok : [ `Ok ]) clause ->
+          match Feel.Solver.add_clause t.solver ~clause with
+          | `Ok -> Continue `Ok
+          | `Unsat _ as unsat -> Stop unsat)
+        ~finish:(fun (`Ok : [ `Ok ]) -> `Ok)
+    in
+    (match result, t.proof_generation with
+     | `Ok, Some proof_generation ->
+       Proof_generation.assert_formula proof_generation encoded_formula
+     | (`Ok | `Unsat _), None | `Unsat _, Some _ -> ());
+    Ok result
 ;;
+
+let declaration_guard_atom declaration : Atom.Equality.t =
+  let hint =
+    "adt_" ^ Tvar.to_string declaration.Datatype.Declaration.datatype.name
+  in
+  `Type_eq
+    ( Type_expr.Var (Theory_core.Fresh_tvar.create ~hint:(hint ^ "_on") ())
+    , Type_expr.Var (Theory_core.Fresh_tvar.create ~hint:(hint ^ "_off") ()) )
+;;
+
+let declare_datatype t declaration =
+  match t.scopes with
+  | [] -> Adts.declare t.combined.adts declaration
+  | _ :: _ ->
+    let guard = declaration_guard_atom declaration in
+    let%bind.Or_error () = Adts.declare t.combined.adts declaration ~guard in
+    let%bind.Or_error result =
+      assert_formula t (Encoding.atom_to_formula (guard :> Atom.t))
+    in
+    (match result with
+     | `Ok -> Ok ()
+     | `Unsat _ ->
+       Or_error.error_s [%message "datatype declaration guard is unsat"])
+;;
+
+let datatype_env t = Adts.env t.combined.adts
 
 (* Proof provenance for a quantifier layer on top ({!Quantifier_solver}): no-ops
    unless proof production is on. See {!Proof_generation}. *)
@@ -470,6 +523,7 @@ let push t =
   let activation = Encoding.fresh_var t.encoding in
   t.scopes <- activation :: t.scopes;
   t.asserted_scopes <- [] :: t.asserted_scopes;
+  Adts.push t.combined.adts;
   Option.iter t.proof_generation ~f:Proof_generation.push
 ;;
 
@@ -479,6 +533,7 @@ let pop t =
   | _ :: rest, _ :: asserted_rest ->
     t.scopes <- rest;
     t.asserted_scopes <- asserted_rest;
+    Adts.pop t.combined.adts;
     Option.iter t.proof_generation ~f:Proof_generation.pop
 ;;
 
@@ -593,6 +648,7 @@ let solve ?time_bound ?(assumptions = [||]) t : Solver_result.t =
           ~certificate_for_atoms:
             (Combined_theory.certificate_for_atoms t.combined)
           ~formula_by_root_lit:t.formula_by_root_lit
+          ~datatype_env:(Adts.env t.combined.adts)
           ~scope_vars:t.scopes
           ~refutation_clauses)
     in
@@ -615,7 +671,11 @@ let active_asserted_formulas t =
 ;;
 
 let check_model t (model : Model.t) =
-  Model.check model ~asserted_formulas:(active_asserted_formulas t)
+  Model.check
+    model
+    ~datatype_env:(Adts.env t.combined.adts)
+    ~adt_observations:(Adts.datatype_observations t.combined.adts)
+    ~asserted_formulas:(active_asserted_formulas t)
 ;;
 
 let egraph t =

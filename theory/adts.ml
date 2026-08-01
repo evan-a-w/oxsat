@@ -41,8 +41,12 @@ module Emitted_key = struct
       | Injectivity of Formula.any * Formula.any * int
       | Disjointness of Formula.any * Formula.any
       | Tester of Formula.any * Formula.any * Formula.any
+      | Tester_exclusivity of Formula.any * Formula.any
+      | Tester_reconstruction of Formula.any * Datatype.Constructor.t
       | Selector of Formula.any * Formula.any
       | Acyclicity of (Formula.any * Formula.any) list
+      | Completeness of
+          Formula.any * Datatype.Datatype.t * Atom.Equality.t option
     [@@deriving sexp, compare, hash]
   end
 
@@ -50,23 +54,103 @@ module Emitted_key = struct
   include functor Hashable.Make
 end
 
+module Declared = struct
+  type t =
+    { declaration : Datatype.Declaration.t
+    ; guard : Atom.Equality.t option
+    }
+  [@@deriving sexp_of]
+end
+
+module Scope = struct
+  type t =
+    { has_adt : bool
+    ; env : Datatype.Env.t
+    ; declared : Declared.t Datatype.Datatype.Map.t
+    ; observations : Datatype.Datatype.Set.t Formula.Any.Map.t
+    }
+  [@@deriving sexp_of]
+end
+
 type t =
   { mutable has_adt : bool
   ; emitted : Emitted_key.Hash_set.t
   ; mutable last_certificate : Proof.Theory_certificate.Adt.t option
+  ; mutable env : Datatype.Env.t
+  ; mutable declared : Declared.t Datatype.Datatype.Map.t
+  ; mutable scopes : Scope.t list
+  ; mutable observations : Datatype.Datatype.Set.t Formula.Any.Map.t
   }
 
-let create () =
+let create ?(env = Datatype.Env.empty) () =
+  let declared =
+    Datatype.Env.declarations env
+    |> List.map ~f:(fun declaration ->
+      ( declaration.Datatype.Declaration.datatype
+      , { Declared.declaration; guard = None } ))
+    |> Datatype.Datatype.Map.of_alist_exn
+  in
   { has_adt = false
   ; emitted = Emitted_key.Hash_set.create ()
   ; last_certificate = None
+  ; env
+  ; declared
+  ; scopes = []
+  ; observations = Formula.Any.Map.empty
   }
+;;
+
+let push t =
+  t.scopes
+  <- { Scope.has_adt = t.has_adt
+     ; env = t.env
+     ; declared = t.declared
+     ; observations = t.observations
+     }
+     :: t.scopes
+;;
+
+let pop t =
+  match t.scopes with
+  | [] -> assert false
+  | scope :: scopes ->
+    t.has_adt <- scope.has_adt;
+    t.env <- scope.env;
+    t.declared <- scope.declared;
+    t.observations <- scope.observations;
+    t.scopes <- scopes
+;;
+
+let declare t ?guard declaration =
+  let%map.Or_error env = Datatype.Env.add t.env declaration in
+  t.env <- env;
+  t.declared
+  <- Map.set
+       t.declared
+       ~key:declaration.datatype
+       ~data:{ Declared.declaration; guard }
+;;
+
+let env t = t.env
+
+let observe t subject datatype =
+  t.observations
+  <- Map.update t.observations subject ~f:(function
+       | None -> Datatype.Datatype.Set.singleton datatype
+       | Some datatypes -> Set.add datatypes datatype)
 ;;
 
 let rec note_adt_shapes t (term : Formula.any) =
   (match term with
-   | Datatype_constructor _ | Datatype_selector _ | Datatype_tester _ ->
-     t.has_adt <- true
+   | Datatype_constructor (constructor, _) ->
+     t.has_adt <- true;
+     observe t term constructor.datatype
+   | Datatype_selector (selector, argument) ->
+     t.has_adt <- true;
+     observe t argument selector.constructor.datatype
+   | Datatype_tester (constructor, argument) ->
+     t.has_adt <- true;
+     observe t argument constructor.datatype
    | _ -> ());
   List.iter (Formula.args term) ~f:(note_adt_shapes t)
 ;;
@@ -74,7 +158,210 @@ let rec note_adt_shapes t (term : Formula.any) =
 let add_atom t ~atom =
   let left, right = Atom.Equality.endpoints (Atom.Equality.normalize atom) in
   note_adt_shapes t left;
-  note_adt_shapes t right
+  note_adt_shapes t right;
+  match left, right with
+  | Datatype_constructor (constructor, _), other
+  | other, Datatype_constructor (constructor, _) ->
+    observe t other constructor.datatype
+  | _ -> ()
+;;
+
+let datatype_observations t = t.observations
+let datatype_type datatype = Type_expr.App (datatype.Datatype.Datatype.name, [])
+
+let constructor_declaration t constructor =
+  Datatype.Env.find_constructor t.env constructor
+;;
+
+let constructor_field_types t constructor =
+  Option.map (constructor_declaration t constructor) ~f:(fun declaration ->
+    declaration.Datatype.Constructor_declaration.field_types)
+;;
+
+let selector_field_type t (selector : Datatype.Selector.t) =
+  let%bind.Option field_types =
+    constructor_field_types t selector.constructor
+  in
+  List.nth field_types selector.index
+;;
+
+let rec validate_formula t (formula : Formula.any) =
+  let%bind.Or_error () =
+    match formula with
+    | Datatype_constructor (constructor, args) ->
+      if not (Datatype.Env.mem_constructor t.env constructor)
+      then
+        Or_error.error_s
+          [%message
+            "undeclared ADT constructor" (constructor : Datatype.Constructor.t)]
+      else if List.length args <> constructor.arity
+      then
+        Or_error.error_s
+          [%message
+            "ADT constructor application has the wrong arity"
+              (constructor : Datatype.Constructor.t)
+              ~actual:(List.length args : int)]
+      else Ok ()
+    | Datatype_selector (selector, _) ->
+      if Datatype.Env.mem_selector t.env selector
+      then Ok ()
+      else
+        Or_error.error_s
+          [%message "undeclared ADT selector" (selector : Datatype.Selector.t)]
+    | Datatype_tester (constructor, _) ->
+      if Datatype.Env.mem_constructor t.env constructor
+      then Ok ()
+      else
+        Or_error.error_s
+          [%message
+            "undeclared ADT tester constructor"
+              (constructor : Datatype.Constructor.t)]
+    | _ -> Ok ()
+  in
+  List.fold_result (Formula.args formula) ~init:() ~f:(fun () arg ->
+    validate_formula t arg)
+;;
+
+let type_expr_is_ground type_expr =
+  let rec go = function
+    | Type_expr.Var _ | Type_of _ -> false
+    | Base _ | Type -> true
+    | App (_, args) -> List.for_all args ~f:go
+    | Function_type (a, b) | Array_type (a, b) -> go a && go b
+  in
+  go type_expr
+;;
+
+let static_type t (term : Formula.any) =
+  match term with
+  | Datatype_constructor (constructor, _) ->
+    Some (datatype_type constructor.datatype)
+  | Datatype_selector (selector, _) -> selector_field_type t selector
+  | Var _
+  | Eq _
+  | Ite _
+  | True
+  | False
+  | Not _
+  | And _
+  | Or _
+  | App _
+  | Select _
+  | Store _
+  | Datatype_tester _
+  | Bool
+  | Int
+  | Float
+  | Type
+  | Function_type _
+  | Array_type _
+  | Type_of _
+  | Type_var _
+  | Type_app _
+  | La_const _
+  | La_scale_const _
+  | La_add _
+  | La_compare _ -> None
+;;
+
+let check_expected_type ~term ~expected ~actual =
+  match actual with
+  | Some actual
+    when type_expr_is_ground expected
+         && type_expr_is_ground actual
+         && not ([%compare.equal: Type_expr.t] expected actual) ->
+    Or_error.error_s
+      [%message
+        "ADT term has an incompatible field type"
+          (term : Formula.any)
+          (expected : Type_expr.t)
+          (actual : Type_expr.t)]
+  | Some _ | None -> Ok ()
+;;
+
+let add_var_constraint constraints term expected =
+  match term with
+  | Formula.Var var -> (var, expected) :: constraints
+  | _ -> constraints
+;;
+
+let rec type_constraints_for_term t ?expected constraints (term : Formula.any) =
+  let%bind.Or_error () =
+    match expected with
+    | None -> Ok ()
+    | Some expected ->
+      check_expected_type ~term ~expected ~actual:(static_type t term)
+  in
+  let constraints =
+    match expected with
+    | None -> constraints
+    | Some expected -> add_var_constraint constraints term expected
+  in
+  match term with
+  | Eq (left, right) ->
+    let%bind.Or_error constraints =
+      type_constraints_for_equality t constraints left right
+    in
+    List.fold_result
+      (Formula.args term)
+      ~init:constraints
+      ~f:(type_constraints_for_term t)
+  | Datatype_constructor (constructor, args) ->
+    let field_types =
+      Option.value (constructor_field_types t constructor) ~default:[]
+    in
+    (match List.zip args field_types with
+     | Unequal_lengths -> Ok constraints
+     | Ok fields ->
+       List.fold_result
+         fields
+         ~init:constraints
+         ~f:(fun constraints (arg, expected) ->
+           type_constraints_for_term t ~expected constraints arg))
+  | Datatype_selector (selector, argument) ->
+    type_constraints_for_term
+      t
+      ~expected:(datatype_type selector.constructor.datatype)
+      constraints
+      argument
+  | Datatype_tester (constructor, argument) ->
+    type_constraints_for_term
+      t
+      ~expected:(datatype_type constructor.datatype)
+      constraints
+      argument
+  | Ite (condition, then_, else_) ->
+    let%bind.Or_error constraints =
+      type_constraints_for_term t constraints condition
+    in
+    let%bind.Or_error constraints =
+      match expected with
+      | None -> type_constraints_for_term t constraints then_
+      | Some expected -> type_constraints_for_term t ~expected constraints then_
+    in
+    (match expected with
+     | None -> type_constraints_for_term t constraints else_
+     | Some expected -> type_constraints_for_term t ~expected constraints else_)
+  | _ ->
+    List.fold_result
+      (Formula.args term)
+      ~init:constraints
+      ~f:(type_constraints_for_term t)
+
+and type_constraints_for_equality t constraints left right =
+  let%bind.Or_error constraints =
+    match static_type t left with
+    | None -> Ok constraints
+    | Some expected -> type_constraints_for_term t ~expected constraints right
+  in
+  match static_type t right with
+  | None -> Ok constraints
+  | Some expected -> type_constraints_for_term t ~expected constraints left
+;;
+
+let type_constraints t formula =
+  let%map.Or_error constraints = type_constraints_for_term t [] formula in
+  List.dedup_and_sort constraints ~compare:[%compare: Tvar.t * Type_expr.t]
 ;;
 
 let eq left right : Atom.Equality.t = `Eq (left, right)
@@ -263,6 +550,125 @@ let find_tester t egraph testers constructors =
       else None))
 ;;
 
+let find_tester_exclusivity t egraph testers =
+  List.find_mapi testers ~f:(fun i left ->
+    List.drop testers (i + 1)
+    |> List.find_map ~f:(fun right ->
+      if Datatype.Datatype.equal
+           left.Tester_term.constructor.datatype
+           right.Tester_term.constructor.datatype
+         && (not
+               (Datatype.Constructor.equal
+                  left.Tester_term.constructor
+                  right.Tester_term.constructor))
+         && same_class
+              egraph
+              left.Tester_term.argument
+              right.Tester_term.argument
+      then (
+        match
+          ( Formula_egraph_uf.atom_value
+              egraph
+              ~atom:
+                (tester_atom
+                   left.Tester_term.constructor
+                   left.Tester_term.argument)
+          , Formula_egraph_uf.atom_value
+              egraph
+              ~atom:
+                (tester_atom
+                   right.Tester_term.constructor
+                   right.Tester_term.argument) )
+        with
+        | Some true, Some true ->
+          let a, b =
+            normalized_pair left.Tester_term.term right.Tester_term.term
+          in
+          let key = Emitted_key.Tester_exclusivity (a, b) in
+          let literals =
+            guarded_equality
+              left.Tester_term.argument
+              right.Tester_term.argument
+            @ [ ( tester_atom
+                    left.Tester_term.constructor
+                    left.Tester_term.argument
+                , false )
+              ; ( tester_atom
+                    right.Tester_term.constructor
+                    right.Tester_term.argument
+                , false )
+              ]
+          in
+          let certificate =
+            Proof.Theory_certificate.Adt.Tester_exclusivity
+              { left_constructor = left.Tester_term.constructor
+              ; left_argument = left.Tester_term.argument
+              ; right_constructor = right.Tester_term.constructor
+              ; right_argument = right.Tester_term.argument
+              }
+          in
+          emit t egraph key literals certificate
+        | Some false, _ | None, _ | _, Some false | _, None -> None)
+      else None))
+;;
+
+let selector_args_for_constructor t constructor argument =
+  let%bind.Option declaration = constructor_declaration t constructor in
+  List.init constructor.Datatype.Constructor.arity ~f:(fun index ->
+    List.find declaration.selectors ~f:(fun selector -> selector.index = index)
+    |> Option.map ~f:(fun selector ->
+      Formula.Datatype_selector (selector, argument)))
+  |> Option.all
+;;
+
+let find_tester_reconstruction t egraph testers =
+  List.find_map testers ~f:(fun tester ->
+    match
+      Formula_egraph_uf.atom_value
+        egraph
+        ~atom:
+          (tester_atom
+             tester.Tester_term.constructor
+             tester.Tester_term.argument)
+    with
+    | Some true ->
+      (match
+         selector_args_for_constructor
+           t
+           tester.Tester_term.constructor
+           tester.Tester_term.argument
+       with
+       | None -> None
+       | Some args ->
+         let reconstructed =
+           Formula.Datatype_constructor (tester.Tester_term.constructor, args)
+         in
+         if Formula_egraph_uf.mem_term egraph reconstructed
+            && same_class egraph tester.Tester_term.argument reconstructed
+         then None
+         else (
+           let key =
+             Emitted_key.Tester_reconstruction
+               (tester.Tester_term.argument, tester.Tester_term.constructor)
+           in
+           let literals =
+             [ ( tester_atom
+                   tester.Tester_term.constructor
+                   tester.Tester_term.argument
+               , false )
+             ; eq tester.Tester_term.argument reconstructed, true
+             ]
+           in
+           let certificate =
+             Proof.Theory_certificate.Adt.Tester_reconstruction
+               { constructor = tester.Tester_term.constructor
+               ; argument = tester.Tester_term.argument
+               }
+           in
+           emit t egraph key literals certificate))
+    | Some false | None -> None)
+;;
+
 let find_selector t egraph selectors constructors =
   List.find_map selectors ~f:(fun selector ->
     List.find_map constructors ~f:(fun witness ->
@@ -373,6 +779,62 @@ let find_acyclicity t egraph constructors =
     emit t egraph key literals certificate
 ;;
 
+let constructor_term constructor = Formula.Datatype_constructor (constructor, [])
+
+let completeness_literals ~guard subject declaration form =
+  let guard_literals =
+    match guard with
+    | None -> []
+    | Some atom -> [ atom, false ]
+  in
+  let constructor_declarations =
+    declaration.Datatype.Declaration.constructors
+  in
+  match (form : Proof.Theory_certificate.Adt.Completeness_form.t) with
+  | Enum_equalities ->
+    guard_literals
+    @ List.map constructor_declarations ~f:(fun cd ->
+      eq subject (constructor_term cd.constructor), true)
+  | Testers ->
+    guard_literals
+    @ List.map constructor_declarations ~f:(fun cd ->
+      tester_atom cd.constructor subject, true)
+;;
+
+let completeness_form declaration =
+  if List.for_all declaration.Datatype.Declaration.constructors ~f:(fun cd ->
+       cd.Datatype.Constructor_declaration.constructor.arity = 0)
+  then Proof.Theory_certificate.Adt.Completeness_form.Enum_equalities
+  else Testers
+;;
+
+let find_completeness t egraph terms =
+  let registered_terms = Formula.Any.Set.of_list terms in
+  Map.to_alist t.observations
+  |> List.find_map ~f:(fun (subject, datatypes) ->
+    match subject with
+    | Formula.Datatype_constructor _ -> None
+    | _ ->
+      if not (Set.mem registered_terms subject)
+      then None
+      else
+        Set.to_list datatypes
+        |> List.find_map ~f:(fun datatype ->
+          match Map.find t.declared datatype with
+          | None -> None
+          | Some { Declared.declaration; guard } ->
+            let form = completeness_form declaration in
+            let key = Emitted_key.Completeness (subject, datatype, guard) in
+            let literals =
+              completeness_literals ~guard subject declaration form
+            in
+            let certificate =
+              Proof.Theory_certificate.Adt.Completeness
+                { declaration; subject; guard; form }
+            in
+            emit t egraph key literals certificate))
+;;
+
 let maybe_get_lemma t ~egraph =
   t.last_certificate <- None;
   if not t.has_adt
@@ -391,12 +853,21 @@ let maybe_get_lemma t ~egraph =
          (match find_tester t egraph testers constructors with
           | Some lemma -> lemma
           | None ->
-            (match find_selector t egraph selectors constructors with
+            (match find_tester_exclusivity t egraph testers with
              | Some lemma -> lemma
              | None ->
-               (match find_acyclicity t egraph constructors with
+               (match find_tester_reconstruction t egraph testers with
                 | Some lemma -> lemma
-                | None -> `Consistent)))))
+                | None ->
+                  (match find_selector t egraph selectors constructors with
+                   | Some lemma -> lemma
+                   | None ->
+                     (match find_acyclicity t egraph constructors with
+                      | Some lemma -> lemma
+                      | None ->
+                        (match find_completeness t egraph terms with
+                         | Some lemma -> lemma
+                         | None -> `Consistent))))))))
 ;;
 
 let last_certificate t = t.last_certificate

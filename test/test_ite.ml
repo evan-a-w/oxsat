@@ -204,7 +204,11 @@ let%expect_test "satisfiable ite problem has a checkable model" =
 ;;
 
 let%expect_test "proof-producing unsat with ite lowering" =
-  let solver = Solver.create ~config:{ produce_proofs = true } () in
+  let solver =
+    Solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
+  in
   let condition = eq (v "c1") (v "c2") in
   assert_ok solver condition;
   assert_ok solver (neq (ite condition (v "x") (v "y")) (v "x"));
@@ -213,7 +217,11 @@ let%expect_test "proof-producing unsat with ite lowering" =
 ;;
 
 let%expect_test "ite-lowered proof prints human-readable refutation text" =
-  let solver = Solver.create ~config:{ produce_proofs = true } () in
+  let solver =
+    Solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
+  in
   let condition = eq (v "c1") (v "c2") in
   assert_ok solver condition;
   assert_ok solver (neq (ite condition (v "x") (v "y")) (v "x"));

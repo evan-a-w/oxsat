@@ -13,12 +13,23 @@ open! Import
 type t
 
 module Config : sig
-  type t = { produce_proofs : bool } [@@deriving sexp_of]
+  type t =
+    { produce_proofs : bool
+    ; datatype_env : Datatype.Env.t
+    }
+  [@@deriving sexp_of]
 
   val default : t
 end
 
 val create : ?config:Config.t -> unit -> t
+
+(** Adds a datatype declaration to the current assertion scope. Declarations in
+    [Config.datatype_env] live for the solver's whole lifetime; declarations
+    added after {!push} are removed by the matching {!pop}. *)
+val declare_datatype : t -> Datatype.Declaration.t -> unit Or_error.t
+
+val datatype_env : t -> Datatype.Env.t
 
 (** Asserts that [formula] is true. May be called between [solve] calls
     (including before the first one) to add new constraints incrementally. Any
@@ -30,7 +41,8 @@ val create : ?config:Config.t -> unit -> t
     [solve] call -- in that case the offending clause was not enforced,
     mirroring {!Feel.Solver.add_clause}.
 
-    Returns an [Error] if [formula] is ill-formed (see {!Encoding.encode}). *)
+    Returns an [Error] if [formula] is ill-formed (see {!Encoding.encode}) or
+    uses an undeclared ADT constructor/selector/tester. *)
 val assert_formula
   :  t
   -> Formula.any

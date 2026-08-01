@@ -215,6 +215,7 @@ let build
   ~encoding
   ~certificate_for_atoms
   ~formula_by_root_lit
+  ~datatype_env
   ~refutation_clauses
   ~inputs
   =
@@ -299,6 +300,7 @@ let build
   in
   { Proof.Refutation.inputs
   ; extensions = Resolver.extensions resolver
+  ; datatype_env
   ; steps
   ; contradiction
   }
@@ -309,6 +311,7 @@ let unsat_proof
   ~encoding
   ~certificate_for_atoms
   ~formula_by_root_lit
+  ~datatype_env
   ~scope_vars
   ~refutation_clauses
   =
@@ -337,6 +340,7 @@ let unsat_proof
         ~encoding
         ~certificate_for_atoms
         ~formula_by_root_lit
+        ~datatype_env
         ~refutation_clauses
         ~inputs
     in
