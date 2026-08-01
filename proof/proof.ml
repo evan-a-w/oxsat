@@ -24,8 +24,51 @@ module Rewrite_direction = struct
   [@@deriving sexp, compare]
 end
 
+type proof =
+  { assumptions : Assumption.t array
+  ; steps : step array
+  ; conclusion : Proof_id.Step.t
+  }
+
+and kernel_rule =
+  | Propositional
+  | Equality_refl
+  | Equality_symm
+  | Equality_trans
+  | Congruence
+  | Rewrite of
+      { direction : Rewrite_direction.t
+      ; path : int list
+      }
+  | Forall_instantiation of { bound_values : (Tvar.t * Formula.any) list }
+  | Exists_elim of { skolems : (Tvar.t * Formula.any) list }
+  | Exists_intro of { witnesses : (Tvar.t * Formula.any) list }
+  | Forall_intro of
+      { eigenvariables : (Tvar.t * Tvar.t) list
+      ; subproof : proof
+      ; imports : Proof_id.Step.t array
+      }
+
+and justification =
+  | Assumption of Proof_id.Assumption.t
+  | Kernel of
+      { rule : kernel_rule
+      ; premises : Proof_id.Step.t array
+      }
+  | By_refutation of
+      { premises : Proof_id.Step.t array
+      ; refutation : Refutation.t
+      }
+
+and step =
+  { name : string option
+  ; conclusion : Formula.quantified
+  ; justification : justification
+  }
+[@@deriving sexp, compare]
+
 module Kernel_rule = struct
-  type t =
+  type t = kernel_rule =
     | Propositional
     | Equality_refl
     | Equality_symm
@@ -37,11 +80,17 @@ module Kernel_rule = struct
         }
     | Forall_instantiation of { bound_values : (Tvar.t * Formula.any) list }
     | Exists_elim of { skolems : (Tvar.t * Formula.any) list }
+    | Exists_intro of { witnesses : (Tvar.t * Formula.any) list }
+    | Forall_intro of
+        { eigenvariables : (Tvar.t * Tvar.t) list
+        ; subproof : proof
+        ; imports : Proof_id.Step.t array
+        }
   [@@deriving sexp, compare]
 end
 
 module Justification = struct
-  type t =
+  type t = justification =
     | Assumption of Proof_id.Assumption.t
     | Kernel of
         { rule : Kernel_rule.t
@@ -55,7 +104,7 @@ module Justification = struct
 end
 
 module Step = struct
-  type t =
+  type t = step =
     { name : string option
     ; conclusion : Formula.quantified
     ; justification : Justification.t
@@ -63,9 +112,9 @@ module Step = struct
   [@@deriving sexp, compare]
 end
 
-type t =
+type t = proof =
   { assumptions : Assumption.t array
-  ; steps : Step.t array
+  ; steps : step array
   ; conclusion : Proof_id.Step.t
   }
 [@@deriving sexp, compare]
@@ -208,14 +257,50 @@ let check_ground_kernel rule premises conclusion =
   | Congruence -> check_congruence premises conclusion
   | Rewrite { direction; path } ->
     check_rewrite premises conclusion ~direction ~path
-  | Forall_instantiation _ | Exists_elim _ ->
+  | Forall_instantiation _ | Exists_elim _ | Exists_intro _ | Forall_intro _ ->
     (* Handled by [check_kernel] before ground conversion. *)
     error "quantifier kernel rule reached the ground checker"
 ;;
 
+let quantifier_subst
+  ?(check_binding = fun _ -> Ok ())
+  ?(duplicate_key_error =
+    fun key ->
+      Or_error.error_s
+        [%message "a bound variable was witnessed twice" (key : Tvar.t)])
+  ?(extra_keys_error =
+    fun extra_keys ->
+      Or_error.error_s
+        [%message
+          "a quantifier rule provided witnesses for variables not bound by the \
+           premise"
+            (extra_keys : Tvar.t list)])
+  ~bound
+  ~bindings
+  ~missing_error
+  ()
+  =
+  match Tvar.Map.of_alist bindings with
+  | `Duplicate_key key -> duplicate_key_error key
+  | `Ok subst ->
+    let bound_set = Tvar.Set.of_list bound in
+    let extra_keys =
+      Map.keys subst |> List.filter ~f:(fun key -> not (Set.mem bound_set key))
+    in
+    if not (List.is_empty extra_keys)
+    then extra_keys_error extra_keys
+    else if not (List.for_all bound ~f:(Map.mem subst))
+    then error missing_error
+    else (
+      let%bind.Or_error () =
+        Or_error.all_unit (List.map bindings ~f:check_binding)
+      in
+      Ok subst)
+;;
+
 (* Substitutes [bindings] into [body] and checks [conclusion] equals the result,
-   requiring exactly the [bound] variables to be bound. Shared by universal
-   instantiation and existential elimination. *)
+   requiring exactly the [bound] variables to be bound. Shared by quantifier
+   rules whose premise/conclusion direction is a direct witnessed body. *)
 let check_witnessing
   ?(check_binding = fun _ -> Ok ())
   ~bound
@@ -223,35 +308,16 @@ let check_witnessing
   ~bindings
   ~conclusion
   ~missing_error
+  ~mismatch_error
   ()
   =
-  match Tvar.Map.of_alist bindings with
-  | `Duplicate_key key ->
-    Or_error.error_s
-      [%message "a bound variable was witnessed twice" (key : Tvar.t)]
-  | `Ok subst ->
-    let bound_set = Tvar.Set.of_list bound in
-    let extra_keys =
-      Map.keys subst |> List.filter ~f:(fun key -> not (Set.mem bound_set key))
-    in
-    if not (List.is_empty extra_keys)
-    then
-      Or_error.error_s
-        [%message
-          "a quantifier rule provided witnesses for variables not bound by the \
-           premise"
-            (extra_keys : Tvar.t list)]
-    else if not (List.for_all bound ~f:(Map.mem subst))
-    then error missing_error
-    else (
-      let%bind.Or_error () =
-        Or_error.all_unit (List.map bindings ~f:check_binding)
-      in
-      let%bind.Or_error expected = Formula.substitute_quantified subst body in
-      if formula_equal_quantified expected conclusion
-      then Ok ()
-      else
-        error "a quantifier rule's conclusion does not match its witnessed body")
+  let%bind.Or_error subst =
+    quantifier_subst ~bound ~bindings ~missing_error ~check_binding ()
+  in
+  let%bind.Or_error expected = Formula.substitute_quantified subst body in
+  if formula_equal_quantified expected conclusion
+  then Ok ()
+  else error mismatch_error
 ;;
 
 let check_forall_instantiation premises conclusion ~bound_values =
@@ -264,6 +330,8 @@ let check_forall_instantiation premises conclusion ~bound_values =
       ~conclusion
       ~missing_error:
         "universal instantiation must instantiate every bound variable"
+      ~mismatch_error:
+        "universal instantiation conclusion does not match its witnessed body"
       ()
   | [ _ ] -> error "universal instantiation premise must be a [∀]"
   | _ -> error "universal instantiation expects a single premise"
@@ -280,6 +348,8 @@ let check_exists_elim premises conclusion ~skolems ~assumption_tvars =
         ~conclusion
         ~missing_error:
           "existential elimination must witness every bound variable"
+        ~mismatch_error:
+          "existential elimination conclusion does not match its witnessed body"
         ~check_binding:(fun (bound, witness) ->
           match witness with
           | Formula.Var _ -> Ok ()
@@ -320,12 +390,155 @@ let check_exists_elim premises conclusion ~skolems ~assumption_tvars =
   | _ -> error "existential elimination expects a single premise"
 ;;
 
-let check_kernel ~assumption_tvars rule premises conclusion =
+let check_exists_intro premises conclusion ~witnesses =
+  match premises, conclusion with
+  | [ premise ], Formula.Exists (bound, body) ->
+    check_witnessing
+      ~bound
+      ~body
+      ~bindings:witnesses
+      ~conclusion:premise
+      ~missing_error:
+        "existential introduction must witness every bound variable"
+      ~mismatch_error:
+        "existential introduction premise does not match its witnessed body"
+      ()
+  | [ _ ], _ -> error "existential introduction conclusion must be an [∃]"
+  | _ -> error "existential introduction expects a single premise"
+;;
+
+let check_pairwise_distinct_tvars tvars ~context =
+  match Tvar.Set.of_list tvars |> Set.length = List.length tvars with
+  | true -> Ok ()
+  | false -> error context
+;;
+
+let check_forall_intro
+  ~check_subproof
+  ~step_at
+  ~premises
+  ~eigenvariables
+  ~subproof
+  ~imports
+  conclusion
+  =
+  if not (List.is_empty premises)
+  then error "universal introduction expects no kernel premises; use imports"
+  else (
+    match conclusion with
+    | Formula.Forall (bound, _triggers, body) ->
+      let%bind.Or_error () = check_subproof subproof in
+      let bindings =
+        List.map eigenvariables ~f:(fun (bound, eigenvariable) ->
+          bound, Formula.Var eigenvariable)
+      in
+      let%bind.Or_error subst =
+        quantifier_subst
+          ~bound
+          ~bindings
+          ~missing_error:
+            "universal introduction must provide an eigenvariable for every \
+             bound variable"
+          ~duplicate_key_error:(fun key ->
+            Or_error.error_s
+              [%message
+                "universal introduction provided multiple eigenvariables for a \
+                 bound variable"
+                  (key : Tvar.t)])
+          ~extra_keys_error:(fun extra_keys ->
+            Or_error.error_s
+              [%message
+                "universal introduction provided eigenvariables for variables \
+                 not bound by the conclusion"
+                  (extra_keys : Tvar.t list)])
+          ()
+      in
+      let eigenvariables = List.map eigenvariables ~f:snd in
+      let%bind.Or_error () =
+        check_pairwise_distinct_tvars
+          eigenvariables
+          ~context:"universal introduction's eigenvariables must be distinct"
+      in
+      let%bind.Or_error expected = Formula.substitute_quantified subst body in
+      let subproof_conclusion =
+        subproof.steps.(Proof_id.Step.to_int subproof.conclusion).conclusion
+      in
+      if not (formula_equal_quantified expected subproof_conclusion)
+      then
+        error
+          "universal introduction subproof conclusion does not match the body \
+           under its eigenvariable substitution"
+      else (
+        let eigenvariable_set = Tvar.Set.of_list eigenvariables in
+        let bad_assumptions =
+          Array.to_list subproof.assumptions
+          |> List.filter_mapi ~f:(fun index assumption ->
+            let overlap =
+              Set.inter
+                eigenvariable_set
+                (Formula.tvars assumption.Assumption.formula)
+            in
+            if Set.is_empty overlap then None else Some (index, overlap))
+        in
+        if not (List.is_empty bad_assumptions)
+        then
+          Or_error.error_s
+            [%message
+              "universal introduction eigenvariable occurs in a subproof \
+               assumption"
+                (bad_assumptions : (int * Tvar.Set.t) list)]
+        else if Array.length imports <> Array.length subproof.assumptions
+        then
+          Or_error.error_s
+            [%message
+              "universal introduction must discharge every subproof assumption"
+                ~imports:(Array.length imports : int)
+                ~subproof_assumptions:(Array.length subproof.assumptions : int)]
+        else
+          Or_error.all_unit
+            (Array.to_list imports
+             |> List.mapi ~f:(fun index import ->
+               let%bind.Or_error imported_step = step_at import in
+               let assumption = subproof.assumptions.(index) in
+               if formula_equal_quantified
+                    imported_step.Step.conclusion
+                    assumption.Assumption.formula
+               then Ok ()
+               else
+                 Or_error.error_s
+                   [%message
+                     "universal introduction import does not match subproof \
+                      assumption"
+                       (index : int)
+                       ~import:(imported_step.conclusion : Formula.quantified)
+                       ~assumption:(assumption.formula : Formula.quantified)])))
+    | _ -> error "universal introduction conclusion must be a [∀]")
+;;
+
+let check_kernel
+  ~assumption_tvars
+  ~check_subproof
+  ~step_at
+  rule
+  premises
+  conclusion
+  =
   match (rule : Kernel_rule.t) with
   | Forall_instantiation { bound_values } ->
     check_forall_instantiation premises conclusion ~bound_values
   | Exists_elim { skolems } ->
     check_exists_elim premises conclusion ~skolems ~assumption_tvars
+  | Exists_intro { witnesses } ->
+    check_exists_intro premises conclusion ~witnesses
+  | Forall_intro { eigenvariables; subproof; imports } ->
+    check_forall_intro
+      ~check_subproof
+      ~step_at
+      ~premises
+      ~eigenvariables
+      ~subproof
+      ~imports
+      conclusion
   | Propositional
   | Equality_refl
   | Equality_symm
@@ -356,7 +569,7 @@ let check_well_formed (q : Formula.quantified) =
   | Some ground -> Or_error.map (Boolean_formula.of_formula ground) ~f:ignore
 ;;
 
-let check proof =
+let rec check proof =
   let assumption_tvars =
     Array.fold proof.assumptions ~init:Tvar.Set.empty ~f:(fun acc assumption ->
       Set.union acc (Formula.tvars assumption.Assumption.formula))
@@ -444,7 +657,13 @@ let check proof =
                Or_error.map (step_at ~before:index premise) ~f:(fun step ->
                  step.Step.conclusion)))
         in
-        check_kernel ~assumption_tvars rule premises step.conclusion
+        check_kernel
+          ~assumption_tvars
+          ~check_subproof:check
+          ~step_at:(step_at ~before:index)
+          rule
+          premises
+          step.conclusion
       | By_refutation { premises; refutation } ->
         let%bind.Or_error premises =
           Or_error.all
@@ -519,15 +738,14 @@ let subst_to_string pairs =
          (Proof_to_string.formula_to_string term)))
 ;;
 
-let justification_to_string (j : Justification.t) =
-  let refs prefix ids =
-    Array.to_list ids |> List.map ~f:(fun p -> prefix ^ Int.to_string p)
+let justification_to_string ~step_label ~assumption_label (j : Justification.t) =
+  let refs ids =
+    Array.to_list ids |> List.map ~f:(fun p -> step_label (Id.Step.to_int p))
   in
-  let over premises =
-    String.concat ~sep:", " (refs "s" (Array.map premises ~f:Id.Step.to_int))
-  in
+  let over premises = String.concat ~sep:", " (refs premises) in
   match j with
-  | Assumption id -> sprintf "assumption a%d" (Id.Assumption.to_int id)
+  | Assumption id ->
+    sprintf "assumption %s" (assumption_label (Id.Assumption.to_int id))
   | Kernel { rule = Forall_instantiation { bound_values }; premises } ->
     sprintf
       "∀-instantiation {%s} over [%s]"
@@ -538,49 +756,107 @@ let justification_to_string (j : Justification.t) =
       "∃-elimination {%s} over [%s]"
       (subst_to_string skolems)
       (over premises)
+  | Kernel { rule = Exists_intro { witnesses }; premises } ->
+    sprintf
+      "∃-introduction {%s} over [%s]"
+      (subst_to_string witnesses)
+      (over premises)
+  | Kernel
+      { rule = Forall_intro { eigenvariables; subproof = _; imports }
+      ; premises = _
+      } ->
+    sprintf
+      "∀-introduction {%s} importing [%s]"
+      (subst_to_string
+         (List.map eigenvariables ~f:(fun (bound, eigenvariable) ->
+            bound, Formula.Var eigenvariable)))
+      (over imports)
   | Kernel { rule; premises } ->
     sprintf
       "%s over [%s]"
       (Sexp.to_string (Kernel_rule.sexp_of_t rule))
       (over premises)
   | By_refutation { premises; refutation = _ } ->
-    sprintf
-      "refutation of [%s]"
-      (String.concat
-         ~sep:", "
-         (refs "s" (Array.map premises ~f:Id.Step.to_int)))
+    sprintf "refutation of [%s]" (String.concat ~sep:", " (refs premises))
 ;;
 
-let to_string_hum (proof : t) =
-  let out = Proof_to_string.Buffer_out.create () in
+let label ?scope prefix index =
+  let local = sprintf "%s%d" prefix index in
+  match scope with
+  | None -> local
+  | Some scope -> sprintf "%s.%s" scope local
+;;
+
+let rec render_hum out ?scope ?assumption_imports (proof : t) =
   let open Proof_to_string.Buffer_out in
+  let assumption_label index = label ?scope "a" index in
+  let step_label index = label ?scope "s" index in
   line out "Assumptions:";
   indented out ~f:(fun () ->
     Array.iteri proof.assumptions ~f:(fun index assumption ->
+      let import_suffix =
+        match assumption_imports with
+        | Some imports when index < Array.length imports ->
+          (match imports.(index) with
+           | None -> ""
+           | Some import -> sprintf "   [imported from %s]" import)
+        | None | Some _ -> ""
+      in
       line
         out
         (sprintf
-           "a%d: %s"
-           index
-           (Proof_to_string.quantified_to_string assumption.Assumption.formula))));
+           "%s: %s%s"
+           (assumption_label index)
+           (Proof_to_string.quantified_to_string assumption.Assumption.formula)
+           import_suffix)));
   line out "Steps:";
   indented out ~f:(fun () ->
     Array.iteri proof.steps ~f:(fun index step ->
+      let current_step_label = step_label index in
       line
         out
         (sprintf
-           "s%d: %s   [%s]"
-           index
+           "%s: %s   [%s]"
+           current_step_label
            (Proof_to_string.quantified_to_string step.Step.conclusion)
-           (justification_to_string step.justification));
+           (justification_to_string
+              ~step_label
+              ~assumption_label
+              step.justification));
       match step.justification with
       | By_refutation { refutation; premises } ->
         indented out ~f:(fun () ->
           Proof_to_string.render_refutation
             out
-            ~premise_steps:(Array.map premises ~f:Id.Step.to_int)
+            ~premise_steps:
+              (Array.map premises ~f:(fun id -> step_label (Id.Step.to_int id)))
             refutation)
+      | Kernel
+          { rule = Forall_intro { eigenvariables = _; subproof; imports }
+          ; premises = _
+          } ->
+        let assumption_imports =
+          Array.mapi subproof.assumptions ~f:(fun index _ ->
+            if index < Array.length imports
+            then Some (step_label (Id.Step.to_int imports.(index)))
+            else None)
+        in
+        indented out ~f:(fun () ->
+          line out "subproof:";
+          indented out ~f:(fun () ->
+            render_hum
+              out
+              ~scope:current_step_label
+              ~assumption_imports
+              subproof))
       | Assumption _ | Kernel _ -> ()));
-  line out (sprintf "Conclusion: s%d" (Id.Step.to_int proof.conclusion));
-  contents out
+  line
+    out
+    (sprintf "Conclusion: %s" (step_label (Id.Step.to_int proof.conclusion)))
+;;
+
+let to_string_hum (proof : t) =
+  let out = Proof_to_string.Buffer_out.create () in
+  render_hum out proof;
+  Proof_to_string.Buffer_out.contents out
 ;;

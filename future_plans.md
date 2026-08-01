@@ -93,15 +93,37 @@ citable.
 
 Remaining:
 
-- Quantified *conclusions* (a lemma `∀x. P(x)`, not just a quantified
-  assumption) need universal generalization — `Forall_intro` with an
-  eigenvariable condition over the step DAG's dependency closure, plus the cheap
-  `Exists_intro`. This is the fork toward a real proof language; Route A proofs
-  stay valid verbatim under it.
 - Eventually certify the whole instantiation loop so cached instantiations can be
   trusted artifacts rather than only optimizations.
 - The only remaining `proof = None` path is a refutation depending on a
   synthetic atom; no currently reachable case produces one.
+
+Also done: the kernel can now *prove* quantified conclusions, not just consume
+them as assumptions. `Exists_intro` substitutes chosen witnesses into the body
+(no side condition — picking a witness is always sound). `Forall_intro` carries
+an explicit nested subproof plus `imports` discharging each of the subproof's
+assumptions against an earlier outer step; the eigenvariable condition is then
+the local check that no eigenvariable occurs in any subproof assumption, so no
+DAG reachability or dependency-closure analysis is needed, and nested
+introductions compose by checking the same condition at each level. Eigenvariables
+are deliberately kept out of the whole-proof Skolem escape check: a subproof's
+conclusion must mention them, and the enclosing `Forall_intro` is what binds them.
+
+These rules are kernel-only — the solver refutes and never proves a quantified
+conclusion, so nothing in `proof_generation` emits them and no generated proof
+changed. They are exercised solely by hand-built proofs in `test_proof.ml`, which
+is a weaker signal than the end-to-end validation the refutation rules get; the
+rejection tests carry that weight instead.
+
+Remaining toward a usable proof language:
+
+- Nothing generates introduction rules. A surface syntax or API for authoring
+  proofs would be the next step if the artifact is meant to be written by hand
+  rather than emitted by the solver.
+- `to_string_hum` renders `Forall_intro` subproofs as indented nested blocks to
+  arbitrary depth, with IDs qualified by the enclosing step (`s1.a0`, `s0.s0.s0`)
+  and each imported subproof assumption annotated `[imported from sN]` so a
+  reader can see it is discharged rather than assumed free.
 
 ## ITE follow-ups
 

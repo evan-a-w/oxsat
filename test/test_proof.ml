@@ -865,3 +865,510 @@ let%expect_test "bare equality bridge and integer split certificates are \
            : bool)];
   [%expect {| (certificates (bare true) (integer true) (bad_integer false)) |}]
 ;;
+
+let%expect_test "kernel quantifier introduction accepts hand-built proofs" =
+  let step_id = Proof.Id.Step.of_int_exn in
+  let assumption_id = Proof.Id.Assumption.of_int_exn in
+  let v name = Formula.Var (Tvar.of_string name) in
+  let refl term : Formula.quantified = Formula.Eq (term, term) in
+  let refl_step term : Proof.Step.t =
+    { name = None
+    ; conclusion = refl term
+    ; justification = Kernel { rule = Equality_refl; premises = [||] }
+    }
+  in
+  let print_result name proof =
+    print_s
+      [%message (name : string) ~result:(Proof.check proof : unit Or_error.t)]
+  in
+  let forall_x_x_eq_x = forall ([ x ], [], Eq (Var x, Var x)) in
+  let forall_intro =
+    { Proof.assumptions = [||]
+    ; steps =
+        [| { name = Some "forall_x_x_eq_x"
+           ; conclusion = forall_x_x_eq_x
+           ; justification =
+               Kernel
+                 { rule =
+                     Forall_intro
+                       { eigenvariables = [ x, Tvar.of_string "a" ]
+                       ; subproof =
+                           { assumptions = [||]
+                           ; steps = [| refl_step (v "a") |]
+                           ; conclusion = step_id 0
+                           }
+                       ; imports = [||]
+                       }
+                 ; premises = [||]
+                 }
+           }
+        |]
+    ; conclusion = step_id 0
+    }
+  in
+  let exists_intro =
+    { Proof.assumptions = [||]
+    ; steps =
+        [| refl_step (v "t")
+         ; { name = Some "exists_x_x_eq_x"
+           ; conclusion = exists ([ x ], Eq (Var x, Var x))
+           ; justification =
+               Kernel
+                 { rule = Exists_intro { witnesses = [ x, v "t" ] }
+                 ; premises = [| step_id 0 |]
+                 }
+           }
+        |]
+    ; conclusion = step_id 1
+    }
+  in
+  let f = Tvar.of_string "f" in
+  let q left right : Formula.quantified =
+    let term = Formula.App (f, [ left; right ]) in
+    Eq (term, term)
+  in
+  let nested_forall : Formula.quantified =
+    Forall ([ x ], [], Forall ([ y ], [], q (Var x) (Var y)))
+  in
+  let nested =
+    let a = Tvar.of_string "a" in
+    let b = Tvar.of_string "b" in
+    let inner_conclusion : Formula.quantified =
+      Forall ([ y ], [], q (Var a) (Var y))
+    in
+    let inner_subproof : Proof.t =
+      { assumptions = [||]
+      ; steps = [| refl_step (App (f, [ Var a; Var b ])) |]
+      ; conclusion = step_id 0
+      }
+    in
+    let outer_subproof : Proof.t =
+      { assumptions = [||]
+      ; steps =
+          [| { name = Some "forall_y"
+             ; conclusion = inner_conclusion
+             ; justification =
+                 Kernel
+                   { rule =
+                       Forall_intro
+                         { eigenvariables = [ y, b ]
+                         ; subproof = inner_subproof
+                         ; imports = [||]
+                         }
+                   ; premises = [||]
+                   }
+             }
+          |]
+      ; conclusion = step_id 0
+      }
+    in
+    { Proof.assumptions = [||]
+    ; steps =
+        [| { name = Some "forall_x_forall_y"
+           ; conclusion = nested_forall
+           ; justification =
+               Kernel
+                 { rule =
+                     Forall_intro
+                       { eigenvariables = [ x, a ]
+                       ; subproof = outer_subproof
+                       ; imports = [||]
+                       }
+                 ; premises = [||]
+                 }
+           }
+        |]
+    ; conclusion = step_id 0
+    }
+  in
+  let imported_fact =
+    let c_eq_c = refl (v "c") in
+    { Proof.assumptions = [||]
+    ; steps =
+        [| refl_step (v "c")
+         ; { name = Some "forall_x_c_eq_c"
+           ; conclusion = forall ([ x ], [], Eq (v "c", v "c"))
+           ; justification =
+               Kernel
+                 { rule =
+                     Forall_intro
+                       { eigenvariables = [ x, Tvar.of_string "a" ]
+                       ; subproof =
+                           { assumptions =
+                               [| { name = None; formula = c_eq_c } |]
+                           ; steps =
+                               [| { name = None
+                                  ; conclusion = c_eq_c
+                                  ; justification = Assumption (assumption_id 0)
+                                  }
+                               |]
+                           ; conclusion = step_id 0
+                           }
+                       ; imports = [| step_id 0 |]
+                       }
+                 ; premises = [||]
+                 }
+           }
+        |]
+    ; conclusion = step_id 1
+    }
+  in
+  let with_refutation =
+    let refutation = refutation_of_false_input () in
+    { Proof.assumptions = [||]
+    ; steps =
+        [| { name = Some "forall_x_true"
+           ; conclusion = forall ([ x ], [], True)
+           ; justification =
+               Kernel
+                 { rule =
+                     Forall_intro
+                       { eigenvariables = [ x, Tvar.of_string "a" ]
+                       ; subproof =
+                           { assumptions = [||]
+                           ; steps =
+                               [| { name = Some "truth"
+                                  ; conclusion = True
+                                  ; justification =
+                                      By_refutation
+                                        { premises = [||]; refutation }
+                                  }
+                               |]
+                           ; conclusion = step_id 0
+                           }
+                       ; imports = [||]
+                       }
+                 ; premises = [||]
+                 }
+           }
+        |]
+    ; conclusion = step_id 0
+    }
+  in
+  List.iter
+    [ "forall_intro", forall_intro
+    ; "exists_intro", exists_intro
+    ; "nested_forall_intro", nested
+    ; "forall_intro_with_import", imported_fact
+    ; "forall_intro_with_refutation", with_refutation
+    ]
+    ~f:(fun (name, proof) -> print_result name proof);
+  [%expect
+    {|
+    ((name forall_intro) (result (Ok ())))
+    ((name exists_intro) (result (Ok ())))
+    ((name nested_forall_intro) (result (Ok ())))
+    ((name forall_intro_with_import) (result (Ok ())))
+    ((name forall_intro_with_refutation) (result (Ok ())))
+    |}];
+  let print_hum name proof =
+    printf "=== %s ===\n%s" name (Proof.to_string_hum proof)
+  in
+  List.iter
+    [ "forall_intro", forall_intro
+    ; "nested_forall_intro", nested
+    ; "forall_intro_with_import", imported_fact
+    ; "forall_intro_with_refutation", with_refutation
+    ]
+    ~f:(fun (name, proof) -> print_hum name proof);
+  [%expect
+    {|
+    === forall_intro ===
+    Assumptions:
+    Steps:
+      s0: ∀x. x = x   [∀-introduction {x := a} importing []]
+        subproof:
+          Assumptions:
+          Steps:
+            s0.s0: a = a   [Equality_refl over []]
+          Conclusion: s0.s0
+    Conclusion: s0
+    === nested_forall_intro ===
+    Assumptions:
+    Steps:
+      s0: ∀x. ∀y. f(x, y) = f(x, y)   [∀-introduction {x := a} importing []]
+        subproof:
+          Assumptions:
+          Steps:
+            s0.s0: ∀y. f(a, y) = f(a, y)   [∀-introduction {y := b} importing []]
+              subproof:
+                Assumptions:
+                Steps:
+                  s0.s0.s0: f(a, b) = f(a, b)   [Equality_refl over []]
+                Conclusion: s0.s0.s0
+          Conclusion: s0.s0
+    Conclusion: s0
+    === forall_intro_with_import ===
+    Assumptions:
+    Steps:
+      s0: c = c   [Equality_refl over []]
+      s1: ∀x. c = c   [∀-introduction {x := a} importing [s0]]
+        subproof:
+          Assumptions:
+            s1.a0: c = c   [imported from s0]
+          Steps:
+            s1.s0: c = c   [assumption s1.a0]
+          Conclusion: s1.s0
+    Conclusion: s1
+    === forall_intro_with_refutation ===
+    Assumptions:
+    Steps:
+      s0: ∀x. true   [∀-introduction {x := a} importing []]
+        subproof:
+          Assumptions:
+          Steps:
+            s0.s0: true   [refutation of []]
+              refutation:
+                extensions:
+                  e0 := false
+                steps:
+                  r0: e0   [input i0 (¬false)]
+                  r1: ¬(e0)   [definition of e0]
+                  r2: ⊥   [RUP over [r0, r1]]
+          Conclusion: s0.s0
+    Conclusion: s0
+    |}]
+;;
+
+let%expect_test "kernel quantifier introduction rejects bogus proofs" =
+  let step_id = Proof.Id.Step.of_int_exn in
+  let assumption_id = Proof.Id.Assumption.of_int_exn in
+  let v name = Formula.Var (Tvar.of_string name) in
+  let a = Tvar.of_string "a" in
+  let c = Tvar.of_string "c" in
+  let d = Tvar.of_string "d" in
+  let p = Tvar.of_string "p" in
+  let print_result name proof =
+    print_s
+      [%message (name : string) ~result:(Proof.check proof : unit Or_error.t)]
+  in
+  let central_eigenvariable_in_assumption =
+    let a_eq_c : Formula.quantified = Eq (Var a, Var c) in
+    { Proof.assumptions = [| { name = None; formula = a_eq_c } |]
+    ; steps =
+        [| { name = None
+           ; conclusion = a_eq_c
+           ; justification = Assumption (assumption_id 0)
+           }
+         ; { name = None
+           ; conclusion = forall ([ x ], [], Eq (Var x, Var c))
+           ; justification =
+               Kernel
+                 { rule =
+                     Forall_intro
+                       { eigenvariables = [ x, a ]
+                       ; subproof =
+                           { assumptions =
+                               [| { name = None; formula = a_eq_c } |]
+                           ; steps =
+                               [| { name = None
+                                  ; conclusion = a_eq_c
+                                  ; justification = Assumption (assumption_id 0)
+                                  }
+                               |]
+                           ; conclusion = step_id 0
+                           }
+                       ; imports = [| step_id 0 |]
+                       }
+                 ; premises = [||]
+                 }
+           }
+        |]
+    ; conclusion = step_id 1
+    }
+  in
+  let subproof_conclusion_mismatch =
+    { Proof.assumptions = [||]
+    ; steps =
+        [| { name = None
+           ; conclusion = forall ([ x ], [], Eq (Var x, Var c))
+           ; justification =
+               Kernel
+                 { rule =
+                     Forall_intro
+                       { eigenvariables = [ x, a ]
+                       ; subproof =
+                           { assumptions = [||]
+                           ; steps =
+                               [| { name = None
+                                  ; conclusion = Eq (Var a, Var a)
+                                  ; justification =
+                                      Kernel
+                                        { rule = Equality_refl
+                                        ; premises = [||]
+                                        }
+                                  }
+                               |]
+                           ; conclusion = step_id 0
+                           }
+                       ; imports = [||]
+                       }
+                 ; premises = [||]
+                 }
+           }
+        |]
+    ; conclusion = step_id 0
+    }
+  in
+  let undisclosed_subproof_assumption =
+    let c_eq_c : Formula.quantified = Eq (Var c, Var c) in
+    { Proof.assumptions = [||]
+    ; steps =
+        [| { name = None
+           ; conclusion = forall ([ x ], [], Eq (Var c, Var c))
+           ; justification =
+               Kernel
+                 { rule =
+                     Forall_intro
+                       { eigenvariables = [ x, a ]
+                       ; subproof =
+                           { assumptions =
+                               [| { name = None; formula = c_eq_c } |]
+                           ; steps =
+                               [| { name = None
+                                  ; conclusion = c_eq_c
+                                  ; justification = Assumption (assumption_id 0)
+                                  }
+                               |]
+                           ; conclusion = step_id 0
+                           }
+                       ; imports = [||]
+                       }
+                 ; premises = [||]
+                 }
+           }
+        |]
+    ; conclusion = step_id 0
+    }
+  in
+  let import_mismatch =
+    let c_eq_c : Formula.quantified = Eq (Var c, Var c) in
+    let d_eq_d : Formula.quantified = Eq (Var d, Var d) in
+    { Proof.assumptions = [||]
+    ; steps =
+        [| { name = None
+           ; conclusion = d_eq_d
+           ; justification = Kernel { rule = Equality_refl; premises = [||] }
+           }
+         ; { name = None
+           ; conclusion = forall ([ x ], [], Eq (Var c, Var c))
+           ; justification =
+               Kernel
+                 { rule =
+                     Forall_intro
+                       { eigenvariables = [ x, a ]
+                       ; subproof =
+                           { assumptions =
+                               [| { name = None; formula = c_eq_c } |]
+                           ; steps =
+                               [| { name = None
+                                  ; conclusion = c_eq_c
+                                  ; justification = Assumption (assumption_id 0)
+                                  }
+                               |]
+                           ; conclusion = step_id 0
+                           }
+                       ; imports = [| step_id 0 |]
+                       }
+                 ; premises = [||]
+                 }
+           }
+        |]
+    ; conclusion = step_id 1
+    }
+  in
+  let eigenvariable_capture =
+    let captured : Formula.quantified =
+      Forall ([ a ], [], App (p, [ Var a; Var a ]))
+    in
+    { Proof.assumptions = [||]
+    ; steps =
+        [| { name = None
+           ; conclusion =
+               Forall ([ x ], [], Forall ([ a ], [], App (p, [ Var x; Var a ])))
+           ; justification =
+               Kernel
+                 { rule =
+                     Forall_intro
+                       { eigenvariables = [ x, a ]
+                       ; subproof =
+                           { assumptions =
+                               [| { name = None; formula = captured } |]
+                           ; steps =
+                               [| { name = None
+                                  ; conclusion = captured
+                                  ; justification = Assumption (assumption_id 0)
+                                  }
+                               |]
+                           ; conclusion = step_id 0
+                           }
+                       ; imports = [||]
+                       }
+                 ; premises = [||]
+                 }
+           }
+        |]
+    ; conclusion = step_id 0
+    }
+  in
+  let exists_intro_mismatch =
+    { Proof.assumptions = [||]
+    ; steps =
+        [| { name = None
+           ; conclusion = Eq (v "t", v "t")
+           ; justification = Kernel { rule = Equality_refl; premises = [||] }
+           }
+         ; { name = None
+           ; conclusion = exists ([ x ], Eq (Var x, Var c))
+           ; justification =
+               Kernel
+                 { rule = Exists_intro { witnesses = [ x, v "t" ] }
+                 ; premises = [| step_id 0 |]
+                 }
+           }
+        |]
+    ; conclusion = step_id 1
+    }
+  in
+  List.iter
+    [ ( "eigenvariable_in_subproof_assumption"
+      , central_eigenvariable_in_assumption )
+    ; "subproof_conclusion_mismatch", subproof_conclusion_mismatch
+    ; "undischarged_subproof_assumption", undisclosed_subproof_assumption
+    ; "import_mismatch", import_mismatch
+    ; "eigenvariable_capture", eigenvariable_capture
+    ; "exists_intro_mismatch", exists_intro_mismatch
+    ]
+    ~f:(fun (name, proof) -> print_result name proof);
+  [%expect
+    {|
+    ((name eigenvariable_in_subproof_assumption)
+     (result
+      (Error
+       ("universal introduction eigenvariable occurs in a subproof assumption"
+        (bad_assumptions ((0 (a))))))))
+    ((name subproof_conclusion_mismatch)
+     (result
+      (Error
+       "universal introduction subproof conclusion does not match the body under its eigenvariable substitution")))
+    ((name undischarged_subproof_assumption)
+     (result
+      (Error
+       ("universal introduction must discharge every subproof assumption"
+        (imports 0) (subproof_assumptions 1)))))
+    ((name import_mismatch)
+     (result
+      (Error
+       ("universal introduction import does not match subproof assumption"
+        (index 0) (import (Eq (Var d) (Var d)))
+        (assumption (Eq (Var c) (Var c)))))))
+    ((name eigenvariable_capture)
+     (result
+      (Error
+       ("substitution would capture an inner universal binder" (captured (a))))))
+    ((name exists_intro_mismatch)
+     (result
+      (Error
+       "existential introduction premise does not match its witnessed body")))
+    |}]
+;;
