@@ -571,19 +571,31 @@ let%expect_test "scoped ADT tester premise can be popped" =
     |}]
 ;;
 
-let%expect_test "scoped ADT completeness proof certificate" =
-  let solver =
-    Solver.create
-      ~config:{ Solver.Config.default with produce_proofs = true }
-      ()
+let%expect_test "guarded ADT completeness proof certificate is accepted" =
+  let x = v "x" in
+  let guard : Atom.Equality.t = `Eq (v "guard_l", v "guard_r") in
+  let clause =
+    clause_exn
+      [ theory_literal (guard :> Atom.t) ~positive:false
+      ; theory_literal (`Eq (x, red)) ~positive:true
+      ; theory_literal (`Eq (x, green)) ~positive:true
+      ; theory_literal (`Eq (x, blue)) ~positive:true
+      ]
   in
-  Solver.push solver;
-  Or_error.ok_exn (Solver.declare_datatype solver color_declaration);
-  assert_ok solver (neq (v "x") red);
-  assert_ok solver (neq (v "x") green);
-  assert_ok solver (neq (v "x") blue);
-  print_proof_result (Solver.solve solver);
-  [%expect {| (Unsat (proof_check (Ok ()))) |}]
+  print_s
+    [%sexp
+      (Proof.check_theory_certificate
+         ~datatype_env:color_env
+         ~clause
+         (Adt
+            (Completeness
+               { declaration = color_declaration
+               ; subject = x
+               ; guard = Some guard
+               ; form = Enum_equalities
+               }))
+       : unit Or_error.t)];
+  [%expect {| (Ok ()) |}]
 ;;
 
 let%expect_test "ADT proof certificates" =
