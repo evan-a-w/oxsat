@@ -28,8 +28,7 @@ type t =
     mutable quantified_givens : Formula.quantified list
   ; quantifier_chains : Quantifier_chain.t Formula.Any.Table.t
   ; (* Ground atoms with no real meaning. A refutation that depends on one can't
-       be turned into a real proof, so we decline -- the same fallback as a
-       push/pop scope. *)
+       be turned into a real proof, so we decline. *)
     synthetic : Formula.Any.Hash_set.t
   }
 
@@ -224,11 +223,29 @@ let rup_hints ~clause ~prior_clauses =
   Queue.to_array hints
 ;;
 
+let strip_scope_literals ~scope_vars (rc : Refutation_clause.t) =
+  Array.filter rc.literals ~f:(fun lit ->
+    let var = Int.abs lit in
+    if Set.mem scope_vars var
+    then
+      if lit < 0
+      then false
+      else
+        raise_s
+          [%message
+            "positive scope activation literal in refutation clause"
+              ~clause_idx:(rc.clause_idx : int)
+              ~literal:(lit : int)
+              ~literals:(rc.literals : int array)]
+    else true)
+;;
+
 let build
   ~encoding
   ~certificate_for_atoms
   ~formula_by_root_lit
   ~datatype_env
+  ~scope_vars
   ~refutation_clauses
   ~inputs
   =
@@ -244,11 +261,12 @@ let build
       Encoding.atom_for_sat_var encoding (Int.abs literal))
   in
   List.iter refutation_clauses ~f:(fun (rc : Refutation_clause.t) ->
-    let clause = Resolver.clause resolver rc.literals in
+    let literals = strip_scope_literals ~scope_vars rc in
+    let clause = Resolver.clause resolver literals in
     let reason : Proof.Refutation.Reason.t =
       match rc.reason with
       | Theory ->
-        let atoms = atoms_of_literals rc.literals in
+        let atoms = atoms_of_literals literals in
         (match certificate_for_atoms atoms with
          | Some certificate ->
            Theory_lemma
@@ -269,7 +287,7 @@ let build
         (* A single-literal User clause is the unit assertion of a top-level
            formula (its literal names a Tseitin root or a bare atom); a
            multi-literal one is a Tseitin definition clause. *)
-        (match rc.literals with
+        (match literals with
          | [| lit |] ->
            let formula =
              match Hashtbl.find formula_by_root_lit lit with
@@ -289,7 +307,7 @@ let build
            Input_clause { input; literal = Resolver.literal resolver lit }
          | _ ->
            let def_var =
-             Array.filter_map rc.literals ~f:(fun lit ->
+             Array.filter_map literals ~f:(fun lit ->
                let var = Int.abs lit in
                Option.some_if
                  (Option.is_some (Encoding.tseitin_def encoding var))
@@ -304,7 +322,8 @@ let build
                 [%message
                   "multi-literal input clause is neither an assertion nor a \
                    Tseitin definition"
-                    ~literals:(rc.literals : int array)]))
+                    (literals : int array)
+                    ~original_literals:(rc.literals : int array)]))
     in
     Queue.enqueue steps { Proof.Refutation.Step.clause; reason });
   let steps = Queue.to_array steps in
@@ -328,20 +347,12 @@ let unsat_proof
   ~scope_vars
   ~refutation_clauses
   =
-  (* Proofs of assertions made inside a [push]/[pop] scope would have to account
-     for the scope's activation literal (which the SAT core assumes true but
-     which has no formula); that is not yet modeled, so decline to produce a
-     proof when the refutation touches one. *)
   let scope_vars = Int.Set.of_list scope_vars in
-  let touches_scope_var =
-    List.exists refutation_clauses ~f:(fun (rc : Refutation_clause.t) ->
-      Array.exists rc.literals ~f:(fun lit -> Set.mem scope_vars (Int.abs lit)))
-  in
   let premises = asserted_formulas t in
   (* Synthetic atoms have no real meaning, so a refutation citing one (directly
      or inside a larger asserted formula) can't be a real proof. *)
   let depends_on_synthetic = Array.exists premises ~f:(contains_synthetic t) in
-  if touches_scope_var || depends_on_synthetic
+  if depends_on_synthetic
   then None
   else (
     (* The refutation refutes the premises together with the negation of the
@@ -354,6 +365,7 @@ let unsat_proof
         ~certificate_for_atoms
         ~formula_by_root_lit
         ~datatype_env
+        ~scope_vars
         ~refutation_clauses
         ~inputs
     in

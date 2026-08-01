@@ -80,10 +80,19 @@ that elaboration creates is spliced positively, so no guarded case remains
 synthetic; `Guard.Polarity.Negative` exists for the encoding but is currently
 unreachable.
 
+Also done: refutations inside `push`/`pop` scopes produce checked proofs. A
+scope's activation literal `a` appears only as the `-a` that `guard_clauses`
+prepends to in-scope clauses, and `solve` assumes `a` true, so proof
+construction strips those negative literals — recovering exactly the clause set
+the same assertions would have produced at top level. Every premise stays a real
+formula; `a` never enters the proof. A positive occurrence of a scope var in a
+refutation clause would fall outside this model, so it raises rather than being
+silently stripped. Such a proof establishes unsat *of the current assertion
+stack*: popped scopes' formulas are dropped from the premises and are not
+citable.
+
 Remaining:
 
-- `push`/`pop` scope activation literals still yield `proof = None`; that path
-  is untouched and is now the only remaining decline.
 - Quantified *conclusions* (a lemma `∀x. P(x)`, not just a quantified
   assumption) need universal generalization — `Forall_intro` with an
   eigenvariable condition over the step DAG's dependency closure, plus the cheap
@@ -91,6 +100,8 @@ Remaining:
   stay valid verbatim under it.
 - Eventually certify the whole instantiation loop so cached instantiations can be
   trusted artifacts rather than only optimizations.
+- The only remaining `proof = None` path is a refutation depending on a
+  synthetic atom; no currently reachable case produces one.
 
 ## ITE follow-ups
 
