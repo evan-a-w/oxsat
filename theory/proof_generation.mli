@@ -1,6 +1,25 @@
 open! Core
 open! Import
 
+module Quantifier_step : sig
+  type t =
+    | Forall_instantiation of
+        { bound_values : (Tvar.t * Formula.any) list
+        ; conclusion : Formula.quantified
+        }
+    | Exists_elim of
+        { skolems : (Tvar.t * Formula.any) list
+        ; conclusion : Formula.quantified
+        }
+end
+
+module Quantifier_chain : sig
+  type t =
+    { given : Formula.quantified
+    ; steps : Quantifier_step.t list
+    }
+end
+
 type t
 
 val create : unit -> t
@@ -19,6 +38,12 @@ val note_forall_instance
   -> instance:Formula.any
   -> forall:Formula.quantified
   -> bound_values:(Tvar.t * Formula.any) list
+  -> unit
+
+val note_quantifier_chain
+  :  t
+  -> ground:Formula.any
+  -> chain:Quantifier_chain.t
   -> unit
 
 (** Like {!note_forall_instance} but for the ground [skolem_body] an existential

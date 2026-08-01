@@ -73,6 +73,12 @@ val proof_note_exists_skolemization
   -> skolems:(Tvar.t * Formula.any) list
   -> unit
 
+val proof_note_quantifier_chain
+  :  t
+  -> ground:Formula.any
+  -> chain:Proof_generation.Quantifier_chain.t
+  -> unit
+
 val proof_note_synthetic : t -> Formula.any -> unit
 val push : t -> unit
 

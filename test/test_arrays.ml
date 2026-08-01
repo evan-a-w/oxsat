@@ -15,6 +15,13 @@ let store array index value : Formula.any = Store (array, index, value)
 let eq left right : Formula.any = Eq (left, right)
 let neq left right : Formula.any = Not (eq left right)
 
+let forall (bound, triggers, body) : Formula.quantified =
+  Forall
+    ( bound
+    , List.map triggers ~f:(List.map ~f:Formula.widen_quantified)
+    , Formula.widen_quantified body )
+;;
+
 let has_int_int_array_type var : Formula.any =
   eq (Type_var var) (Array_type (Int, Int))
 ;;
@@ -173,7 +180,7 @@ let%expect_test "array extensionality with a universal select equality" =
   ignore
     (Quantifier_solver.assert_formula
        solver
-       (Forall
+       (forall
           ( [ k ]
           , [ [ select a (Var k) ]; [ select b (Var k) ] ]
           , eq (select a (Var k)) (select b (Var k)) ))
@@ -259,7 +266,7 @@ let%expect_test "extensionality through aliased array variables" =
     ignore (Quantifier_solver.assert_formula solver f : _ Or_error.t)
   in
   assert_q
-    (Forall
+    (forall
        ( [ k ]
        , [ [ select x (Var k) ]; [ select y (Var k) ] ]
        , eq (select x (Var k)) (select y (Var k)) ));
@@ -288,7 +295,7 @@ let%expect_test "extensionality through aliased array variables with proofs" =
     ignore (Quantifier_solver.assert_formula solver f : _ Or_error.t)
   in
   assert_q
-    (Forall
+    (forall
        ( [ k ]
        , [ [ select x (Var k) ]; [ select y (Var k) ] ]
        , eq (select x (Var k)) (select y (Var k)) ));
@@ -309,7 +316,7 @@ let%expect_test "extensionality uses declared array types" =
     ignore (Quantifier_solver.assert_formula solver f : _ Or_error.t)
   in
   assert_q
-    (Forall
+    (forall
        ( [ k ]
        , [ [ select b (Var k) ] ]
        , eq (select a (Var k)) (select b (Var k)) ));
@@ -335,7 +342,7 @@ let%expect_test "extensionality uses declared array types with proofs" =
     ignore (Quantifier_solver.assert_formula solver f : _ Or_error.t)
   in
   assert_q
-    (Forall
+    (forall
        ( [ k ]
        , [ [ select b (Var k) ] ]
        , eq (select a (Var k)) (select b (Var k)) ));
@@ -445,7 +452,7 @@ let%expect_test "extensionality proof prints certificate lines" =
     ignore (Quantifier_solver.assert_formula solver f : _ Or_error.t)
   in
   assert_q
-    (Forall
+    (forall
        ( [ k ]
        , [ [ select x (Var k) ]; [ select y (Var k) ] ]
        , eq (select x (Var k)) (select y (Var k)) ));

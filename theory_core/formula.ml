@@ -28,12 +28,9 @@ type _ t =
   | Not : 'a t -> ([> `Boolean ] as 'a) t
   | And : 'a t list -> ([> `Boolean ] as 'a) t
   | Or : 'a t list -> ([> `Boolean ] as 'a) t
-  (* Quantifiers -- see formula.mli for why [body]/[triggers] are pinned to
-     [any_theory t] rather than the ambient ['a t]. *)
-  | Forall :
-      Tvar.t list * any_theory t list list * any_theory t
-      -> ([> `Quantified ] as 'a) t
-  | Exists : Tvar.t list * any_theory t -> ([> `Quantified ] as 'a) t
+  (* Quantifiers -- see formula.mli for the [quantified]/[any] split. *)
+  | Forall : Tvar.t list * 'a t list list * 'a t -> ([> `Quantified ] as 'a) t
+  | Exists : Tvar.t list * 'a t -> ([> `Quantified ] as 'a) t
   (* UF *)
   | App : Tvar.t * 'a t list -> ([> `Uf ] as 'a) t
   (* Arrays *)
@@ -188,6 +185,10 @@ let widen (type a) (t : a t) : any = Obj.magic t
 let widen_quantified (type a) (t : a t) : quantified = Obj.magic t
 let widen_list (type a) (l : a t list) : any list = Obj.magic l
 
+let widen_quantified_list (type a) (l : a t list) : quantified list =
+  Obj.magic l
+;;
+
 let args (type a) (t : a t) : any list =
   match t with
   | Var _ -> []
@@ -198,8 +199,8 @@ let args (type a) (t : a t) : any list =
   | Not x -> [ widen x ]
   | And l -> widen_list l
   | Or l -> widen_list l
-  | Forall (_, triggers, body) -> List.concat triggers @ [ body ]
-  | Exists (_, body) -> [ body ]
+  | Forall _ -> []
+  | Exists _ -> []
   | App (_, l) -> widen_list l
   | Select (array, index) -> [ widen array; widen index ]
   | Store (array, index, value) -> [ widen array; widen index; widen value ]
@@ -219,6 +220,47 @@ let args (type a) (t : a t) : any list =
   | La_scale_const (_, r) -> [ widen r ]
   | La_add (a, b) -> [ widen a; widen b ]
   | La_compare (a, _, b) -> [ widen a; widen b ]
+;;
+
+let quantified_args (q : quantified) : quantified list =
+  match q with
+  | Var _ -> []
+  | Eq (a, b) -> [ widen_quantified a; widen_quantified b ]
+  | Ite (condition, then_, else_) ->
+    [ widen_quantified condition
+    ; widen_quantified then_
+    ; widen_quantified else_
+    ]
+  | True -> []
+  | False -> []
+  | Not x -> [ widen_quantified x ]
+  | And l -> widen_quantified_list l
+  | Or l -> widen_quantified_list l
+  | Forall (_, triggers, body) ->
+    List.concat_map triggers ~f:widen_quantified_list
+    @ [ widen_quantified body ]
+  | Exists (_, body) -> [ widen_quantified body ]
+  | App (_, l) -> widen_quantified_list l
+  | Select (array, index) -> [ widen_quantified array; widen_quantified index ]
+  | Store (array, index, value) ->
+    [ widen_quantified array; widen_quantified index; widen_quantified value ]
+  | Datatype_constructor (_, args) -> widen_quantified_list args
+  | Datatype_selector (_, arg) -> [ widen_quantified arg ]
+  | Datatype_tester (_, arg) -> [ widen_quantified arg ]
+  | Bool -> []
+  | Int -> []
+  | Float -> []
+  | Type -> []
+  | Function_type (a, b) -> [ widen_quantified a; widen_quantified b ]
+  | Array_type (index, element) ->
+    [ widen_quantified index; widen_quantified element ]
+  | Type_of x -> [ widen_quantified x ]
+  | Type_var _ -> []
+  | Type_app (_, l) -> widen_quantified_list l
+  | La_const _ -> []
+  | La_scale_const (_, r) -> [ widen_quantified r ]
+  | La_add (a, b) -> [ widen_quantified a; widen_quantified b ]
+  | La_compare (a, _, b) -> [ widen_quantified a; widen_quantified b ]
 ;;
 
 let make_opt ~(op : Op.t) ~(args : any list) : any option =
@@ -360,13 +402,151 @@ let rec substitute (subst : any Tvar.Map.t) (term : any) : any =
     make ~op:(op term) ~args:new_args
 ;;
 
+let without_bound subst bound =
+  List.fold bound ~init:subst ~f:(fun subst v -> Map.remove subst v)
+;;
+
+let rec tvars_of_any (acc : Tvar.Set.t) (formula : any) : Tvar.Set.t =
+  let acc =
+    match op formula with
+    | Var v | App v | Type_var v | Type_app v -> Set.add acc v
+    | _ -> acc
+  in
+  List.fold (args formula) ~init:acc ~f:tvars_of_any
+;;
+
+let replacement_tvars subst =
+  Map.data subst
+  |> List.fold ~init:Tvar.Set.empty ~f:(fun acc replacement ->
+    tvars_of_any acc replacement)
+;;
+
+let rec substitute_quantified (subst : any Tvar.Map.t) (formula : quantified)
+  : quantified Or_error.t
+  =
+  let open Or_error.Let_syntax in
+  let substitute_list formulas =
+    Or_error.all (List.map formulas ~f:(substitute_quantified subst))
+  in
+  match formula with
+  | Var v ->
+    (match Map.find subst v with
+     | Some replacement -> Ok (widen_quantified replacement)
+     | None -> Ok (Var v))
+  | Eq (a, b) ->
+    let%map a = substitute_quantified subst (widen_quantified a)
+    and b = substitute_quantified subst (widen_quantified b) in
+    Eq (a, b)
+  | Ite (condition, then_, else_) ->
+    let condition = substitute subst condition in
+    let%map then_ = substitute_quantified subst (widen_quantified then_)
+    and else_ = substitute_quantified subst (widen_quantified else_) in
+    Ite (condition, then_, else_)
+  | True -> Ok True
+  | False -> Ok False
+  | Not f ->
+    let%map f = substitute_quantified subst (widen_quantified f) in
+    Not f
+  | And fs ->
+    let%map fs = substitute_list (widen_quantified_list fs) in
+    And fs
+  | Or fs ->
+    let%map fs = substitute_list (widen_quantified_list fs) in
+    Or fs
+  | Forall (bound, triggers, body) ->
+    let subst = without_bound subst bound in
+    let captured =
+      Set.inter (Tvar.Set.of_list bound) (replacement_tvars subst)
+    in
+    if not (Set.is_empty captured)
+    then
+      Or_error.error_s
+        [%message
+          "substitution would capture an inner universal binder"
+            (captured : Tvar.Set.t)]
+    else (
+      let%map triggers =
+        Or_error.all
+          (List.map triggers ~f:(fun trigger ->
+             Or_error.all
+               (List.map
+                  (widen_quantified_list trigger)
+                  ~f:(substitute_quantified subst))))
+      and body = substitute_quantified subst (widen_quantified body) in
+      Forall (bound, triggers, body))
+  | Exists (bound, body) ->
+    let subst = without_bound subst bound in
+    let captured =
+      Set.inter (Tvar.Set.of_list bound) (replacement_tvars subst)
+    in
+    if not (Set.is_empty captured)
+    then
+      Or_error.error_s
+        [%message
+          "substitution would capture an inner existential binder"
+            (captured : Tvar.Set.t)]
+    else (
+      let%map body = substitute_quantified subst (widen_quantified body) in
+      Exists (bound, body))
+  | App (f, args) ->
+    let%map args = substitute_list (widen_quantified_list args) in
+    App (f, args)
+  | Select (array, index) ->
+    let%map array = substitute_quantified subst (widen_quantified array)
+    and index = substitute_quantified subst (widen_quantified index) in
+    Select (array, index)
+  | Store (array, index, value) ->
+    let%map array = substitute_quantified subst (widen_quantified array)
+    and index = substitute_quantified subst (widen_quantified index)
+    and value = substitute_quantified subst (widen_quantified value) in
+    Store (array, index, value)
+  | Datatype_constructor (constructor, args) ->
+    let%map args = substitute_list (widen_quantified_list args) in
+    Datatype_constructor (constructor, args)
+  | Datatype_selector (selector, arg) ->
+    let%map arg = substitute_quantified subst (widen_quantified arg) in
+    Datatype_selector (selector, arg)
+  | Datatype_tester (constructor, arg) ->
+    let%map arg = substitute_quantified subst (widen_quantified arg) in
+    Datatype_tester (constructor, arg)
+  | Bool -> Ok Bool
+  | Int -> Ok Int
+  | Float -> Ok Float
+  | Type -> Ok Type
+  | Function_type (a, b) ->
+    let%map a = substitute_quantified subst (widen_quantified a)
+    and b = substitute_quantified subst (widen_quantified b) in
+    Function_type (a, b)
+  | Array_type (index, element) ->
+    let%map index = substitute_quantified subst (widen_quantified index)
+    and element = substitute_quantified subst (widen_quantified element) in
+    Array_type (index, element)
+  | Type_of f ->
+    let%map f = substitute_quantified subst (widen_quantified f) in
+    Type_of f
+  | Type_var v -> Ok (Type_var v)
+  | Type_app (f, args) ->
+    let%map args = substitute_list (widen_quantified_list args) in
+    Type_app (f, args)
+  | La_const q -> Ok (La_const q)
+  | La_scale_const (q, f) ->
+    let%map f = substitute_quantified subst (widen_quantified f) in
+    La_scale_const (q, f)
+  | La_add (a, b) ->
+    let%map a = substitute_quantified subst (widen_quantified a)
+    and b = substitute_quantified subst (widen_quantified b) in
+    La_add (a, b)
+  | La_compare (a, op, b) ->
+    let%map a = substitute_quantified subst (widen_quantified a)
+    and b = substitute_quantified subst (widen_quantified b) in
+    La_compare (a, op, b)
+;;
+
 let rec sexp_of_t : type a. (a -> Sexp.t) -> a t -> Sexp.t =
   fun sexp_of_a formula ->
   let node tag args = Sexp.List (Sexp.Atom tag :: args) in
   (* Children of the same phantom tag [a] as [formula] itself. *)
   let sexp_of_sub a = sexp_of_t sexp_of_a a in
-  (* Children pinned to [any_theory t] (Forall/Exists triggers and bodies), a
-     different instantiation than [a] -- can't reuse [sexp_of_sub]. *)
   let sexp_of_ground a = sexp_of_t (fun _ -> assert false) a in
   match formula with
   | Var v -> node "Var" [ [%sexp_of: Tvar.t] v ]
@@ -386,11 +566,11 @@ let rec sexp_of_t : type a. (a -> Sexp.t) -> a t -> Sexp.t =
       "Forall"
       [ [%sexp_of: Tvar.t list] bound
       ; [%sexp_of: Sexp.t list list]
-          (List.map triggers ~f:(List.map ~f:sexp_of_ground))
-      ; sexp_of_ground body
+          (List.map triggers ~f:(List.map ~f:sexp_of_sub))
+      ; sexp_of_sub body
       ]
   | Exists (bound, body) ->
-    node "Exists" [ [%sexp_of: Tvar.t list] bound; sexp_of_ground body ]
+    node "Exists" [ [%sexp_of: Tvar.t list] bound; sexp_of_sub body ]
   | App (f, args) ->
     node
       "App"
@@ -452,7 +632,7 @@ let sexp_of_quantified (q : quantified) : Sexp.t =
 let rec contains_binder (q : quantified) : bool =
   match q with
   | Forall _ | Exists _ -> true
-  | _ -> List.exists (args q) ~f:(fun a -> contains_binder (widen_quantified a))
+  | _ -> List.exists (quantified_args q) ~f:contains_binder
 ;;
 
 let to_any (q : quantified) : any option =
@@ -527,10 +707,10 @@ let rec quantified_of_sexp sexp : quantified =
     Forall
       ( [%of_sexp: Tvar.t list] bound
       , [%of_sexp: Sexp.t list list] triggers
-        |> List.map ~f:(List.map ~f:any_of_sexp)
-      , any_of_sexp body )
+        |> List.map ~f:(List.map ~f:quantified_of_sexp)
+      , quantified_of_sexp body )
   | Sexp.List [ Sexp.Atom "Exists"; bound; body ] ->
-    Exists ([%of_sexp: Tvar.t list] bound, any_of_sexp body)
+    Exists ([%of_sexp: Tvar.t list] bound, quantified_of_sexp body)
   | Sexp.List [ Sexp.Atom "Not"; f ] -> Not (quantified_of_sexp f)
   | Sexp.List [ Sexp.Atom "And"; fs ] ->
     And ([%of_sexp: Sexp.t list] fs |> List.map ~f:quantified_of_sexp)
@@ -801,8 +981,7 @@ let rec tvars_fold (acc : Tvar.Set.t) (q : quantified) : Tvar.Set.t =
     | Forall bound | Exists bound -> List.fold bound ~init:acc ~f:Set.add
     | _ -> acc
   in
-  List.fold (args q) ~init:acc ~f:(fun acc a ->
-    tvars_fold acc (widen_quantified a))
+  List.fold (quantified_args q) ~init:acc ~f:tvars_fold
 ;;
 
 let tvars (q : quantified) : Tvar.Set.t = tvars_fold Tvar.Set.empty q

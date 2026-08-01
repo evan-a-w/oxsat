@@ -34,14 +34,11 @@ type _ t =
   | Not : 'a t -> ([> `Boolean ] as 'a) t
   | And : 'a t list -> ([> `Boolean ] as 'a) t
   | Or : 'a t list -> ([> `Boolean ] as 'a) t
-  (* Quantifiers. [body]/[triggers] are plain [any_theory t], not the
-     polymorphic ['a t] used elsewhere in this GADT: a Forall/Exists body can't
-     itself contain a further quantifier (no alternation in v1). Tagged
-     [`Quantified], not [`Boolean], so it never unifies with [any]. *)
-  | Forall :
-      Tvar.t list * any_theory t list list * any_theory t
-      -> ([> `Quantified ] as 'a) t
-  | Exists : Tvar.t list * any_theory t -> ([> `Quantified ] as 'a) t
+  (* Quantifiers may nest because [body]/[triggers] use the same phantom tag as
+     the quantified formula. Tagged [`Quantified], not [`Boolean], so they still
+     never unify with [any]: [any_theory] excludes [`Quantified]. *)
+  | Forall : Tvar.t list * 'a t list list * 'a t -> ([> `Quantified ] as 'a) t
+  | Exists : Tvar.t list * 'a t -> ([> `Quantified ] as 'a) t
   (* UF *)
   | App : Tvar.t * 'a t list -> ([> `Uf ] as 'a) t
   (* Arrays *)
@@ -178,7 +175,19 @@ module Op : sig
 end
 
 val op : 'a t -> Op.t
-val args : 'a t -> any list
+
+(** Immediate children of a binder-free formula. Quantifier bodies and triggers
+    cannot be exposed here: after quantifier nesting, they may themselves
+    contain binders, and coercing them to [any] would break the invariant that
+    [any] is binder-free. Use {!quantified_args} when traversing [quantified]
+    formulas. *)
+val args : any -> any list
+
+(** Immediate children of a [quantified] formula, including [Forall] triggers
+    and bodies and [Exists] bodies. For non-binder nodes this is {!args} widened
+    to [quantified]. *)
+val quantified_args : quantified -> quantified list
+
 val make_opt : op:Op.t -> args:any list -> any option
 val make : op:Op.t -> args:any list -> any
 
@@ -191,6 +200,14 @@ val type_expr_to_formula : Type_expr.t -> any
     in [subst] with its mapped replacement, leaving everything else structurally
     unchanged. *)
 val substitute : any Tvar.Map.t -> any -> any
+
+(** Capture-avoiding substitution over a possibly-quantified formula. Inner
+    binders shadow matching substitution entries, and the function rejects a
+    substitution whose replacement would be captured by an inner binder. *)
+val substitute_quantified
+  :  any Tvar.Map.t
+  -> quantified
+  -> quantified Or_error.t
 
 (** Rewrites term-level [Ite] nodes into Boolean structure at their enclosing
     formula position, preserving binder scope when applied to quantifier bodies

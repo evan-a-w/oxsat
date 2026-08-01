@@ -514,6 +514,11 @@ let proof_note_exists_skolemization t ~skolem_body ~existential ~skolems =
       ~skolems)
 ;;
 
+let proof_note_quantifier_chain t ~ground ~chain =
+  Option.iter t.proof_generation ~f:(fun pg ->
+    Proof_generation.note_quantifier_chain pg ~ground ~chain)
+;;
+
 let proof_note_synthetic t atom =
   Option.iter t.proof_generation ~f:(fun pg ->
     Proof_generation.note_synthetic pg atom)

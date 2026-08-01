@@ -24,12 +24,18 @@
 
 ## Nested quantifiers
 
-- Widen quantifier bodies so nested quantifiers and alternation are expressible.
-- Implement proper Skolem functions depending on enclosing universal variables;
-  do not use fresh ground constants except where sound.
-- Preserve scope for term-level ITEs and triggers under nested binders.
-- Extend proof support for nested quantifier elaboration where feasible; escalate
-  only genuinely hard proof-kernel changes.
+Done: quantifier bodies/triggers now carry the same phantom tag as the enclosing
+formula, so nesting and alternation are expressible while `Formula.any` stays
+statically binder-free. Positive universal subtrees prenex into a single axiom;
+existentials become Skolem functions of exactly the universals in scope at their
+occurrence (bare constants only at the top level).
+
+Remaining:
+
+- Quantifiers inside triggers, or in a non-boolean-skeleton position (an
+  argument to `Eq`/`App`), are still rejected rather than elaborated.
+- Trigger groups from hoisted universals merge by cross-product; revisit if that
+  proves too coarse in practice.
 
 ## Trigger inference and quantifier UX
 
@@ -58,11 +64,24 @@
 
 ## Quantifier proof production
 
-- Leave full quantifier/e-matching proof production until the end.
+Done ("Route A"): top-level alternation produces checked proofs with no new
+kernel rules. Outer universals are instantiated first, so each `∃` eliminated is
+ground and witnessed by a distinct fresh constant per instantiation point.
+`Forall_instantiation`/`Exists_elim` may now conclude a still-quantified formula;
+substitution over quantified formulas rejects binder capture.
+
+Remaining:
+
+- Quantifiers under `Or`/`Not`/boolean structure still use synthetic guards and
+  return `proof = None`. Proving these needs a definitional `g ↔ ∀x. body` atom,
+  which the refutation format cannot currently express.
+- Quantified *conclusions* (a lemma `∀x. P(x)`, not just a quantified
+  assumption) need universal generalization — `Forall_intro` with an
+  eigenvariable condition over the step DAG's dependency closure, plus the cheap
+  `Exists_intro`. This is the fork toward a real proof language; Route A proofs
+  stay valid verbatim under it.
 - Eventually certify the whole instantiation loop so cached instantiations can be
   trusted artifacts rather than only optimizations.
-- Include proof-printing examples and bogus-proof rejection tests for quantified
-  proofs.
 
 ## ITE follow-ups
 

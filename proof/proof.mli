@@ -49,16 +49,18 @@ module Kernel_rule : sig
         }
     | Forall_instantiation of
         { (* premise [∀bound. body]; conclusion [body] with each bound variable
-             replaced per [bound_values]. Every bound variable must be
-             instantiated. *)
+             replaced per [bound_values]. The conclusion may still be
+             quantified. Every bound variable must be instantiated. *)
           bound_values : (Tvar.t * Formula.any) list
         }
     | Exists_elim of
         { (* premise [∃bound. body]; conclusion [body] with each bound variable
-             replaced by its witness per [skolems], subject to the eigenvariable
-             condition: no Skolem symbol occurs in the premise, in any of the
-             proof's assumptions, or in the proof's final conclusion (the last
-             enforced by [check], not here). *)
+             replaced by its witness per [skolems]. The conclusion may still be
+             quantified, subject to the eigenvariable condition: no Skolem
+             symbol occurs in the premise, in any of the proof's assumptions, in
+             another existential-elimination conclusion unless it is exactly the
+             same conclusion, or in the proof's final conclusion (the last
+             enforced after checking all steps). *)
           skolems : (Tvar.t * Formula.any) list
         }
   [@@deriving sexp, compare]
