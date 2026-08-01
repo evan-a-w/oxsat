@@ -486,7 +486,7 @@ let reason_to_string ~clause ~premise_steps (reason : Refutation.Reason.t) =
        never cites) is named as a bare input to avoid implying a nonexistent
        step. *)
     if input < Array.length premise_steps
-    then sprintf "s%d" premise_steps.(input)
+    then premise_steps.(input)
     else sprintf "input i%d (¬false)" input
   | Extension_definition id ->
     sprintf "definition of e%d" (Proof_id.Extension.to_int id)
@@ -501,10 +501,10 @@ let reason_to_string ~clause ~premise_steps (reason : Refutation.Reason.t) =
             sprintf "r%d" (Proof_id.Refutation_step.to_int h))))
 ;;
 
-(* Renders a refutation into [out] at the current indent. [premise_steps] are
-   the step indices of the enclosing [By_refutation]'s premises, in input order,
-   used to name input references. Kept here (rather than in [Proof]) since it
-   needs only the [Refutation] and certificate modules. *)
+(* Renders a refutation into [out] at the current indent. [premise_steps] names
+   the enclosing [By_refutation]'s premises in input order, for input
+   references. Kept here (rather than in [Proof]) since it needs only the
+   [Refutation] and certificate modules. *)
 let render_refutation out ~premise_steps (refutation : Refutation.t) =
   let open Buffer_out in
   line out "refutation:";
