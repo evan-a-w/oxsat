@@ -129,6 +129,16 @@ module Adt = struct
         ; witness_args : Formula.any list
         ; value : bool
         }
+    | Tester_exclusivity of
+        { left_constructor : Datatype.Constructor.t
+        ; left_argument : Formula.any
+        ; right_constructor : Datatype.Constructor.t
+        ; right_argument : Formula.any
+        }
+    | Tester_reconstruction of
+        { constructor : Datatype.Constructor.t
+        ; argument : Formula.any
+        }
     | Selector of
         { selector : Datatype.Selector.t
         ; argument : Formula.any

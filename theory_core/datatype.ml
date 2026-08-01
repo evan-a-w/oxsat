@@ -44,6 +44,7 @@ end
 module Constructor_declaration = struct
   type t =
     { constructor : Constructor.t
+    ; field_types : Type_expr.t list
     ; selectors : Selector.t list
     }
   [@@deriving sexp, compare, hash, equal]
@@ -94,6 +95,13 @@ module Env = struct
         [%message
           "duplicate constructor in datatype declaration"
             (constructor : Constructor.t)]
+    else if List.length cd.field_types <> constructor.arity
+    then
+      Or_error.error_s
+        [%message
+          "constructor field type list has the wrong arity"
+            (constructor : Constructor.t)
+            ~actual:(List.length cd.field_types : int)]
     else (
       let seen_indices = Int.Hash_set.create () in
       let seen_selectors = Selector.Hash_set.create () in
@@ -131,6 +139,38 @@ module Env = struct
           Ok ())))
   ;;
 
+  let has_finite_inhabitant (declaration : Declaration.t) =
+    let rec field_type_has_inhabitant productive = function
+      | Type_expr.App (name, args)
+        when Tvar.equal name declaration.datatype.name ->
+        productive
+        && List.for_all args ~f:(field_type_has_inhabitant productive)
+      | App (_, args) ->
+        List.for_all args ~f:(field_type_has_inhabitant productive)
+      | Function_type (a, b) | Array_type (a, b) ->
+        field_type_has_inhabitant productive a
+        && field_type_has_inhabitant productive b
+      | Var _ | Base _ | Type_of _ | Type -> true
+    in
+    let constructor_is_productive productive cd =
+      List.for_all
+        cd.Constructor_declaration.field_types
+        ~f:(field_type_has_inhabitant productive)
+    in
+    let rec fixed_point productive =
+      let productive' =
+        productive
+        || List.exists
+             declaration.constructors
+             ~f:(constructor_is_productive productive)
+      in
+      if Bool.equal productive productive'
+      then productive
+      else fixed_point productive'
+    in
+    fixed_point false
+  ;;
+
   let validate_declaration declaration =
     if List.is_empty declaration.Declaration.constructors
     then
@@ -139,7 +179,7 @@ module Env = struct
           "datatype declaration must have at least one constructor"
             (declaration.datatype : Datatype.t)]
     else (
-      let%map.Or_error (_ : Tvar.Set.t * Constructor.Set.t) =
+      let%bind.Or_error (_ : Tvar.Set.t * Constructor.Set.t) =
         List.fold_result
           declaration.constructors
           ~init:(Tvar.Set.empty, Constructor.Set.empty)
@@ -154,7 +194,13 @@ module Env = struct
             ( Set.add seen_names cd.constructor.name
             , Set.add seen_constructors cd.constructor ))
       in
-      ())
+      if has_finite_inhabitant declaration
+      then Ok ()
+      else
+        Or_error.error_s
+          [%message
+            "datatype declaration has no finite inhabitant"
+              (declaration.datatype : Datatype.t)])
   ;;
 
   let add t declaration =

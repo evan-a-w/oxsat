@@ -286,6 +286,20 @@ let make_opt ~(op : Op.t) ~(args : any list) : any option =
 
 let make ~op ~args = Option.value_exn (make_opt ~op ~args)
 
+let rec type_expr_to_formula : Type_expr.t -> any = function
+  | Var v -> Type_var v
+  | Base Bool -> Bool
+  | Base Int -> Int
+  | Base Float -> Float
+  | Type_of v -> Type_of (Var v)
+  | App (f, args) -> Type_app (f, List.map args ~f:type_expr_to_formula)
+  | Type -> Type
+  | Function_type (a, b) ->
+    Function_type (type_expr_to_formula a, type_expr_to_formula b)
+  | Array_type (index, element) ->
+    Array_type (type_expr_to_formula index, type_expr_to_formula element)
+;;
+
 module Ite_case = struct
   type t =
     { conditions : any list

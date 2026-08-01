@@ -13,7 +13,7 @@ module Equality : sig
   val normalize : t -> t
 
   (** Both endpoints as terms of the shared [Formula.any] term language; a
-      [`Type_eq]'s sides are embedded via {!Type_expr.to_formula}. *)
+      [`Type_eq]'s sides are embedded via {!Formula.type_expr_to_formula}. *)
   val endpoints : t -> Formula.any * Formula.any
 
   include Comparable.S_plain with type t := t

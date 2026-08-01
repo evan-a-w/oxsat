@@ -22,11 +22,6 @@
 - Keep wall-clock timeout as an emergency escape hatch, not the reproducibility
   mechanism.
 
-## Algebraic datatypes follow-ups
-
-- Implement a full non-ground ADT model representation. Current ADT model
-  checking is intentionally finite-ground over observed solver terms.
-
 ## Nested quantifiers
 
 - Widen quantifier bodies so nested quantifiers and alternation are expressible.

@@ -17,6 +17,7 @@ let neq a b : Formula.any = Not (eq a b)
 let xv = Tvar.of_string "x"
 let yv = Tvar.of_string "y"
 let list_datatype = Datatype.Datatype.{ name = Tvar.of_string "list" }
+let list_type = Type_expr.App (list_datatype.name, [])
 
 let nil_constructor =
   Datatype.Constructor.
@@ -37,8 +38,11 @@ let list_declaration =
   Datatype.Declaration.
     { datatype = list_datatype
     ; constructors =
-        [ { constructor = nil_constructor; selectors = [] }
-        ; { constructor = cons_constructor; selectors = [ head_selector ] }
+        [ { constructor = nil_constructor; field_types = []; selectors = [] }
+        ; { constructor = cons_constructor
+          ; field_types = [ list_type; list_type ]
+          ; selectors = [ head_selector ]
+          }
         ]
     }
 ;;
@@ -69,8 +73,8 @@ let color_declaration =
   Datatype.Declaration.
     { datatype = color_datatype
     ; constructors =
-        [ { constructor = red_constructor; selectors = [] }
-        ; { constructor = green_constructor; selectors = [] }
+        [ { constructor = red_constructor; field_types = []; selectors = [] }
+        ; { constructor = green_constructor; field_types = []; selectors = [] }
         ]
     }
 ;;

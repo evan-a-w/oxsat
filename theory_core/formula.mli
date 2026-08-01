@@ -182,6 +182,11 @@ val args : 'a t -> any list
 val make_opt : op:Op.t -> args:any list -> any option
 val make : op:Op.t -> args:any list -> any
 
+(** Widens a type expression to the [Formula.any] term the egraph and proof
+    checker reason over, mapping [Type_expr.Var] to [Type_var] so it stays
+    distinct from a UF-role [Var]. *)
+val type_expr_to_formula : Type_expr.t -> any
+
 (** Capture-free substitution over a ground term: replaces each [Var v] for [v]
     in [subst] with its mapped replacement, leaving everything else structurally
     unchanged. *)

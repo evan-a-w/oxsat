@@ -407,41 +407,63 @@ let guard_clauses ~activation clauses =
   List.map clauses ~f:(fun clause -> Array.append [| -activation |] clause)
 ;;
 
-let assert_formula t (formula : Formula.any)
+let rec assert_formula t (formula : Formula.any)
   : [ `Ok | `Unsat of Feel.Sat_result.Core_clause.t list ] Or_error.t
   =
   let%bind.Or_error () = Adts.validate_formula t.combined.adts formula in
-  let encoded_formula = Formula.expand_term_ites formula in
-  let%bind.Or_error clauses =
-    Encoding.encode t.encoding ~formula:encoded_formula
+  let%bind.Or_error type_constraints =
+    Adts.type_constraints t.combined.adts formula
   in
-  Vec.Value.push t.pending_egraph_terms encoded_formula;
-  let root_lit = (List.last_exn clauses).(0) in
-  Hashtbl.set t.formula_by_root_lit ~key:root_lit ~data:encoded_formula;
-  (match t.asserted_scopes with
-   | current :: outer ->
-     t.asserted_scopes <- (encoded_formula :: current) :: outer
-   | [] -> assert false);
-  let clauses =
-    match t.scopes with
-    | [] -> clauses
-    | activation :: _ -> guard_clauses ~activation clauses
-  in
-  let result =
+  let%bind.Or_error type_result =
     List.fold_until
-      clauses
+      type_constraints
       ~init:`Ok
-      ~f:(fun (`Ok : [ `Ok ]) clause ->
-        match Feel.Solver.add_clause t.solver ~clause with
-        | `Ok -> Continue `Ok
-        | `Unsat _ as unsat -> Stop unsat)
-      ~finish:(fun (`Ok : [ `Ok ]) -> `Ok)
+      ~f:(fun (`Ok : [ `Ok ]) (var, type_expr) ->
+        match
+          assert_formula
+            t
+            (Encoding.atom_to_formula
+               (Tvar_types.has_type var type_expr :> Atom.t))
+        with
+        | Error error -> Stop (Error error)
+        | Ok `Ok -> Continue `Ok
+        | Ok (`Unsat _ as unsat) -> Stop (Ok unsat))
+      ~finish:(fun (`Ok : [ `Ok ]) -> Ok `Ok)
   in
-  (match result, t.proof_generation with
-   | `Ok, Some proof_generation ->
-     Proof_generation.assert_formula proof_generation encoded_formula
-   | (`Ok | `Unsat _), None | `Unsat _, Some _ -> ());
-  Ok result
+  match type_result with
+  | `Unsat _ as unsat -> Ok unsat
+  | `Ok ->
+    let encoded_formula = Formula.expand_term_ites formula in
+    let%bind.Or_error clauses =
+      Encoding.encode t.encoding ~formula:encoded_formula
+    in
+    Vec.Value.push t.pending_egraph_terms encoded_formula;
+    let root_lit = (List.last_exn clauses).(0) in
+    Hashtbl.set t.formula_by_root_lit ~key:root_lit ~data:encoded_formula;
+    (match t.asserted_scopes with
+     | current :: outer ->
+       t.asserted_scopes <- (encoded_formula :: current) :: outer
+     | [] -> assert false);
+    let clauses =
+      match t.scopes with
+      | [] -> clauses
+      | activation :: _ -> guard_clauses ~activation clauses
+    in
+    let result =
+      List.fold_until
+        clauses
+        ~init:`Ok
+        ~f:(fun (`Ok : [ `Ok ]) clause ->
+          match Feel.Solver.add_clause t.solver ~clause with
+          | `Ok -> Continue `Ok
+          | `Unsat _ as unsat -> Stop unsat)
+        ~finish:(fun (`Ok : [ `Ok ]) -> `Ok)
+    in
+    (match result, t.proof_generation with
+     | `Ok, Some proof_generation ->
+       Proof_generation.assert_formula proof_generation encoded_formula
+     | (`Ok | `Unsat _), None | `Unsat _, Some _ -> ());
+    Ok result
 ;;
 
 let declaration_guard_atom declaration : Atom.Equality.t =

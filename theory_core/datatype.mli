@@ -6,8 +6,9 @@ open! Feel.Import
     Formula nodes carry constructor, selector, and tester records so terms
     remain self-describing and serializable, but the solver treats a {!Env.t}
     declaration environment as the source of truth. Every ADT constructor,
-    selector, and tester used by the solver must be declared. Selectors project
-    only when applied to values known equal to their owning constructor;
+    selector, and tester used by the solver must be declared. Constructor
+    declarations include one field type per constructor argument. Selectors
+    project only when applied to values known equal to their owning constructor;
     applications to other constructors are intentionally underspecified. *)
 
 module Datatype : sig
@@ -44,6 +45,7 @@ end
 module Constructor_declaration : sig
   type t =
     { constructor : Constructor.t
+    ; field_types : Type_expr.t list
     ; selectors : Selector.t list
     }
   [@@deriving sexp, compare, hash, equal]

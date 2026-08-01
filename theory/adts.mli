@@ -11,8 +11,10 @@ open! Import
 
     - equal applications of the same constructor imply equality of each field;
     - applications of distinct constructors of the same datatype are disjoint;
-    - testers are true on their constructor and false on other constructors of
-      the same datatype;
+    - testers are true on their constructor, false on other constructors of the
+      same datatype, and mutually exclusive for non-ground subjects;
+    - positive testers reconstruct constructor terms when all fields have
+      declared selectors;
     - selectors project their owning constructor's field, and are left
       underspecified on other constructors;
     - finite values cannot form constructor cycles, including multi-step cycles
@@ -35,6 +37,12 @@ val declare
 
 val env : t -> Datatype.Env.t
 val validate_formula : t -> Formula.any -> unit Or_error.t
+
+val type_constraints
+  :  t
+  -> Formula.any
+  -> (Tvar.t * Type_expr.t) list Or_error.t
+
 val datatype_observations : t -> Datatype.Datatype.Set.t Formula.Any.Map.t
 val add_atom : t -> atom:Atom.Equality.t -> unit
 

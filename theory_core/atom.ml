@@ -21,7 +21,8 @@ module Equality = struct
 
   let endpoints = function
     | `Eq (a, b) -> a, b
-    | `Type_eq (a, b) -> Type_expr.to_formula a, Type_expr.to_formula b
+    | `Type_eq (a, b) ->
+      Formula.type_expr_to_formula a, Formula.type_expr_to_formula b
   ;;
 
   include functor Comparable.Make_plain

@@ -87,6 +87,16 @@ let check_adt clause certificate ~datatype_env =
   let selector_is_declared selector =
     Datatype.Env.mem_selector datatype_env selector
   in
+  let reconstruction_args constructor argument =
+    let%bind.Option declaration =
+      Datatype.Env.find_constructor datatype_env constructor
+    in
+    List.init constructor.arity ~f:(fun index ->
+      List.find declaration.selectors ~f:(fun selector ->
+        selector.index = index)
+      |> Option.map ~f:(fun selector -> selector_term selector argument))
+    |> Option.all
+  in
   let expected =
     match certificate with
     | Injectivity { constructor; left_args; right_args; field_index } ->
@@ -140,6 +150,32 @@ let check_adt clause certificate ~datatype_env =
           (guard argument witness
            @ [ theory_literal (tester_atom tester_constructor argument) value ]
           )
+      else None
+    | Tester_exclusivity
+        { left_constructor; left_argument; right_constructor; right_argument }
+      ->
+      if constructor_is_declared left_constructor
+         && constructor_is_declared right_constructor
+         && Datatype.Datatype.equal
+              left_constructor.datatype
+              right_constructor.datatype
+         && not (Datatype.Constructor.equal left_constructor right_constructor)
+      then
+        Some
+          (guard left_argument right_argument
+           @ [ theory_literal (tester_atom left_constructor left_argument) false
+             ; theory_literal
+                 (tester_atom right_constructor right_argument)
+                 false
+             ])
+      else None
+    | Tester_reconstruction { constructor; argument } ->
+      if constructor_is_declared constructor
+      then
+        Option.map (reconstruction_args constructor argument) ~f:(fun args ->
+          [ theory_literal (tester_atom constructor argument) false
+          ; eq_literal argument (constructor_term constructor args)
+          ])
       else None
     | Selector { selector; argument; constructor_args } ->
       let constructor = selector.constructor in
@@ -413,7 +449,7 @@ let equality_endpoints : Proof_atom.t -> (Formula.any * Formula.any) option
   = function
   | Theory (`Eq (left, right)) -> Some (left, right)
   | Theory (`Type_eq (left, right)) ->
-    Some (Type_expr.to_formula left, Type_expr.to_formula right)
+    Some (Formula.type_expr_to_formula left, Formula.type_expr_to_formula right)
   | Theory (`Le _) | Extension _ -> None
 ;;
 

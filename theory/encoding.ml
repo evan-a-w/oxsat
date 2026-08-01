@@ -498,7 +498,8 @@ let linear_expr_to_formula (le : Linear_expr.t) : [> `La | `Term ] Formula.t =
 
 let atom_to_formula : Atom.t -> Formula.any = function
   | `Eq (a, b) -> Eq (a, b)
-  | `Type_eq (a, b) -> Eq (Type_expr.to_formula a, Type_expr.to_formula b)
+  | `Type_eq (a, b) ->
+    Eq (Formula.type_expr_to_formula a, Formula.type_expr_to_formula b)
   | `Le (le, c) -> La_compare (linear_expr_to_formula le, `Le, La_const c)
 ;;
 

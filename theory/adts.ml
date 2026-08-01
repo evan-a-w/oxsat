@@ -41,6 +41,8 @@ module Emitted_key = struct
       | Injectivity of Formula.any * Formula.any * int
       | Disjointness of Formula.any * Formula.any
       | Tester of Formula.any * Formula.any * Formula.any
+      | Tester_exclusivity of Formula.any * Formula.any
+      | Tester_reconstruction of Formula.any * Datatype.Constructor.t
       | Selector of Formula.any * Formula.any
       | Acyclicity of (Formula.any * Formula.any) list
       | Completeness of
@@ -165,6 +167,23 @@ let add_atom t ~atom =
 ;;
 
 let datatype_observations t = t.observations
+let datatype_type datatype = Type_expr.App (datatype.Datatype.Datatype.name, [])
+
+let constructor_declaration t constructor =
+  Datatype.Env.find_constructor t.env constructor
+;;
+
+let constructor_field_types t constructor =
+  Option.map (constructor_declaration t constructor) ~f:(fun declaration ->
+    declaration.Datatype.Constructor_declaration.field_types)
+;;
+
+let selector_field_type t (selector : Datatype.Selector.t) =
+  let%bind.Option field_types =
+    constructor_field_types t selector.constructor
+  in
+  List.nth field_types selector.index
+;;
 
 let rec validate_formula t (formula : Formula.any) =
   let%bind.Or_error () =
@@ -201,6 +220,148 @@ let rec validate_formula t (formula : Formula.any) =
   in
   List.fold_result (Formula.args formula) ~init:() ~f:(fun () arg ->
     validate_formula t arg)
+;;
+
+let type_expr_is_ground type_expr =
+  let rec go = function
+    | Type_expr.Var _ | Type_of _ -> false
+    | Base _ | Type -> true
+    | App (_, args) -> List.for_all args ~f:go
+    | Function_type (a, b) | Array_type (a, b) -> go a && go b
+  in
+  go type_expr
+;;
+
+let static_type t (term : Formula.any) =
+  match term with
+  | Datatype_constructor (constructor, _) ->
+    Some (datatype_type constructor.datatype)
+  | Datatype_selector (selector, _) -> selector_field_type t selector
+  | Var _
+  | Eq _
+  | Ite _
+  | True
+  | False
+  | Not _
+  | And _
+  | Or _
+  | App _
+  | Select _
+  | Store _
+  | Datatype_tester _
+  | Bool
+  | Int
+  | Float
+  | Type
+  | Function_type _
+  | Array_type _
+  | Type_of _
+  | Type_var _
+  | Type_app _
+  | La_const _
+  | La_scale_const _
+  | La_add _
+  | La_compare _ -> None
+;;
+
+let check_expected_type ~term ~expected ~actual =
+  match actual with
+  | Some actual
+    when type_expr_is_ground expected
+         && type_expr_is_ground actual
+         && not ([%compare.equal: Type_expr.t] expected actual) ->
+    Or_error.error_s
+      [%message
+        "ADT term has an incompatible field type"
+          (term : Formula.any)
+          (expected : Type_expr.t)
+          (actual : Type_expr.t)]
+  | Some _ | None -> Ok ()
+;;
+
+let add_var_constraint constraints term expected =
+  match term with
+  | Formula.Var var -> (var, expected) :: constraints
+  | _ -> constraints
+;;
+
+let rec type_constraints_for_term t ?expected constraints (term : Formula.any) =
+  let%bind.Or_error () =
+    match expected with
+    | None -> Ok ()
+    | Some expected ->
+      check_expected_type ~term ~expected ~actual:(static_type t term)
+  in
+  let constraints =
+    match expected with
+    | None -> constraints
+    | Some expected -> add_var_constraint constraints term expected
+  in
+  match term with
+  | Eq (left, right) ->
+    let%bind.Or_error constraints =
+      type_constraints_for_equality t constraints left right
+    in
+    List.fold_result
+      (Formula.args term)
+      ~init:constraints
+      ~f:(type_constraints_for_term t)
+  | Datatype_constructor (constructor, args) ->
+    let field_types =
+      Option.value (constructor_field_types t constructor) ~default:[]
+    in
+    (match List.zip args field_types with
+     | Unequal_lengths -> Ok constraints
+     | Ok fields ->
+       List.fold_result
+         fields
+         ~init:constraints
+         ~f:(fun constraints (arg, expected) ->
+           type_constraints_for_term t ~expected constraints arg))
+  | Datatype_selector (selector, argument) ->
+    type_constraints_for_term
+      t
+      ~expected:(datatype_type selector.constructor.datatype)
+      constraints
+      argument
+  | Datatype_tester (constructor, argument) ->
+    type_constraints_for_term
+      t
+      ~expected:(datatype_type constructor.datatype)
+      constraints
+      argument
+  | Ite (condition, then_, else_) ->
+    let%bind.Or_error constraints =
+      type_constraints_for_term t constraints condition
+    in
+    let%bind.Or_error constraints =
+      match expected with
+      | None -> type_constraints_for_term t constraints then_
+      | Some expected -> type_constraints_for_term t ~expected constraints then_
+    in
+    (match expected with
+     | None -> type_constraints_for_term t constraints else_
+     | Some expected -> type_constraints_for_term t ~expected constraints else_)
+  | _ ->
+    List.fold_result
+      (Formula.args term)
+      ~init:constraints
+      ~f:(type_constraints_for_term t)
+
+and type_constraints_for_equality t constraints left right =
+  let%bind.Or_error constraints =
+    match static_type t left with
+    | None -> Ok constraints
+    | Some expected -> type_constraints_for_term t ~expected constraints right
+  in
+  match static_type t right with
+  | None -> Ok constraints
+  | Some expected -> type_constraints_for_term t ~expected constraints left
+;;
+
+let type_constraints t formula =
+  let%map.Or_error constraints = type_constraints_for_term t [] formula in
+  List.dedup_and_sort constraints ~compare:[%compare: Tvar.t * Type_expr.t]
 ;;
 
 let eq left right : Atom.Equality.t = `Eq (left, right)
@@ -389,6 +550,125 @@ let find_tester t egraph testers constructors =
       else None))
 ;;
 
+let find_tester_exclusivity t egraph testers =
+  List.find_mapi testers ~f:(fun i left ->
+    List.drop testers (i + 1)
+    |> List.find_map ~f:(fun right ->
+      if Datatype.Datatype.equal
+           left.Tester_term.constructor.datatype
+           right.Tester_term.constructor.datatype
+         && (not
+               (Datatype.Constructor.equal
+                  left.Tester_term.constructor
+                  right.Tester_term.constructor))
+         && same_class
+              egraph
+              left.Tester_term.argument
+              right.Tester_term.argument
+      then (
+        match
+          ( Formula_egraph_uf.atom_value
+              egraph
+              ~atom:
+                (tester_atom
+                   left.Tester_term.constructor
+                   left.Tester_term.argument)
+          , Formula_egraph_uf.atom_value
+              egraph
+              ~atom:
+                (tester_atom
+                   right.Tester_term.constructor
+                   right.Tester_term.argument) )
+        with
+        | Some true, Some true ->
+          let a, b =
+            normalized_pair left.Tester_term.term right.Tester_term.term
+          in
+          let key = Emitted_key.Tester_exclusivity (a, b) in
+          let literals =
+            guarded_equality
+              left.Tester_term.argument
+              right.Tester_term.argument
+            @ [ ( tester_atom
+                    left.Tester_term.constructor
+                    left.Tester_term.argument
+                , false )
+              ; ( tester_atom
+                    right.Tester_term.constructor
+                    right.Tester_term.argument
+                , false )
+              ]
+          in
+          let certificate =
+            Proof.Theory_certificate.Adt.Tester_exclusivity
+              { left_constructor = left.Tester_term.constructor
+              ; left_argument = left.Tester_term.argument
+              ; right_constructor = right.Tester_term.constructor
+              ; right_argument = right.Tester_term.argument
+              }
+          in
+          emit t egraph key literals certificate
+        | Some false, _ | None, _ | _, Some false | _, None -> None)
+      else None))
+;;
+
+let selector_args_for_constructor t constructor argument =
+  let%bind.Option declaration = constructor_declaration t constructor in
+  List.init constructor.Datatype.Constructor.arity ~f:(fun index ->
+    List.find declaration.selectors ~f:(fun selector -> selector.index = index)
+    |> Option.map ~f:(fun selector ->
+      Formula.Datatype_selector (selector, argument)))
+  |> Option.all
+;;
+
+let find_tester_reconstruction t egraph testers =
+  List.find_map testers ~f:(fun tester ->
+    match
+      Formula_egraph_uf.atom_value
+        egraph
+        ~atom:
+          (tester_atom
+             tester.Tester_term.constructor
+             tester.Tester_term.argument)
+    with
+    | Some true ->
+      (match
+         selector_args_for_constructor
+           t
+           tester.Tester_term.constructor
+           tester.Tester_term.argument
+       with
+       | None -> None
+       | Some args ->
+         let reconstructed =
+           Formula.Datatype_constructor (tester.Tester_term.constructor, args)
+         in
+         if Formula_egraph_uf.mem_term egraph reconstructed
+            && same_class egraph tester.Tester_term.argument reconstructed
+         then None
+         else (
+           let key =
+             Emitted_key.Tester_reconstruction
+               (tester.Tester_term.argument, tester.Tester_term.constructor)
+           in
+           let literals =
+             [ ( tester_atom
+                   tester.Tester_term.constructor
+                   tester.Tester_term.argument
+               , false )
+             ; eq tester.Tester_term.argument reconstructed, true
+             ]
+           in
+           let certificate =
+             Proof.Theory_certificate.Adt.Tester_reconstruction
+               { constructor = tester.Tester_term.constructor
+               ; argument = tester.Tester_term.argument
+               }
+           in
+           emit t egraph key literals certificate))
+    | Some false | None -> None)
+;;
+
 let find_selector t egraph selectors constructors =
   List.find_map selectors ~f:(fun selector ->
     List.find_map constructors ~f:(fun witness ->
@@ -573,15 +853,21 @@ let maybe_get_lemma t ~egraph =
          (match find_tester t egraph testers constructors with
           | Some lemma -> lemma
           | None ->
-            (match find_selector t egraph selectors constructors with
+            (match find_tester_exclusivity t egraph testers with
              | Some lemma -> lemma
              | None ->
-               (match find_acyclicity t egraph constructors with
+               (match find_tester_reconstruction t egraph testers with
                 | Some lemma -> lemma
                 | None ->
-                  (match find_completeness t egraph terms with
+                  (match find_selector t egraph selectors constructors with
                    | Some lemma -> lemma
-                   | None -> `Consistent))))))
+                   | None ->
+                     (match find_acyclicity t egraph constructors with
+                      | Some lemma -> lemma
+                      | None ->
+                        (match find_completeness t egraph terms with
+                         | Some lemma -> lemma
+                         | None -> `Consistent))))))))
 ;;
 
 let last_certificate t = t.last_certificate

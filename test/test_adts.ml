@@ -4,6 +4,7 @@ open! Theory_core
 open! Theory
 
 let datatype = Datatype.Datatype.{ name = Tvar.of_string "list" }
+let list_type = Type_expr.App (datatype.name, [])
 
 let nil_constructor =
   Datatype.Constructor.{ datatype; name = Tvar.of_string "Nil"; arity = 0 }
@@ -27,8 +28,9 @@ let list_declaration =
   Datatype.Declaration.
     { datatype
     ; constructors =
-        [ { constructor = nil_constructor; selectors = [] }
+        [ { constructor = nil_constructor; field_types = []; selectors = [] }
         ; { constructor = cons_constructor
+          ; field_types = [ list_type; list_type ]
           ; selectors = [ head_selector; tail_selector ]
           }
         ]
@@ -67,7 +69,10 @@ let color_declaration =
         List.map
           [ red_constructor; green_constructor; blue_constructor ]
           ~f:(fun constructor ->
-            { Datatype.Constructor_declaration.constructor; selectors = [] })
+            { Datatype.Constructor_declaration.constructor
+            ; field_types = []
+            ; selectors = []
+            })
     }
 ;;
 
@@ -265,13 +270,41 @@ let%expect_test "ADT declarations are validated" =
     ; ( "wrong selector index"
       , { datatype
         ; constructors =
-            [ { constructor = nil_constructor; selectors = [ bad_selector ] } ]
+            [ { constructor = nil_constructor
+              ; field_types = []
+              ; selectors = [ bad_selector ]
+              }
+            ]
         } )
     ; ( "duplicate constructor name"
       , { datatype
         ; constructors =
-            [ { constructor = nil_constructor; selectors = [] }
-            ; { constructor = duplicate_constructor_name; selectors = [] }
+            [ { constructor = nil_constructor
+              ; field_types = []
+              ; selectors = []
+              }
+            ; { constructor = duplicate_constructor_name
+              ; field_types = [ list_type; list_type ]
+              ; selectors = []
+              }
+            ]
+        } )
+    ; ( "wrong field type arity"
+      , { datatype
+        ; constructors =
+            [ { constructor = cons_constructor
+              ; field_types = [ list_type ]
+              ; selectors = []
+              }
+            ]
+        } )
+    ; ( "no finite inhabitant"
+      , { datatype
+        ; constructors =
+            [ { constructor = cons_constructor
+              ; field_types = [ list_type; list_type ]
+              ; selectors = []
+              }
             ]
         } )
     ]
@@ -288,7 +321,131 @@ let%expect_test "ADT declarations are validated" =
     ((name empty) (is_error true))
     ((name "wrong selector index") (is_error true))
     ((name "duplicate constructor name") (is_error true))
+    ((name "wrong field type arity") (is_error true))
+    ((name "no finite inhabitant") (is_error true))
     |}]
+;;
+
+let%expect_test "ADT field types constrain constructor arguments" =
+  let box_datatype = Datatype.Datatype.{ name = Tvar.of_string "box" } in
+  let box_constructor =
+    Datatype.Constructor.
+      { datatype = box_datatype; name = Tvar.of_string "Box"; arity = 1 }
+  in
+  let box_selector =
+    Datatype.Selector.
+      { constructor = box_constructor
+      ; name = Tvar.of_string "unbox"
+      ; index = 0
+      }
+  in
+  let box_declaration =
+    Datatype.Declaration.
+      { datatype = box_datatype
+      ; constructors =
+          [ { constructor = box_constructor
+            ; field_types = [ Type_expr.Base Int ]
+            ; selectors = [ box_selector ]
+            }
+          ]
+      }
+  in
+  let datatype_env =
+    Or_error.ok_exn (Datatype.Env.of_declarations [ box_declaration ])
+  in
+  let solver =
+    Solver.create ~config:{ Solver.Config.default with datatype_env } ()
+  in
+  let x = Tvar.of_string "x" in
+  let box_x : Formula.any = Datatype_constructor (box_constructor, [ Var x ]) in
+  assert_ok solver (eq box_x box_x);
+  print_result (Solver.solve solver);
+  print_s [%sexp (Solver.get_type solver x : Type_expr.t option)];
+  let solver =
+    Solver.create ~config:{ Solver.Config.default with datatype_env } ()
+  in
+  let b = Tvar.of_string "b" in
+  let y = Tvar.of_string "y" in
+  let unbox_b : Formula.any = Datatype_selector (box_selector, Var b) in
+  assert_ok solver (eq unbox_b (Var y));
+  print_result (Solver.solve solver);
+  print_s
+    [%sexp
+      (Solver.get_type solver b : Type_expr.t option)
+      , (Solver.get_type solver y : Type_expr.t option)];
+  let solver =
+    Solver.create ~config:{ Solver.Config.default with datatype_env } ()
+  in
+  Solver.assert_type solver x (Base Float);
+  assert_ok solver (eq box_x box_x);
+  print_result (Solver.solve solver);
+  [%expect
+    {|
+    Sat
+    ((Base Int))
+    Sat
+    (((App box ())) ((Base Int)))
+    Unsat
+    |}]
+;;
+
+let%expect_test "non-ground ADT testers are mutually exclusive" =
+  let solver = create_solver () in
+  assert_ok solver (is_nil (v "x"));
+  assert_ok solver (is_cons (v "x"));
+  print_result (Solver.solve solver);
+  [%expect {| Unsat |}]
+;;
+
+let%expect_test "non-ground ADT model chooses an unobserved constructor" =
+  let tree = Datatype.Datatype.{ name = Tvar.of_string "tree" } in
+  let tree_type = Type_expr.App (tree.name, []) in
+  let leaf =
+    Datatype.Constructor.
+      { datatype = tree; name = Tvar.of_string "Leaf"; arity = 0 }
+  in
+  let node =
+    Datatype.Constructor.
+      { datatype = tree; name = Tvar.of_string "Node"; arity = 2 }
+  in
+  let declaration =
+    Datatype.Declaration.
+      { datatype = tree
+      ; constructors =
+          [ { constructor = leaf; field_types = []; selectors = [] }
+          ; { constructor = node
+            ; field_types = [ tree_type; tree_type ]
+            ; selectors = []
+            }
+          ]
+      }
+  in
+  let datatype_env =
+    Or_error.ok_exn (Datatype.Env.of_declarations [ declaration ])
+  in
+  let solver =
+    Solver.create ~config:{ Solver.Config.default with datatype_env } ()
+  in
+  let x = v "x" in
+  assert_ok solver (Not (Formula.Datatype_tester (leaf, x)));
+  match Solver.solve solver with
+  | Unsat _ -> print_endline "Unsat"
+  | Sat { model } ->
+    print_endline "Sat";
+    print_s [%sexp (Solver.check_model solver model : unit Or_error.t)];
+    [%expect {|
+    Sat
+    (Ok ())
+    |}]
+;;
+
+let%expect_test "non-ground tester reconstructs constructor value" =
+  let solver = create_solver () in
+  let x = v "x" in
+  assert_ok solver (is_cons x);
+  assert_ok solver (neq x (cons (head x) (tail x)));
+  print_result (Solver.solve solver);
+  [%expect {| Unsat |}]
 ;;
 
 let%expect_test "ADT selector alias projects through variable equal to \
@@ -397,6 +554,10 @@ let%expect_test "ADT proof certificates" =
     ; create_solver, "disjointness", [ eq nil (cons (v "h") (v "t")) ]
     ; create_solver, "selector", [ neq (head (cons (v "h") nil)) (v "h") ]
     ; create_solver, "tester", [ is_nil (cons (v "h") nil) ]
+    ; create_solver, "tester exclusivity", [ is_nil (v "x"); is_cons (v "x") ]
+    ; ( create_solver
+      , "tester reconstruction"
+      , [ is_cons (v "x"); neq (v "x") (cons (head (v "x")) (tail (v "x"))) ] )
     ; create_solver, "acyclicity", [ eq (v "x") (cons (v "x") nil) ]
     ; ( create_solver
       , "constructor completeness"
@@ -418,6 +579,8 @@ let%expect_test "ADT proof certificates" =
     disjointness: (Unsat (proof_check (Ok ())))
     selector: (Unsat (proof_check (Ok ())))
     tester: (Unsat (proof_check (Ok ())))
+    tester exclusivity: (Unsat (proof_check (Ok ())))
+    tester reconstruction: (Unsat (proof_check (Ok ())))
     acyclicity: (Unsat (proof_check (Ok ())))
     constructor completeness: (Unsat (proof_check (Ok ())))
     enum completeness: (Unsat (proof_check (Ok ())))
@@ -461,19 +624,23 @@ let%expect_test "ADT proofs print human-readable certificate text" =
       a0: bool ≠ int
       a1: bool ≠ float
       a2: int ≠ float
-      a3: Cons(a, Nil()) = Cons(c, Nil())
-      a4: a ≠ c
+      a3: a : list()
+      a4: c : list()
+      a5: Cons(a, Nil()) = Cons(c, Nil())
+      a6: a ≠ c
     Steps:
       s0: bool ≠ int   [assumption a0]
       s1: bool ≠ float   [assumption a1]
       s2: int ≠ float   [assumption a2]
-      s3: Cons(a, Nil()) = Cons(c, Nil())   [assumption a3]
-      s4: a ≠ c   [assumption a4]
-      s5: false   [refutation of [s0, s1, s2, s3, s4]]
+      s3: a : list()   [assumption a3]
+      s4: c : list()   [assumption a4]
+      s5: Cons(a, Nil()) = Cons(c, Nil())   [assumption a5]
+      s6: a ≠ c   [assumption a6]
+      s7: false   [refutation of [s0, s1, s2, s3, s4, s5, s6]]
         refutation:
           steps:
-            r0: Cons(a, Nil()) = Cons(c, Nil())   [s3]
-            r1: a ≠ c   [s4]
+            r0: Cons(a, Nil()) = Cons(c, Nil())   [s5]
+            r1: a ≠ c   [s6]
             r2: a = c ∨ Cons(a, Nil()) ≠ Cons(c, Nil())   [ADT: (Injectivity (constructor ((datatype ((name list))) (name Cons) (arity 2)))
      (left_args
       ((Var a)
@@ -483,46 +650,52 @@ let%expect_test "ADT proofs print human-readable certificate text" =
        (Datatype_constructor ((datatype ((name list))) (name Nil) (arity 0)) ())))
      (field_index 0))]
             r3: ⊥   [RUP over [r0, r1, r2]]
-    Conclusion: s5
+    Conclusion: s7
 
     disjointness: check = true
     Assumptions:
       a0: bool ≠ int
       a1: bool ≠ float
       a2: int ≠ float
-      a3: Nil() = Cons(h, t)
+      a3: t : list()
+      a4: h : list()
+      a5: Nil() = Cons(h, t)
     Steps:
       s0: bool ≠ int   [assumption a0]
       s1: bool ≠ float   [assumption a1]
       s2: int ≠ float   [assumption a2]
-      s3: Nil() = Cons(h, t)   [assumption a3]
-      s4: false   [refutation of [s0, s1, s2, s3]]
+      s3: t : list()   [assumption a3]
+      s4: h : list()   [assumption a4]
+      s5: Nil() = Cons(h, t)   [assumption a5]
+      s6: false   [refutation of [s0, s1, s2, s3, s4, s5]]
         refutation:
           steps:
-            r0: Nil() = Cons(h, t)   [s3]
+            r0: Nil() = Cons(h, t)   [s5]
             r1: Nil() ≠ Cons(h, t)   [ADT: (Disjointness
      (left_constructor ((datatype ((name list))) (name Nil) (arity 0)))
      (left_args ())
      (right_constructor ((datatype ((name list))) (name Cons) (arity 2)))
      (right_args ((Var h) (Var t))))]
             r2: ⊥   [RUP over [r0, r1]]
-    Conclusion: s4
+    Conclusion: s6
 
     selector: check = true
     Assumptions:
       a0: bool ≠ int
       a1: bool ≠ float
       a2: int ≠ float
-      a3: head(Cons(h, Nil())) ≠ h
+      a3: h : list()
+      a4: head(Cons(h, Nil())) ≠ h
     Steps:
       s0: bool ≠ int   [assumption a0]
       s1: bool ≠ float   [assumption a1]
       s2: int ≠ float   [assumption a2]
-      s3: head(Cons(h, Nil())) ≠ h   [assumption a3]
-      s4: false   [refutation of [s0, s1, s2, s3]]
+      s3: h : list()   [assumption a3]
+      s4: head(Cons(h, Nil())) ≠ h   [assumption a4]
+      s5: false   [refutation of [s0, s1, s2, s3, s4]]
         refutation:
           steps:
-            r0: h ≠ head(Cons(h, Nil()))   [s3]
+            r0: h ≠ head(Cons(h, Nil()))   [s4]
             r1: h = head(Cons(h, Nil()))   [ADT: (Selector
      (selector
       ((constructor ((datatype ((name list))) (name Cons) (arity 2))) (name head)
@@ -535,23 +708,25 @@ let%expect_test "ADT proofs print human-readable certificate text" =
       ((Var h)
        (Datatype_constructor ((datatype ((name list))) (name Nil) (arity 0)) ()))))]
             r2: ⊥   [RUP over [r0, r1]]
-    Conclusion: s4
+    Conclusion: s5
 
     tester: check = true
     Assumptions:
       a0: bool ≠ int
       a1: bool ≠ float
       a2: int ≠ float
-      a3: is-Nil(Cons(h, Nil()))
+      a3: h : list()
+      a4: is-Nil(Cons(h, Nil()))
     Steps:
       s0: bool ≠ int   [assumption a0]
       s1: bool ≠ float   [assumption a1]
       s2: int ≠ float   [assumption a2]
-      s3: is-Nil(Cons(h, Nil()))   [assumption a3]
-      s4: false   [refutation of [s0, s1, s2, s3]]
+      s3: h : list()   [assumption a3]
+      s4: is-Nil(Cons(h, Nil()))   [assumption a4]
+      s5: false   [refutation of [s0, s1, s2, s3, s4]]
         refutation:
           steps:
-            r0: true = is-Nil(Cons(h, Nil()))   [s3]
+            r0: true = is-Nil(Cons(h, Nil()))   [s4]
             r1: true ≠ is-Nil(Cons(h, Nil()))   [ADT: (Tester (tester_constructor ((datatype ((name list))) (name Nil) (arity 0)))
      (argument
       (Datatype_constructor ((datatype ((name list))) (name Cons) (arity 2))
@@ -563,23 +738,25 @@ let%expect_test "ADT proofs print human-readable certificate text" =
        (Datatype_constructor ((datatype ((name list))) (name Nil) (arity 0)) ())))
      (value false))]
             r2: ⊥   [RUP over [r0, r1]]
-    Conclusion: s4
+    Conclusion: s5
 
     acyclicity: check = true
     Assumptions:
       a0: bool ≠ int
       a1: bool ≠ float
       a2: int ≠ float
-      a3: x = Cons(x, Nil())
+      a3: x : list()
+      a4: x = Cons(x, Nil())
     Steps:
       s0: bool ≠ int   [assumption a0]
       s1: bool ≠ float   [assumption a1]
       s2: int ≠ float   [assumption a2]
-      s3: x = Cons(x, Nil())   [assumption a3]
-      s4: false   [refutation of [s0, s1, s2, s3]]
+      s3: x : list()   [assumption a3]
+      s4: x = Cons(x, Nil())   [assumption a4]
+      s5: false   [refutation of [s0, s1, s2, s3, s4]]
         refutation:
           steps:
-            r0: x = Cons(x, Nil())   [s3]
+            r0: x = Cons(x, Nil())   [s4]
             r1: x ≠ Cons(x, Nil())   [ADT: (Acyclicity
      (cycle
       (((constructor_term
@@ -589,7 +766,7 @@ let%expect_test "ADT proofs print human-readable certificate text" =
             ()))))
         (field (Var x))))))]
             r2: ⊥   [RUP over [r0, r1]]
-    Conclusion: s4
+    Conclusion: s5
     |}]
 ;;
 
@@ -632,6 +809,12 @@ let%expect_test "bogus ADT certificates are rejected" =
             , Formula.Datatype_constructor (cons_constructor, [ c; nil ]) ))
           ~positive:false
       ; theory_literal (`Eq (a, c)) ~positive:true
+      ]
+  in
+  let tester_exclusivity_clause =
+    clause_exn
+      [ theory_literal (`Eq (is_nil a, Formula.True)) ~positive:false
+      ; theory_literal (`Eq (is_cons a, Formula.True)) ~positive:false
       ]
   in
   let enum_completeness_clause =
@@ -696,6 +879,26 @@ let%expect_test "bogus ADT certificates are rejected" =
                    ; field_index = 3
                    }))
            : bool)
+        ~tester_exclusivity_same_constructor:
+          (Or_error.is_error
+             (check
+                ~datatype_env
+                tester_exclusivity_clause
+                (Tester_exclusivity
+                   { left_constructor = nil_constructor
+                   ; left_argument = a
+                   ; right_constructor = nil_constructor
+                   ; right_argument = a
+                   }))
+           : bool)
+        ~tester_reconstruction_wrong_clause:
+          (Or_error.is_error
+             (check
+                ~datatype_env
+                tester_exclusivity_clause
+                (Tester_reconstruction
+                   { constructor = nil_constructor; argument = a }))
+           : bool)
         ~completeness_missing_constructor:
           (Or_error.is_error
              (check
@@ -735,6 +938,8 @@ let%expect_test "bogus ADT certificates are rejected" =
     ("bogus ADT certificates" (disjointness_same_constructor true)
      (selector_wrong_field true) (acyclicity_not_a_constructor true)
      (acyclicity_field_not_in_args true) (injectivity_field_out_of_bounds true)
+     (tester_exclusivity_same_constructor true)
+     (tester_reconstruction_wrong_clause true)
      (completeness_missing_constructor true) (completeness_undeclared true))
     (Error "ADT certificate does not match its clause")
     |}]

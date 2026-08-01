@@ -407,56 +407,137 @@ let check_adts t ~datatype_env ~adt_observations =
     | None -> Ok ()
     | Some _ -> error [%message "ADT acyclicity is violated"]
   in
+  let constructor_witnesses subject datatype =
+    List.filter constructors ~f:(fun (constructor, _, term) ->
+      Datatype.Datatype.equal constructor.datatype datatype
+      && reps_equal t subject term)
+  in
+  let tester_constraints subject datatype =
+    List.filter_map testers ~f:(fun (constructor, argument, tester) ->
+      if Datatype.Datatype.equal constructor.datatype datatype
+         && reps_equal t subject argument
+      then (
+        match atom_value t (`Eq (tester, Formula.True)) with
+        | True -> Some (constructor, true, tester)
+        | False -> Some (constructor, false, tester)
+        | Unknown -> None)
+      else None)
+  in
+  let enum_constructor_term constructor =
+    Formula.Datatype_constructor (constructor, [])
+  in
+  let enum_candidate_is_excluded subject constructor =
+    match atom_value t (`Eq (subject, enum_constructor_term constructor)) with
+    | False -> true
+    | True | Unknown -> false
+  in
+  let choose_constructor subject datatype declaration =
+    let constructor_declarations =
+      declaration.Datatype.Declaration.constructors
+    in
+    let witness_constructors =
+      constructor_witnesses subject datatype
+      |> List.map ~f:(fun (constructor, _, _) -> constructor)
+      |> List.dedup_and_sort ~compare:Datatype.Constructor.compare
+    in
+    let tester_constraints = tester_constraints subject datatype in
+    let positive_testers =
+      tester_constraints
+      |> List.filter_map ~f:(fun (constructor, value, _) ->
+        if value then Some constructor else None)
+      |> List.dedup_and_sort ~compare:Datatype.Constructor.compare
+    in
+    let negative_testers =
+      tester_constraints
+      |> List.filter_map ~f:(fun (constructor, value, _) ->
+        if value then None else Some constructor)
+      |> Datatype.Constructor.Set.of_list
+    in
+    let%bind.Or_error forced =
+      match witness_constructors, positive_testers with
+      | [], [] -> Ok None
+      | [ constructor ], [] | [], [ constructor ] -> Ok (Some constructor)
+      | [ witness ], [ tester ] when Datatype.Constructor.equal witness tester
+        -> Ok (Some witness)
+      | _ ->
+        error
+          [%message
+            "ADT tester/constructor choice is inconsistent"
+              (subject : Formula.any)
+              (witness_constructors : Datatype.Constructor.t list)
+              (positive_testers : Datatype.Constructor.t list)]
+    in
+    match forced with
+    | Some constructor when Set.mem negative_testers constructor ->
+      let tester = Formula.Datatype_tester (constructor, subject) in
+      let expected = true in
+      error
+        [%message
+          "ADT tester value is violated"
+            (tester : Formula.any)
+            (expected : bool)]
+    | Some constructor -> Ok constructor
+    | None ->
+      let candidates =
+        List.filter constructor_declarations ~f:(fun cd ->
+          let constructor = cd.constructor in
+          (not (Set.mem negative_testers constructor))
+          && (constructor.arity <> 0
+              || not (enum_candidate_is_excluded subject constructor)))
+      in
+      (match candidates with
+       | cd :: _ -> Ok cd.constructor
+       | [] ->
+         if List.for_all constructor_declarations ~f:(fun cd ->
+              cd.constructor.arity = 0)
+         then
+           error
+             [%message
+               "ADT enum exhaustiveness is violated"
+                 (subject : Formula.any)
+                 (datatype : Datatype.Datatype.t)]
+         else
+           error
+             [%message
+               "ADT constructor completeness is violated"
+                 (subject : Formula.any)
+                 (datatype : Datatype.Datatype.t)])
+  in
   Map.fold
     adt_observations
     ~init:(Ok ())
     ~f:(fun ~key:subject ~data:datatypes acc ->
       let%bind.Or_error () = acc in
-      Set.fold datatypes ~init:(Ok ()) ~f:(fun acc datatype ->
-        let%bind.Or_error () = acc in
-        match Datatype.Env.find datatype_env datatype with
-        | None -> Ok ()
-        | Some declaration ->
-          let constructor_declarations = declaration.constructors in
-          if List.for_all constructor_declarations ~f:(fun cd ->
-               cd.constructor.arity = 0)
-          then (
-            let is_equal_to_some_constructor =
-              List.exists constructor_declarations ~f:(fun cd ->
-                reps_equal
-                  t
-                  subject
-                  (Formula.Datatype_constructor (cd.constructor, [])))
+      if not (Map.mem t.euf_classes subject)
+      then
+        error
+          [%message
+            "ADT observation references a term with no class representative"
+              (subject : Formula.any)]
+      else
+        Set.fold datatypes ~init:(Ok ()) ~f:(fun acc datatype ->
+          let%bind.Or_error () = acc in
+          match Datatype.Env.find datatype_env datatype with
+          | None -> Ok ()
+          | Some declaration ->
+            let%bind.Or_error chosen =
+              choose_constructor subject datatype declaration
             in
-            if is_equal_to_some_constructor
-            then Ok ()
-            else
-              error
-                [%message
-                  "ADT enum exhaustiveness is violated"
-                    (subject : Formula.any)
-                    (datatype : Datatype.Datatype.t)])
-          else (
-            let all_testers_false =
-              List.for_all constructor_declarations ~f:(fun cd ->
-                match
-                  atom_value
-                    t
-                    (`Eq
-                      ( Formula.Datatype_tester (cd.constructor, subject)
-                      , Formula.True ))
-                with
-                | False -> true
-                | True | Unknown -> false)
-            in
-            if all_testers_false
-            then
-              error
-                [%message
-                  "ADT constructor completeness is violated"
-                    (subject : Formula.any)
-                    (datatype : Datatype.Datatype.t)]
-            else Ok ())))
+            tester_constraints subject datatype
+            |> List.fold_result
+                 ~init:()
+                 ~f:(fun () (constructor, value, tester) ->
+                   let expected =
+                     Datatype.Constructor.equal constructor chosen
+                   in
+                   if Bool.equal value expected
+                   then Ok ()
+                   else
+                     error
+                       [%message
+                         "ADT tester value is violated"
+                           (tester : Formula.any)
+                           (expected : bool)])))
 ;;
 
 let check_congruence t =
