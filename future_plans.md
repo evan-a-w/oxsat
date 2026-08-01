@@ -70,11 +70,20 @@ ground and witnessed by a distinct fresh constant per instantiation point.
 `Forall_instantiation`/`Exists_elim` may now conclude a still-quantified formula;
 substitution over quantified formulas rejects binder capture.
 
+Also done: quantifiers nested under boolean structure produce checked proofs.
+Their guard atom is now definitional rather than synthetic — the solver cites
+`∀x. ¬g ∨ body`, the prenexed form of `¬g ∨ ∀x. body`, which is equivalent
+because `g` is a fresh ground atom sharing no variable with `bound` (checked at
+the citation site). Guarded instances then follow by the existing
+`Forall_instantiation`; no new kernel rule was needed. Under NNF every guard
+that elaboration creates is spliced positively, so no guarded case remains
+synthetic; `Guard.Polarity.Negative` exists for the encoding but is currently
+unreachable.
+
 Remaining:
 
-- Quantifiers under `Or`/`Not`/boolean structure still use synthetic guards and
-  return `proof = None`. Proving these needs a definitional `g ↔ ∀x. body` atom,
-  which the refutation format cannot currently express.
+- `push`/`pop` scope activation literals still yield `proof = None`; that path
+  is untouched and is now the only remaining decline.
 - Quantified *conclusions* (a lemma `∀x. P(x)`, not just a quantified
   assumption) need universal generalization — `Forall_intro` with an
   eigenvariable condition over the step DAG's dependency closure, plus the cheap

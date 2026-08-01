@@ -1,9 +1,24 @@
 open! Core
 open! Import
 
+module Guard = struct
+  module Polarity = struct
+    type t =
+      | Positive
+      | Negative
+    [@@deriving sexp_of]
+  end
+
+  type t =
+    { atom : Formula.any
+    ; polarity : Polarity.t
+    }
+  [@@deriving sexp_of]
+end
+
 module Axiom = struct
   type t =
-    { guard : Formula.any option
+    { guard : Guard.t option
     ; bound : Tvar.t list
     ; triggers : Formula.any list list
     ; body : Formula.any

@@ -27,9 +27,9 @@ type t =
        (reversed). *)
     mutable quantified_givens : Formula.quantified list
   ; quantifier_chains : Quantifier_chain.t Formula.Any.Table.t
-  ; (* Ground atoms with no real meaning (guards for universals nested inside
-       boolean structure). A refutation that depends on one can't be turned into
-       a real proof, so we decline -- the same fallback as a push/pop scope. *)
+  ; (* Ground atoms with no real meaning. A refutation that depends on one can't
+       be turned into a real proof, so we decline -- the same fallback as a
+       push/pop scope. *)
     synthetic : Formula.Any.Hash_set.t
   }
 
@@ -338,8 +338,8 @@ let unsat_proof
       Array.exists rc.literals ~f:(fun lit -> Set.mem scope_vars (Int.abs lit)))
   in
   let premises = asserted_formulas t in
-  (* A guard atom of a nested universal has no real meaning, so a refutation
-     citing one (directly or inside a guarded instance) can't be a real proof. *)
+  (* Synthetic atoms have no real meaning, so a refutation citing one (directly
+     or inside a larger asserted formula) can't be a real proof. *)
   let depends_on_synthetic = Array.exists premises ~f:(contains_synthetic t) in
   if touches_scope_var || depends_on_synthetic
   then None

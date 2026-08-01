@@ -4,9 +4,9 @@ open! Import
 module Axiom_state = struct
   type t =
     { axiom : Quantifier_axiom.Axiom.t
-    ; (* The top-level [∀] this axiom came from, for a proof to cite when
-         justifying its instances; [None] for a universal nested inside boolean
-         structure (guarded, [proof = None] fallback). *)
+    ; (* The quantified assumption this axiom came from, for a proof to cite
+         when justifying its instances. For a positive guarded axiom this is the
+         prenexed definition [∀x. ¬guard ∨ body]. *)
       given : Formula.quantified option
     ; existential_witnesses :
         (Tvar.t * Formula.any) list Formula.Quantified.Table.t
@@ -154,6 +154,40 @@ let witnesses_for_existential witness_cache ~bound ~existential =
     skolems
 ;;
 
+(* Since each guard is a fresh ground atom, [¬g ∨ ∀x. body] is equivalent to
+   [∀x. ¬g ∨ body]; the prenexed form is directly justified by the existing
+   [Forall_instantiation] rule for each guarded instance. *)
+let positive_guard_definition_exn
+  ({ Quantifier_axiom.Axiom.guard; bound; triggers; body } as axiom)
+  : Formula.quantified
+  =
+  match guard with
+  | None ->
+    raise_s
+      [%message
+        "positive_guard_definition_exn called on an unguarded axiom"
+          (axiom : Quantifier_axiom.Axiom.t)]
+  | Some { atom; polarity = Negative } ->
+    raise_s
+      [%message
+        "positive_guard_definition_exn called on a negative guard"
+          (atom : Formula.any)]
+  | Some { atom; polarity = Positive } ->
+    let guard_tvars = Formula.tvars (Formula.widen_quantified atom) in
+    let bound_tvars = Tvar.Set.of_list bound in
+    if not (Set.are_disjoint guard_tvars bound_tvars)
+    then
+      raise_s
+        [%message
+          "guard atom is not fresh for its quantified definition"
+            (atom : Formula.any)
+            (bound : Tvar.t list)];
+    Forall
+      ( bound
+      , List.map triggers ~f:(List.map ~f:Formula.widen_quantified)
+      , Formula.widen_quantified (Or [ Not atom; body ]) )
+;;
+
 let quantifier_chain_for_instance ~witness_cache ~given ~universal_values =
   let universal_values = Tvar.Map.of_alist_exn universal_values in
   let rec go (formula : Formula.quantified) steps =
@@ -222,15 +256,25 @@ let assert_toplevel_prefix t formula =
 ;;
 
 (* A quantifier nested inside boolean structure (under [Or]/[Not], etc.): keep
-   the guard encoding. Guards are synthetic, so a refutation depending on one
-   yields [proof = None]. *)
+   the guard encoding, and cite positive guards by their quantified definition
+   so guarded instances have checked proofs. *)
 let assert_nested_guarded t (formula : Formula.quantified) =
   let%bind.Or_error ground, new_axioms =
     Or_error.try_with (fun () -> Quantifier_elaboration.elaborate formula)
   in
   List.iter new_axioms ~f:(fun axiom ->
-    add_axiom_state t ~axiom ~given:None;
-    Option.iter axiom.guard ~f:(Solver.proof_note_synthetic t.solver));
+    let given =
+      match axiom.guard with
+      | None -> None
+      | Some { atom; polarity = Negative } ->
+        Solver.proof_note_synthetic t.solver atom;
+        None
+      | Some { polarity = Positive; _ } ->
+        let given = positive_guard_definition_exn axiom in
+        Solver.proof_add_quantified_given t.solver given;
+        Some given
+    in
+    add_axiom_state t ~axiom ~given);
   Solver.assert_formula t.solver ground
 ;;
 
@@ -362,29 +406,47 @@ let instantiate t : Formula.any list =
           note_seen t seen stable_instance;
           let bound_values = Map.to_alist subst in
           (* The formula actually asserted, and the provenance key that
-             [relabel_core_step] looks it up by. A top-level quantifier prefix
-             is guard-free and is derived in the proof by a chain of checked
-             quantifier rules. A nested one stays guarded ([¬guard ∨ instance])
-             -- sound regardless of whether the guard is forced, and its
-             synthetic guard makes any proof decline. *)
+             [relabel_core_step] looks it up by. Whenever [given] is present the
+             asserted instance is derived in the proof by a chain of checked
+             quantifier rules. *)
           let asserted =
-            match axiom.guard with
-            | None ->
+            match axiom.guard, given with
+            | None, Some given ->
+              let instance, chain =
+                quantifier_chain_for_instance
+                  ~witness_cache:existential_witnesses
+                  ~given
+                  ~universal_values:bound_values
+              in
+              Solver.proof_note_quantifier_chain
+                t.solver
+                ~ground:instance
+                ~chain;
+              instance
+            | None, None -> stable_instance
+            | Some { atom; _ }, _ ->
+              let asserted = Formula.Or [ Not atom; stable_instance ] in
               (match given with
+               | None -> ()
                | Some given ->
-                 let instance, chain =
+                 let proven, chain =
                    quantifier_chain_for_instance
                      ~witness_cache:existential_witnesses
                      ~given
                      ~universal_values:bound_values
                  in
+                 if Formula.compare_any proven asserted <> 0
+                 then
+                   raise_s
+                     [%message
+                       "quantifier chain does not prove guarded instance"
+                         (proven : Formula.any)
+                         (asserted : Formula.any)];
                  Solver.proof_note_quantifier_chain
                    t.solver
-                   ~ground:instance
-                   ~chain;
-                 instance
-               | None -> stable_instance)
-            | Some guard -> Formula.Or [ Not guard; stable_instance ]
+                   ~ground:asserted
+                   ~chain);
+              asserted
           in
           note_provenance
             t
