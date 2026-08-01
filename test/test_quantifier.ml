@@ -1585,12 +1585,27 @@ let%expect_test "guarded universal remains possibly satisfiable when the guard \
   [%expect {| Unknown_but_possibly_sat |}]
 ;;
 
-let%expect_test "produce_proofs: push scope conflicts still decline a proof" =
-  let qs =
-    Quantifier_solver.create
-      ~config:{ Solver.Config.default with produce_proofs = true }
-      ()
-  in
+let print_scoped_proof_result = function
+  | Quantifier_solver.Result.Sat _ | Unknown_but_possibly_sat _ ->
+    print_endline "unexpected sat"
+  | Unsat { proof = None; _ } -> print_endline "no proof produced"
+  | Unsat { proof = Some proof; _ } ->
+    print_s [%message "" ~checked:(Or_error.is_ok (Proof.check proof) : bool)];
+    print_endline (Proof.to_string_hum proof)
+;;
+
+let scoped_proof_solver () =
+  Quantifier_solver.create
+    ~config:{ Solver.Config.default with produce_proofs = true }
+    ()
+;;
+
+let assert_q qs formula =
+  ignore (Quantifier_solver.assert_formula qs formula : _ Or_error.t)
+;;
+
+let%expect_test "produce_proofs: push scope conflicts produce a checked proof" =
+  let qs = scoped_proof_solver () in
   let a : Formula.any = Var (Tvar.of_string "a") in
   let b : Formula.any = Var (Tvar.of_string "b") in
   Quantifier_solver.push qs;
@@ -1598,11 +1613,233 @@ let%expect_test "produce_proofs: push scope conflicts still decline a proof" =
     [ Formula.widen_quantified (Eq (a, b))
     ; Formula.widen_quantified (Not (Eq (a, b)))
     ]
-    ~f:(fun formula ->
-      ignore (Quantifier_solver.assert_formula qs formula : _ Or_error.t));
+    ~f:(assert_q qs);
+  print_scoped_proof_result (Quantifier_solver.solve qs ~max_rounds:1);
+  [%expect
+    {|
+    (checked true)
+    Assumptions:
+      a0: bool ≠ int
+      a1: bool ≠ float
+      a2: int ≠ float
+      a3: a = b
+      a4: a ≠ b
+    Steps:
+      s0: bool ≠ int   [assumption a0]
+      s1: bool ≠ float   [assumption a1]
+      s2: int ≠ float   [assumption a2]
+      s3: a = b   [assumption a3]
+      s4: a ≠ b   [assumption a4]
+      s5: false   [refutation of [s0, s1, s2, s3, s4]]
+        refutation:
+          steps:
+            r0: a = b   [s3]
+            r1: a ≠ b   [s4]
+            r2: ⊥   [RUP over [r0, r1]]
+    Conclusion: s5
+    |}]
+;;
+
+let%expect_test "produce_proofs: nested push scopes produce a checked proof" =
+  let qs = scoped_proof_solver () in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let b : Formula.any = Var (Tvar.of_string "b") in
+  Quantifier_solver.push qs;
+  assert_q qs (Formula.widen_quantified (Eq (a, b)));
+  Quantifier_solver.push qs;
+  assert_q qs (Formula.widen_quantified (Not (Eq (a, b))));
+  print_scoped_proof_result (Quantifier_solver.solve qs ~max_rounds:1);
+  [%expect
+    {|
+    (checked true)
+    Assumptions:
+      a0: bool ≠ int
+      a1: bool ≠ float
+      a2: int ≠ float
+      a3: a = b
+      a4: a ≠ b
+    Steps:
+      s0: bool ≠ int   [assumption a0]
+      s1: bool ≠ float   [assumption a1]
+      s2: int ≠ float   [assumption a2]
+      s3: a = b   [assumption a3]
+      s4: a ≠ b   [assumption a4]
+      s5: false   [refutation of [s0, s1, s2, s3, s4]]
+        refutation:
+          steps:
+            r0: a = b   [s3]
+            r1: a ≠ b   [s4]
+            r2: ⊥   [RUP over [r0, r1]]
+    Conclusion: s5
+    |}]
+;;
+
+let%expect_test "produce_proofs: scoped and base assertions mix in a checked \
+                 proof"
+  =
+  let qs = scoped_proof_solver () in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let b : Formula.any = Var (Tvar.of_string "b") in
+  assert_q qs (Formula.widen_quantified (Eq (a, b)));
+  Quantifier_solver.push qs;
+  assert_q qs (Formula.widen_quantified (Not (Eq (a, b))));
+  print_scoped_proof_result (Quantifier_solver.solve qs ~max_rounds:1);
+  [%expect
+    {|
+    (checked true)
+    Assumptions:
+      a0: bool ≠ int
+      a1: bool ≠ float
+      a2: int ≠ float
+      a3: a = b
+      a4: a ≠ b
+    Steps:
+      s0: bool ≠ int   [assumption a0]
+      s1: bool ≠ float   [assumption a1]
+      s2: int ≠ float   [assumption a2]
+      s3: a = b   [assumption a3]
+      s4: a ≠ b   [assumption a4]
+      s5: false   [refutation of [s0, s1, s2, s3, s4]]
+        refutation:
+          steps:
+            r0: a = b   [s3]
+            r1: a ≠ b   [s4]
+            r2: ⊥   [RUP over [r0, r1]]
+    Conclusion: s5
+    |}]
+;;
+
+let%expect_test "produce_proofs: popped scoped assertions are not cited" =
+  let qs = scoped_proof_solver () in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let b : Formula.any = Var (Tvar.of_string "b") in
+  let c : Formula.any = Var (Tvar.of_string "c") in
+  let stale_l : Formula.any = Var (Tvar.of_string "stale_l") in
+  let stale_r : Formula.any = Var (Tvar.of_string "stale_r") in
+  let retracted : Formula.any = Eq (stale_l, stale_r) in
+  assert_q qs (Formula.widen_quantified (Eq (a, b)));
+  assert_q qs (Formula.widen_quantified (Eq (b, c)));
+  Quantifier_solver.push qs;
+  assert_q qs (Formula.widen_quantified retracted);
+  Quantifier_solver.pop qs;
+  assert_q qs (Formula.widen_quantified (Not (Eq (a, c))));
   (match Quantifier_solver.solve qs ~max_rounds:1 with
    | Sat _ | Unknown_but_possibly_sat _ -> print_endline "unexpected sat"
-   | Unsat { proof = None; _ } -> print_endline "unsat, no proof (push scope)"
-   | Unsat { proof = Some _; _ } -> print_endline "unexpected proof");
-  [%expect {| unsat, no proof (push scope) |}]
+   | Unsat { proof = None; _ } -> print_endline "no proof produced"
+   | Unsat { proof = Some proof; _ } ->
+     let proof_text = Proof.to_string_hum proof in
+     print_s
+       [%message
+         ""
+           ~checked:(Or_error.is_ok (Proof.check proof) : bool)
+           ~cites_retracted:
+             (String.is_substring proof_text ~substring:"stale_l = stale_r"
+              : bool)];
+     print_endline proof_text);
+  [%expect
+    {|
+    ((checked true) (cites_retracted false))
+    Assumptions:
+      a0: bool ≠ int
+      a1: bool ≠ float
+      a2: int ≠ float
+      a3: a = b
+      a4: b = c
+      a5: a ≠ c
+    Steps:
+      s0: bool ≠ int   [assumption a0]
+      s1: bool ≠ float   [assumption a1]
+      s2: int ≠ float   [assumption a2]
+      s3: a = b   [assumption a3]
+      s4: b = c   [assumption a4]
+      s5: a ≠ c   [assumption a5]
+      s6: false   [refutation of [s0, s1, s2, s3, s4, s5]]
+        refutation:
+          steps:
+            r0: a = b   [s3]
+            r1: b = c   [s4]
+            r2: a ≠ c   [s5]
+            r3: a ≠ b ∨ a = c ∨ b ≠ c   [EUF: a = c via [a = b; b = c]]
+            r4: ⊥   [RUP over [r0, r1, r2, r3]]
+    Conclusion: s6
+    |}]
+;;
+
+let%expect_test "produce_proofs: scoped conflict with quantifier instantiation \
+                 produces a checked proof"
+  =
+  let qs = scoped_proof_solver () in
+  let f_sym = Tvar.of_string "scoped_f" in
+  let f arg : Formula.any = App (f_sym, [ arg ]) in
+  let x = Tvar.of_string "scoped_x" in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let b : Formula.any = Var (Tvar.of_string "b") in
+  assert_q
+    qs
+    (Forall
+       ( [ x ]
+       , [ [ Formula.widen_quantified (f (Var x)) ] ]
+       , Formula.widen_quantified (Eq (f (Var x), Var x)) ));
+  assert_q qs (Formula.widen_quantified (Eq (a, b)));
+  Quantifier_solver.push qs;
+  assert_q qs (Formula.widen_quantified (Not (Eq (f a, b))));
+  print_scoped_proof_result (Quantifier_solver.solve qs ~max_rounds:2);
+  [%expect
+    {|
+    (checked true)
+    Assumptions:
+      a0: ∀scoped_x.bound.116. scoped_f(scoped_x.bound.116) = scoped_x.bound.116
+      a1: bool ≠ int
+      a2: bool ≠ float
+      a3: int ≠ float
+      a4: a = b
+      a5: scoped_f(a) ≠ b
+    Steps:
+      s0: ∀scoped_x.bound.116. scoped_f(scoped_x.bound.116) = scoped_x.bound.116   [assumption a0]
+      s1: bool ≠ int   [assumption a1]
+      s2: bool ≠ float   [assumption a2]
+      s3: int ≠ float   [assumption a3]
+      s4: a = b   [assumption a4]
+      s5: scoped_f(a) ≠ b   [assumption a5]
+      s6: scoped_f(a) = a   [∀-instantiation {scoped_x.bound.116 := a} over [s0]]
+      s7: false   [refutation of [s1, s2, s3, s4, s5, s6]]
+        refutation:
+          steps:
+            r0: a = b   [s4]
+            r1: b ≠ scoped_f(a)   [s5]
+            r2: a = scoped_f(a)   [s6]
+            r3: a ≠ b ∨ a ≠ scoped_f(a) ∨ b = scoped_f(a)   [EUF: b = scoped_f(a) via [a = b; a = scoped_f(a)]]
+            r4: ⊥   [RUP over [r0, r1, r2, r3]]
+    Conclusion: s7
+    |}]
+;;
+
+let%expect_test "produce_proofs: scoped proof production leaves solving status \
+                 unchanged"
+  =
+  let solve_with ~produce_proofs =
+    let qs =
+      Quantifier_solver.create
+        ~config:{ Solver.Config.default with produce_proofs }
+        ()
+    in
+    let a : Formula.any = Var (Tvar.of_string "a") in
+    let b : Formula.any = Var (Tvar.of_string "b") in
+    Quantifier_solver.push qs;
+    List.iter
+      [ Formula.widen_quantified (Eq (a, b))
+      ; Formula.widen_quantified (Not (Eq (a, b)))
+      ]
+      ~f:(assert_q qs);
+    match Quantifier_solver.solve qs ~max_rounds:1 with
+    | Unsat { proof; _ } -> "Unsat", Option.is_some proof
+    | Sat _ -> "Sat", false
+    | Unknown_but_possibly_sat _ -> "Unknown_but_possibly_sat", false
+  in
+  print_s
+    [%message
+      ""
+        ~without_proofs:(solve_with ~produce_proofs:false : string * bool)
+        ~with_proofs:(solve_with ~produce_proofs:true : string * bool)];
+  [%expect {| ((without_proofs (Unsat false)) (with_proofs (Unsat true))) |}]
 ;;

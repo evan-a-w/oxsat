@@ -1066,7 +1066,8 @@ let%expect_test "proof production is optional and yields checked proofs" =
    | Sat _ -> print_endline "unexpected Sat"
    | Unsat { proof; _ } -> report proof);
   [%expect {| (("Option.is_some proof" true) (checks true)) |}];
-  (* Assertions inside a [push] scope are not yet proof-supported: [None]. *)
+  (* Assertions inside a [push] scope yield checked proofs by stripping the SAT
+     activation literal from the proof-level refutation. *)
   let scoped =
     Solver.create
       ~config:{ Solver.Config.default with produce_proofs = true }
@@ -1078,7 +1079,7 @@ let%expect_test "proof production is optional and yields checked proofs" =
   (match Solver.solve scoped with
    | Sat _ -> print_endline "unexpected Sat"
    | Unsat { proof; _ } -> report proof);
-  [%expect {| (("Option.is_some proof" false) (checks false)) |}]
+  [%expect {| (("Option.is_some proof" true) (checks true)) |}]
 ;;
 
 (* Regression: the integrality split used to round [1 + eps] (from the strict

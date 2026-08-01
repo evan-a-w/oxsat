@@ -67,10 +67,11 @@ val note_synthetic : t -> Formula.any -> unit
     certificate, and the map from unit-clause literals back to the formulas they
     assert.
 
-    Returns [None] when the refutation depends on a [push]/[pop] scope's
-    activation literal (one of [scope_vars]), whose proof modeling is not yet
-    supported. Raises if a proof it does attempt fails to check -- for a
-    supported unsat, full production must yield a checkable proof. *)
+    Scope activation literals (one of [scope_vars]) are stripped from the
+    refutation clauses before checking, because the SAT solver refutes clauses
+    under those assumptions while the proof cites the corresponding unguarded
+    formulas. Raises if a proof it attempts fails to check -- for a supported
+    unsat, full production must yield a checkable proof. *)
 val unsat_proof
   :  t
   -> encoding:Encoding.t
