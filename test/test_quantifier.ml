@@ -3,18 +3,23 @@ open! Feel.Import
 open! Theory_core
 open! Theory
 
-(* [Forall]/[Exists]'s own triggers/body are plain ground [Formula.any] (no
-   further quantifiers), distinct from the ambient [Formula.quantified] used for
-   the surrounding skeleton -- hence two families of helpers. *)
+let q = Formula.widen_quantified
+let q_triggers = List.map ~f:(List.map ~f:q)
 let xg : Formula.any = Var (Tvar.of_string "x")
 let fg arg : Formula.any = App (Tvar.of_string "f", [ arg ])
 let a : Formula.quantified = Var (Tvar.of_string "a")
 
-let forall ?(triggers = [ [ fg xg ] ]) body : Formula.quantified =
-  Forall ([ Tvar.of_string "x" ], triggers, body)
+let forall_raw (bound, triggers, body) : Formula.quantified =
+  Forall (bound, q_triggers triggers, q body)
 ;;
 
-let exists body : Formula.quantified = Exists ([ Tvar.of_string "x" ], body)
+let exists_raw (bound, body) : Formula.quantified = Exists (bound, q body)
+
+let forall ?(triggers = [ [ fg xg ] ]) body : Formula.quantified =
+  forall_raw ([ Tvar.of_string "x" ], triggers, body)
+;;
+
+let exists body : Formula.quantified = exists_raw ([ Tvar.of_string "x" ], body)
 
 let print_elaborate (formula : Formula.quantified) =
   let ground, axioms = Quantifier_elaboration.elaborate formula in
@@ -115,6 +120,21 @@ let instantiate_once
     | _ -> failwith "test only exercises single-term triggers")
 ;;
 
+let print_elaborate_and_instances formula ~seeds =
+  let ground, axioms = Quantifier_elaboration.elaborate formula in
+  let uf = Formula_egraph_uf.create ~atoms:[] in
+  List.iter seeds ~f:(fun term -> Formula_egraph_uf.add_term uf ~term);
+  let instances =
+    List.concat_map axioms ~f:(fun axiom -> instantiate_once axiom uf)
+  in
+  print_s
+    [%message
+      ""
+        (ground : Formula.any)
+        (axioms : Quantifier_axiom.Axiom.t list)
+        (instances : Formula.any list)]
+;;
+
 let%expect_test "manual instantiate-once: single ground match" =
   let x = Tvar.of_string "x" in
   let f_sym = Tvar.of_string "f" in
@@ -170,7 +190,7 @@ let forall_axiom
   =
   let x = Tvar.of_string "x" in
   let xv : Formula.any = Var x in
-  Forall ([ x ], [ [ trigger xv ] ], body xv)
+  forall_raw ([ x ], [ [ trigger xv ] ], body xv)
 ;;
 
 let%expect_test "forall x. f x = x contradicts an asserted disequality, only \
@@ -357,7 +377,7 @@ let%expect_test "produce_proofs: a bare existential drives a checked, fully \
   let a : Formula.any = Var (Tvar.of_string "a") in
   let x = Tvar.of_string "x" in
   let existential : Formula.quantified =
-    Exists
+    exists_raw
       ( [ x ]
       , And
           [ Eq (f (Var x), a)
@@ -420,10 +440,10 @@ let%expect_test "produce_proofs: forall + existential in one top-level \
   let y = Tvar.of_string "y" in
   let x = Tvar.of_string "x" in
   let forall : Formula.quantified =
-    Forall ([ y ], [ [ f (Var y) ] ], Eq (f (Var y), Var y))
+    forall_raw ([ y ], [ [ f (Var y) ] ], Eq (f (Var y), Var y))
   in
   let exists : Formula.quantified =
-    Exists ([ x ], And [ Eq (f (Var x), c); Not (Eq (Var x, c)) ])
+    exists_raw ([ x ], And [ Eq (f (Var x), c); Not (Eq (Var x, c)) ])
   in
   ignore
     (Quantifier_solver.assert_formula qs (And [ forall; exists ])
@@ -466,6 +486,308 @@ let%expect_test "produce_proofs: forall + existential in one top-level \
     |}]
 ;;
 
+let print_checked_proof = function
+  | Quantifier_solver.Result.Sat _ | Unknown_but_possibly_sat _ ->
+    print_endline "unexpected sat"
+  | Unsat { proof = None; _ } -> print_endline "no proof produced"
+  | Unsat { proof = Some proof; _ } ->
+    print_s [%message "" ~checked:(Or_error.is_ok (Proof.check proof) : bool)];
+    print_endline (Proof.to_string_hum proof)
+;;
+
+let%expect_test "produce_proofs: forall-exists alternation instantiates then \
+                 eliminates"
+  =
+  let qs =
+    Quantifier_solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
+  in
+  let x = Tvar.of_string "x" in
+  let y = Tvar.of_string "y" in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let f x : Formula.any = App (Tvar.of_string "f", [ x ]) in
+  let h x : Formula.any = App (Tvar.of_string "h", [ x ]) in
+  ignore
+    (Quantifier_solver.assert_formula
+       qs
+       (forall_raw
+          ( [ x ]
+          , [ [ h (Var x) ] ]
+          , Exists
+              ( [ y ]
+              , Formula.widen_quantified
+                  (And [ Eq (f (Var x), Var y); Not (Eq (f (Var x), Var y)) ])
+              ) ))
+     : _ Or_error.t);
+  ignore
+    (Quantifier_solver.assert_formula
+       qs
+       (Formula.widen_quantified (Eq (h a, h a)))
+     : _ Or_error.t);
+  print_checked_proof (Quantifier_solver.solve qs ~max_rounds:2);
+  [%expect
+    {|
+    (checked true)
+    Assumptions:
+      a0: ∀x.bound.24. ∃y.bound.25. f(x.bound.24) = y.bound.25 ∧ f(x.bound.24) ≠ y.bound.25
+      a1: bool ≠ int
+      a2: bool ≠ float
+      a3: int ≠ float
+      a4: h(a) = h(a)
+    Steps:
+      s0: ∀x.bound.24. ∃y.bound.25. f(x.bound.24) = y.bound.25 ∧ f(x.bound.24) ≠ y.bound.25   [assumption a0]
+      s1: bool ≠ int   [assumption a1]
+      s2: bool ≠ float   [assumption a2]
+      s3: int ≠ float   [assumption a3]
+      s4: h(a) = h(a)   [assumption a4]
+      s5: ∃y.bound.25. f(a) = y.bound.25 ∧ f(a) ≠ y.bound.25   [∀-instantiation {x.bound.24 := a} over [s0]]
+      s6: f(a) = %skolem.27 ∧ f(a) ≠ %skolem.27   [∃-elimination {y.bound.25 := %skolem.27} over [s5]]
+      s7: false   [refutation of [s1, s2, s3, s4, s6]]
+        refutation:
+          extensions:
+            e0 := (%skolem.27 = f(a) ∧ ¬(%skolem.27 = f(a)))
+          steps:
+            r0: %skolem.27 = f(a) ∨ ¬(e0)   [definition of e0]
+            r1: %skolem.27 ≠ f(a) ∨ ¬(e0)   [definition of e0]
+            r2: e0   [s6]
+            r3: ⊥   [RUP over [r2, r0, r1]]
+    Conclusion: s7
+    |}]
+;;
+
+let%expect_test "produce_proofs: exists-forall alternation eliminates then \
+                 instantiates"
+  =
+  let qs =
+    Quantifier_solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
+  in
+  let x = Tvar.of_string "x" in
+  let y = Tvar.of_string "y" in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let b : Formula.any = Var (Tvar.of_string "b") in
+  let f x : Formula.any = App (Tvar.of_string "f", [ x ]) in
+  let h x : Formula.any = App (Tvar.of_string "h", [ x ]) in
+  ignore
+    (Quantifier_solver.assert_formula
+       qs
+       (Exists
+          ( [ x ]
+          , Forall
+              ( [ y ]
+              , [ [ Formula.widen_quantified (h (Var y)) ] ]
+              , Formula.widen_quantified (Eq (f (Var y), Var x)) ) ))
+     : _ Or_error.t);
+  List.iter
+    [ Formula.widen_quantified (Eq (h a, h a))
+    ; Formula.widen_quantified (Eq (h b, h b))
+    ; Formula.widen_quantified (Not (Eq (f a, f b)))
+    ]
+    ~f:(fun formula ->
+      ignore (Quantifier_solver.assert_formula qs formula : _ Or_error.t));
+  print_checked_proof (Quantifier_solver.solve qs ~max_rounds:3);
+  [%expect
+    {|
+    (checked true)
+    Assumptions:
+      a0: ∃x.bound.28. ∀y.bound.30. f(y.bound.30) = x.bound.28
+      a1: bool ≠ int
+      a2: bool ≠ float
+      a3: int ≠ float
+      a4: h(a) = h(a)
+      a5: h(b) = h(b)
+      a6: f(a) ≠ f(b)
+    Steps:
+      s0: ∃x.bound.28. ∀y.bound.30. f(y.bound.30) = x.bound.28   [assumption a0]
+      s1: bool ≠ int   [assumption a1]
+      s2: bool ≠ float   [assumption a2]
+      s3: int ≠ float   [assumption a3]
+      s4: h(a) = h(a)   [assumption a4]
+      s5: h(b) = h(b)   [assumption a5]
+      s6: f(a) ≠ f(b)   [assumption a6]
+      s7: ∀y.bound.30. f(y.bound.30) = %skolem.31   [∃-elimination {x.bound.28 := %skolem.31} over [s0]]
+      s8: f(a) = %skolem.31   [∀-instantiation {y.bound.30 := a} over [s7]]
+      s9: f(b) = %skolem.31   [∀-instantiation {y.bound.30 := b} over [s7]]
+      s10: false   [refutation of [s1, s2, s3, s4, s5, s6, s8, s9]]
+        refutation:
+          steps:
+            r0: f(a) ≠ f(b)   [s6]
+            r1: %skolem.31 = f(a)   [s8]
+            r2: %skolem.31 = f(b)   [s9]
+            r3: %skolem.31 ≠ f(a) ∨ %skolem.31 ≠ f(b) ∨ f(a) = f(b)   [EUF: f(a) = f(b) via [%skolem.31 = f(a); %skolem.31 = f(b)]]
+            r4: ⊥   [RUP over [r0, r1, r2, r3]]
+    Conclusion: s10
+    |}]
+;;
+
+let%expect_test "produce_proofs: forall-exists uses distinct witnesses at two \
+                 terms"
+  =
+  let qs =
+    Quantifier_solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
+  in
+  let x = Tvar.of_string "x" in
+  let y = Tvar.of_string "y" in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let b : Formula.any = Var (Tvar.of_string "b") in
+  let c : Formula.any = Var (Tvar.of_string "c") in
+  let f x : Formula.any = App (Tvar.of_string "f", [ x ]) in
+  let h x : Formula.any = App (Tvar.of_string "h", [ x ]) in
+  ignore
+    (Quantifier_solver.assert_formula
+       qs
+       (forall_raw
+          ( [ x ]
+          , [ [ h (Var x) ] ]
+          , Exists
+              ( [ y ]
+              , Formula.widen_quantified
+                  (And [ Eq (f (Var x), Var y); Eq (Var y, c) ]) ) ))
+     : _ Or_error.t);
+  List.iter
+    [ Formula.widen_quantified (Eq (h a, h a))
+    ; Formula.widen_quantified (Eq (h b, h b))
+    ; Formula.widen_quantified (Not (Eq (f a, f b)))
+    ]
+    ~f:(fun formula ->
+      ignore (Quantifier_solver.assert_formula qs formula : _ Or_error.t));
+  print_checked_proof (Quantifier_solver.solve qs ~max_rounds:3);
+  [%expect
+    {|
+    (checked true)
+    Assumptions:
+      a0: ∀x.bound.32. ∃y.bound.33. f(x.bound.32) = y.bound.33 ∧ y.bound.33 = c
+      a1: bool ≠ int
+      a2: bool ≠ float
+      a3: int ≠ float
+      a4: h(a) = h(a)
+      a5: h(b) = h(b)
+      a6: f(a) ≠ f(b)
+    Steps:
+      s0: ∀x.bound.32. ∃y.bound.33. f(x.bound.32) = y.bound.33 ∧ y.bound.33 = c   [assumption a0]
+      s1: bool ≠ int   [assumption a1]
+      s2: bool ≠ float   [assumption a2]
+      s3: int ≠ float   [assumption a3]
+      s4: h(a) = h(a)   [assumption a4]
+      s5: h(b) = h(b)   [assumption a5]
+      s6: f(a) ≠ f(b)   [assumption a6]
+      s7: ∃y.bound.33. f(a) = y.bound.33 ∧ y.bound.33 = c   [∀-instantiation {x.bound.32 := a} over [s0]]
+      s8: f(a) = %skolem.35 ∧ %skolem.35 = c   [∃-elimination {y.bound.33 := %skolem.35} over [s7]]
+      s9: ∃y.bound.33. f(b) = y.bound.33 ∧ y.bound.33 = c   [∀-instantiation {x.bound.32 := b} over [s0]]
+      s10: f(b) = %skolem.36 ∧ %skolem.36 = c   [∃-elimination {y.bound.33 := %skolem.36} over [s9]]
+      s11: false   [refutation of [s1, s2, s3, s4, s5, s6, s8, s10]]
+        refutation:
+          extensions:
+            e0 := (%skolem.35 = f(a) ∧ c = %skolem.35)
+            e1 := (%skolem.36 = f(b) ∧ c = %skolem.36)
+          steps:
+            r0: f(a) ≠ f(b)   [s6]
+            r1: %skolem.35 = f(a) ∨ ¬(e0)   [definition of e0]
+            r2: c = %skolem.35 ∨ ¬(e0)   [definition of e0]
+            r3: e0   [s8]
+            r4: %skolem.36 = f(b) ∨ ¬(e1)   [definition of e1]
+            r5: c = %skolem.36 ∨ ¬(e1)   [definition of e1]
+            r6: e1   [s10]
+            r7: c ≠ %skolem.35 ∨ c ≠ %skolem.36 ∨ %skolem.35 ≠ f(a) ∨ %skolem.36 ≠ f(b) ∨ f(a) = f(b)   [EUF: f(a) = f(b) via [%skolem.35 = f(a); c = %skolem.35; c = %skolem.36; %skolem.36 = f(b)]]
+            r8: ⊥   [RUP over [r0, r3, r6, r1, r2, r4, r5, r7]]
+    Conclusion: s11
+    |}]
+;;
+
+let%expect_test "produce_proofs: alternating proof rejects reused existential \
+                 witness"
+  =
+  let qs =
+    Quantifier_solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
+  in
+  let x = Tvar.of_string "x" in
+  let y = Tvar.of_string "y" in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let b : Formula.any = Var (Tvar.of_string "b") in
+  let c : Formula.any = Var (Tvar.of_string "c") in
+  let f x : Formula.any = App (Tvar.of_string "f", [ x ]) in
+  let h x : Formula.any = App (Tvar.of_string "h", [ x ]) in
+  ignore
+    (Quantifier_solver.assert_formula
+       qs
+       (forall_raw
+          ( [ x ]
+          , [ [ h (Var x) ] ]
+          , Exists
+              ( [ y ]
+              , Formula.widen_quantified
+                  (And [ Eq (f (Var x), Var y); Eq (Var y, c) ]) ) ))
+     : _ Or_error.t);
+  List.iter
+    [ Formula.widen_quantified (Eq (h a, h a))
+    ; Formula.widen_quantified (Eq (h b, h b))
+    ; Formula.widen_quantified (Not (Eq (f a, f b)))
+    ]
+    ~f:(fun formula ->
+      ignore (Quantifier_solver.assert_formula qs formula : _ Or_error.t));
+  (match Quantifier_solver.solve qs ~max_rounds:3 with
+   | Sat _ | Unknown_but_possibly_sat _ -> print_endline "unexpected sat"
+   | Unsat { proof = None; _ } -> print_endline "no proof produced"
+   | Unsat { proof = Some proof; _ } ->
+     let exists_steps =
+       Array.filter_mapi proof.steps ~f:(fun index step ->
+         match step.Proof.Step.justification with
+         | Kernel { rule = Exists_elim { skolems }; _ } -> Some (index, skolems)
+         | _ -> None)
+     in
+     let reused = snd exists_steps.(0) in
+     let _second_index, second_skolems = exists_steps.(1) in
+     let subst =
+       List.map2_exn
+         second_skolems
+         reused
+         ~f:(fun (_bound, old_) (_bound, new_) ->
+           match old_ with
+           | Var old_var -> old_var, new_
+           | _ -> failwith "test expected a variable Skolem")
+       |> Tvar.Map.of_alist_exn
+     in
+     let mutated =
+       { proof with
+         steps =
+           Array.mapi proof.steps ~f:(fun index step ->
+             if index = fst exists_steps.(1)
+             then (
+               match step.justification with
+               | Kernel { premises; rule = Exists_elim _ } ->
+                 { step with
+                   conclusion =
+                     Or_error.ok_exn
+                       (Formula.substitute_quantified subst step.conclusion)
+                 ; justification =
+                     Kernel
+                       { rule = Exists_elim { skolems = reused }; premises }
+                 }
+               | _ -> step)
+             else step)
+       }
+     in
+     print_s [%sexp (Proof.check mutated : unit Or_error.t)]);
+  [%expect
+    {|
+    (Error
+     ("existential elimination's Skolem symbol was reused for a different conclusion"
+      (tvar %skolem.40)
+      (previous
+       (And
+        ((Eq (App f ((Var a))) (Var %skolem.40)) (Eq (Var %skolem.40) (Var c)))))
+      (current
+       (And
+        ((Eq (App f ((Var b))) (Var %skolem.40)) (Eq (Var %skolem.40) (Var c)))))))
+    |}]
+;;
+
 (* A quantifier nested inside boolean structure keeps the guard encoding, whose
    guard atom is synthetic -- so a refutation depending on it declines to
    produce a real proof (the documented fallback), while still solving. *)
@@ -485,7 +807,7 @@ let%expect_test "produce_proofs: a nested quantifier still solves but declines \
   let nested_forall : Formula.quantified =
     Or
       [ Formula.widen_quantified (Formula.Eq (c, d))
-      ; Forall ([ x ], [ [ f (Var x) ] ], Eq (f (Var x), Var x))
+      ; forall_raw ([ x ], [ [ f (Var x) ] ], Eq (f (Var x), Var x))
       ]
   in
   let a : Formula.any = Var (Tvar.of_string "a") in
@@ -524,7 +846,7 @@ let%expect_test "produce_proofs: one universal instantiated at two terms" =
   ignore
     (Quantifier_solver.assert_formula
        qs
-       (Forall ([ x ], [ [ f (Var x) ] ], Eq (f (Var x), c)))
+       (forall_raw ([ x ], [ [ f (Var x) ] ], Eq (f (Var x), c)))
      : _ Or_error.t);
   ignore
     (Quantifier_solver.assert_formula
@@ -541,19 +863,19 @@ let%expect_test "produce_proofs: one universal instantiated at two terms" =
     {|
     (checked true)
     Assumptions:
-      a0: ∀x.bound.27. f(x.bound.27) = c
+      a0: ∀x.bound.45. f(x.bound.45) = c
       a1: bool ≠ int
       a2: bool ≠ float
       a3: int ≠ float
       a4: f(a) ≠ f(b)
     Steps:
-      s0: ∀x.bound.27. f(x.bound.27) = c   [assumption a0]
+      s0: ∀x.bound.45. f(x.bound.45) = c   [assumption a0]
       s1: bool ≠ int   [assumption a1]
       s2: bool ≠ float   [assumption a2]
       s3: int ≠ float   [assumption a3]
       s4: f(a) ≠ f(b)   [assumption a4]
-      s5: f(a) = c   [∀-instantiation {x.bound.27 := a} over [s0]]
-      s6: f(b) = c   [∀-instantiation {x.bound.27 := b} over [s0]]
+      s5: f(a) = c   [∀-instantiation {x.bound.45 := a} over [s0]]
+      s6: f(b) = c   [∀-instantiation {x.bound.45 := b} over [s0]]
       s7: false   [refutation of [s1, s2, s3, s4, s5, s6]]
         refutation:
           steps:
@@ -584,8 +906,8 @@ let%expect_test "produce_proofs: the checker rejects mutations of a real proof" 
     (Quantifier_solver.assert_formula
        qs
        (And
-          [ Forall ([ y ], [ [ f (Var y) ] ], Eq (f (Var y), Var y))
-          ; Exists ([ x ], And [ Eq (f (Var x), c); Not (Eq (Var x, c)) ])
+          [ forall_raw ([ y ], [ [ f (Var y) ] ], Eq (f (Var y), Var y))
+          ; exists_raw ([ x ], And [ Eq (f (Var x), c); Not (Eq (Var x, c)) ])
           ])
      : _ Or_error.t);
   match Quantifier_solver.solve qs ~max_rounds:2 with
@@ -709,7 +1031,7 @@ let%expect_test "push/pop: a popped instance is re-derivable, not suppressed" =
   let assert_ f =
     ignore (Quantifier_solver.assert_formula qs f : _ Or_error.t)
   in
-  assert_ (Forall ([ x ], [ [ f (Var x) ] ], Eq (f (Var x), Var x)));
+  assert_ (forall_raw ([ x ], [ [ f (Var x) ] ], Eq (f (Var x), Var x)));
   Quantifier_solver.push qs;
   assert_ (Formula.widen_quantified (Not (Eq (f a, c))));
   print_endline (label (Quantifier_solver.solve qs ~max_rounds:2));
@@ -740,7 +1062,7 @@ let%expect_test "push/pop: an axiom registered in a scope is dropped on pop" =
     ignore (Quantifier_solver.assert_formula qs f : _ Or_error.t)
   in
   Quantifier_solver.push qs;
-  assert_ (Forall ([ x ], [ [ f (Var x) ] ], Eq (f (Var x), Var x)));
+  assert_ (forall_raw ([ x ], [ [ f (Var x) ] ], Eq (f (Var x), Var x)));
   assert_ (Formula.widen_quantified (Not (Eq (f a, a))));
   print_endline (label (Quantifier_solver.solve qs ~max_rounds:2));
   Quantifier_solver.pop qs;
@@ -749,5 +1071,374 @@ let%expect_test "push/pop: an axiom registered in a scope is dropped on pop" =
   [%expect {|
     unsat
     sat
+    |}]
+;;
+
+let%expect_test "nested forall-exists: Skolem depends on enclosing universal" =
+  let x = Tvar.of_string "x" in
+  let y = Tvar.of_string "y" in
+  let f x y : Formula.any = App (Tvar.of_string "f", [ x; y ]) in
+  print_elaborate
+    (forall_raw
+       ( [ x ]
+       , [ [ Var x ] ]
+       , Exists ([ y ], Formula.widen_quantified (Eq (f (Var x) (Var y), Var x)))
+       ));
+  [%expect
+    {|
+    ((ground (Eq (Var %guard.53) (Var %guard.52)))
+     (axioms
+      (((guard ((Eq (Var %guard.53) (Var %guard.52)))) (bound (x.bound.50))
+        (triggers (((Var x.bound.50))))
+        (body
+         (Eq (App f ((Var x.bound.50) (App %skolem.51 ((Var x.bound.50)))))
+          (Var x.bound.50)))))))
+    |}]
+;;
+
+let%expect_test "outer exists remains a ground Skolem, inner forall is hoisted" =
+  let x = Tvar.of_string "x" in
+  let y = Tvar.of_string "y" in
+  let h x y : Formula.any = App (Tvar.of_string "h", [ x; y ]) in
+  print_elaborate
+    (Exists
+       ( [ x ]
+       , Forall
+           ( [ y ]
+           , [ [ Formula.widen_quantified (Var y) ] ]
+           , Formula.widen_quantified (Eq (h (Var x) (Var y), Var y)) ) ));
+  [%expect
+    {|
+    ((ground (Eq (Var %guard.57) (Var %guard.56)))
+     (axioms
+      (((guard ((Eq (Var %guard.57) (Var %guard.56)))) (bound (y.bound.55))
+        (triggers (((Var y.bound.55))))
+        (body (Eq (App h ((Var %skolem.54) (Var y.bound.55))) (Var y.bound.55)))))))
+    |}]
+;;
+
+let%expect_test "nested foralls are prenexed into one axiom" =
+  let x = Tvar.of_string "x" in
+  let y = Tvar.of_string "y" in
+  let f x y : Formula.any = App (Tvar.of_string "f", [ x; y ]) in
+  print_elaborate
+    (forall_raw
+       ( [ x ]
+       , [ [ Var x ] ]
+       , Forall
+           ( [ y ]
+           , [ [ Formula.widen_quantified (Var y) ] ]
+           , Formula.widen_quantified (Eq (f (Var x) (Var y), Var x)) ) ));
+  [%expect
+    {|
+    ((ground (Eq (Var %guard.61) (Var %guard.60)))
+     (axioms
+      (((guard ((Eq (Var %guard.61) (Var %guard.60))))
+        (bound (x.bound.58 y.bound.59))
+        (triggers (((Var x.bound.58) (Var y.bound.59))))
+        (body (Eq (App f ((Var x.bound.58) (Var y.bound.59))) (Var x.bound.58)))))))
+    |}]
+;;
+
+let%expect_test "universal inside boolean structure of an axiom is hoisted" =
+  let x = Tvar.of_string "x" in
+  let y = Tvar.of_string "y" in
+  let p x : Formula.any = App (Tvar.of_string "p", [ x ]) in
+  let q x y : Formula.any = App (Tvar.of_string "q", [ x; y ]) in
+  print_elaborate
+    (forall_raw
+       ( [ x ]
+       , [ [ p (Var x) ] ]
+       , Or
+           [ Formula.widen_quantified (Eq (p (Var x), p (Var x)))
+           ; Forall
+               ( [ y ]
+               , [ [ Formula.widen_quantified (q (Var x) (Var y)) ] ]
+               , Formula.widen_quantified
+                   (Eq (q (Var x) (Var y), q (Var x) (Var y))) )
+           ] ));
+  [%expect
+    {|
+    ((ground (Eq (Var %guard.65) (Var %guard.64)))
+     (axioms
+      (((guard ((Eq (Var %guard.65) (Var %guard.64))))
+        (bound (x.bound.62 y.bound.63))
+        (triggers
+         (((App p ((Var x.bound.62)))
+           (App q ((Var x.bound.62) (Var y.bound.63))))))
+        (body
+         (Or
+          ((Eq (App p ((Var x.bound.62))) (App p ((Var x.bound.62))))
+           (Eq (App q ((Var x.bound.62) (Var y.bound.63)))
+            (App q ((Var x.bound.62) (Var y.bound.63)))))))))))
+    |}]
+;;
+
+let%expect_test "hoisted trigger groups are concatenated" =
+  let x = Tvar.of_string "x" in
+  let y = Tvar.of_string "y" in
+  let f x : Formula.any = App (Tvar.of_string "f", [ x ]) in
+  let g y : Formula.any = App (Tvar.of_string "g", [ y ]) in
+  print_elaborate
+    (forall_raw
+       ( [ x ]
+       , [ [ f (Var x) ] ]
+       , Forall
+           ( [ y ]
+           , [ [ Formula.widen_quantified (g (Var y)) ] ]
+           , Formula.widen_quantified (Eq (f (Var x), g (Var y))) ) ));
+  [%expect
+    {|
+    ((ground (Eq (Var %guard.69) (Var %guard.68)))
+     (axioms
+      (((guard ((Eq (Var %guard.69) (Var %guard.68))))
+        (bound (x.bound.66 y.bound.67))
+        (triggers (((App f ((Var x.bound.66))) (App g ((Var y.bound.67))))))
+        (body (Eq (App f ((Var x.bound.66))) (App g ((Var y.bound.67)))))))))
+    |}]
+;;
+
+let%expect_test "negative forall under universal Skolemizes with enclosing \
+                 scope"
+  =
+  (* [y] is existential after negating the inner [forall], so its Skolem must
+     depend on the enclosing universal [x]. *)
+  let x = Tvar.of_string "x" in
+  let y = Tvar.of_string "y" in
+  let p x : Formula.any = App (Tvar.of_string "p", [ x ]) in
+  let q x y : Formula.any = App (Tvar.of_string "q", [ x; y ]) in
+  print_elaborate
+    (forall_raw
+       ( [ x ]
+       , [ [ p (Var x) ] ]
+       , Not
+           (Forall
+              ( [ y ]
+              , [ [ Formula.widen_quantified (q (Var x) (Var y)) ] ]
+              , Formula.widen_quantified (Eq (q (Var x) (Var y), Var x)) )) ));
+  [%expect
+    {|
+    ((ground (Eq (Var %guard.73) (Var %guard.72)))
+     (axioms
+      (((guard ((Eq (Var %guard.73) (Var %guard.72)))) (bound (x.bound.70))
+        (triggers (((App p ((Var x.bound.70))))))
+        (body
+         (Not
+          (Eq (App q ((Var x.bound.70) (App %skolem.71 ((Var x.bound.70)))))
+           (Var x.bound.70))))))))
+    |}]
+;;
+
+let%expect_test "negative exists under universal hoists and scopes deeper \
+                 Skolem"
+  =
+  (* [y] is universal after negating the inner [exists]; the deeper positive
+     [exists z] must Skolemize over both [x] and the renamed [y]. *)
+  let x = Tvar.of_string "x" in
+  let y = Tvar.of_string "y" in
+  let z = Tvar.of_string "z" in
+  let p x : Formula.any = App (Tvar.of_string "p", [ x ]) in
+  let r x y z : Formula.any = App (Tvar.of_string "r", [ x; y; z ]) in
+  print_elaborate
+    (forall_raw
+       ( [ x ]
+       , [ [ p (Var x) ] ]
+       , Not
+           (Exists
+              ( [ y ]
+              , Not
+                  (Exists
+                     ( [ z ]
+                     , Formula.widen_quantified
+                         (Eq (r (Var x) (Var y) (Var z), Var z)) )) )) ));
+  [%expect
+    {|
+    ((ground (Eq (Var %guard.78) (Var %guard.77)))
+     (axioms
+      (((guard ((Eq (Var %guard.78) (Var %guard.77))))
+        (bound (x.bound.74 y.bound.75)) (triggers (((App p ((Var x.bound.74))))))
+        (body
+         (Eq
+          (App r
+           ((Var x.bound.74) (Var y.bound.75)
+            (App %skolem.76 ((Var x.bound.74) (Var y.bound.75)))))
+          (App %skolem.76 ((Var x.bound.74) (Var y.bound.75)))))))))
+    |}]
+;;
+
+let print_quantifier_result_label result =
+  match (result : Quantifier_solver.Result.t) with
+  | Sat _ -> print_endline "Sat"
+  | Unknown_but_possibly_sat _ -> print_endline "Unknown_but_possibly_sat"
+  | Unsat _ -> print_endline "Unsat"
+;;
+
+let%expect_test "soundness: exact forall x exists y. y <> x is not refuted" =
+  (* The trigger and seed make this non-vacuous: the printed instance shows the
+     satisfiable constraint [sk(a) <> a], with the witness depending on [x]. *)
+  let qs = Quantifier_solver.create () in
+  let x = Tvar.of_string "x" in
+  let y = Tvar.of_string "y" in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let h z : Formula.any = App (Tvar.of_string "h", [ z ]) in
+  let quantified =
+    forall_raw
+      ( [ x ]
+      , [ [ h (Var x) ] ]
+      , Exists ([ y ], Formula.widen_quantified (Not (Eq (Var y, Var x)))) )
+  in
+  print_elaborate_and_instances quantified ~seeds:[ h a ];
+  ignore (Quantifier_solver.assert_formula qs quantified : _ Or_error.t);
+  ignore
+    (Quantifier_solver.assert_formula
+       qs
+       (Formula.widen_quantified (Eq (h a, h a)))
+     : _ Or_error.t);
+  print_quantifier_result_label (Quantifier_solver.solve qs ~max_rounds:5);
+  [%expect
+    {|
+    ((ground (Eq (Var %guard.82) (Var %guard.81)))
+     (axioms
+      (((guard ((Eq (Var %guard.82) (Var %guard.81)))) (bound (x.bound.79))
+        (triggers (((App h ((Var x.bound.79))))))
+        (body (Not (Eq (App %skolem.80 ((Var x.bound.79))) (Var x.bound.79)))))))
+     (instances ((Not (Eq (App %skolem.80 ((Var a))) (Var a))))))
+    Unknown_but_possibly_sat
+    |}]
+;;
+
+let%expect_test "soundness: triggered forall-exists does not expose c <> c" =
+  (* This catches the old unsound Skolemization, which replaced [y] by one
+     ground constant [c]. The tautological [h(y) = h(y)] makes [h(c)] available
+     to the trigger, so the old encoding instantiated [x := c] and asserted
+     [c <> c]. The fixed encoding uses [y := sk(x)], so that refutation is no
+     longer possible. *)
+  let qs = Quantifier_solver.create () in
+  let x = Tvar.of_string "x" in
+  let y = Tvar.of_string "y" in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let h z : Formula.any = App (Tvar.of_string "h", [ z ]) in
+  let quantified =
+    forall_raw
+      ( [ x ]
+      , [ [ h (Var x) ] ]
+      , Exists
+          ( [ y ]
+          , Formula.widen_quantified
+              (And [ Not (Eq (Var y, Var x)); Eq (h (Var y), h (Var y)) ]) ) )
+  in
+  print_elaborate_and_instances quantified ~seeds:[ h a ];
+  ignore (Quantifier_solver.assert_formula qs quantified : _ Or_error.t);
+  ignore
+    (Quantifier_solver.assert_formula
+       qs
+       (Formula.widen_quantified (Eq (h a, h a)))
+     : _ Or_error.t);
+  print_quantifier_result_label (Quantifier_solver.solve qs ~max_rounds:5);
+  [%expect
+    {|
+    ((ground (Eq (Var %guard.90) (Var %guard.89)))
+     (axioms
+      (((guard ((Eq (Var %guard.90) (Var %guard.89)))) (bound (x.bound.87))
+        (triggers (((App h ((Var x.bound.87))))))
+        (body
+         (And
+          ((Not (Eq (App %skolem.88 ((Var x.bound.87))) (Var x.bound.87)))
+           (Eq (App h ((App %skolem.88 ((Var x.bound.87)))))
+            (App h ((App %skolem.88 ((Var x.bound.87))))))))))))
+     (instances
+      ((And
+        ((Not (Eq (App %skolem.88 ((Var a))) (Var a)))
+         (Eq (App h ((App %skolem.88 ((Var a)))))
+          (App h ((App %skolem.88 ((Var a)))))))))))
+    Unknown_but_possibly_sat
+    |}]
+;;
+
+let%expect_test "nested alternation can still derive a genuine contradiction" =
+  let qs = Quantifier_solver.create () in
+  let x = Tvar.of_string "x" in
+  let y = Tvar.of_string "y" in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let f x : Formula.any = App (Tvar.of_string "f", [ x ]) in
+  let h x : Formula.any = App (Tvar.of_string "h", [ x ]) in
+  ignore
+    (Quantifier_solver.assert_formula
+       qs
+       (forall_raw
+          ( [ x ]
+          , [ [ h (Var x) ] ]
+          , Exists
+              ( [ y ]
+              , Formula.widen_quantified
+                  (And [ Eq (f (Var x), Var y); Not (Eq (f (Var x), Var y)) ])
+              ) ))
+     : _ Or_error.t);
+  ignore
+    (Quantifier_solver.assert_formula
+       qs
+       (Formula.widen_quantified (Eq (h a, h a)))
+     : _ Or_error.t);
+  print_s
+    [%sexp
+      (Quantifier_solver.solve qs ~max_rounds:2 : Quantifier_solver.Result.t)];
+  [%expect
+    {|
+    (Unsat
+     (core
+      ((Quantifier_instance
+        (body
+         (And
+          ((Eq (App f ((Var x.bound.99))) (App %skolem.101 ((Var x.bound.99))))
+           (Not
+            (Eq (App f ((Var x.bound.99))) (App %skolem.101 ((Var x.bound.99))))))))
+        (bound_values ((x.bound.99 (Var a))))
+        (instance
+         (And
+          ((Eq (App f ((Var a))) (Var %skolem.102))
+           (Not (Eq (App f ((Var a))) (Var %skolem.102))))))))))
+    |}]
+;;
+
+let%expect_test "term ITE in an axiom body expands at the ground instance" =
+  let x = Tvar.of_string "x" in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let b : Formula.any = Var (Tvar.of_string "b") in
+  let c : Formula.any = Var (Tvar.of_string "c") in
+  let h x : Formula.any = App (Tvar.of_string "h", [ x ]) in
+  let quantified =
+    forall_raw ([ x ], [ [ h (Var x) ] ], Eq (Ite (Eq (Var x, a), b, c), c))
+  in
+  print_elaborate quantified;
+  let qs = Quantifier_solver.create () in
+  ignore (Quantifier_solver.assert_formula qs quantified : _ Or_error.t);
+  ignore
+    (Quantifier_solver.assert_formula
+       qs
+       (Formula.widen_quantified (Eq (h a, h a)))
+     : _ Or_error.t);
+  ignore
+    (Quantifier_solver.assert_formula
+       qs
+       (Formula.widen_quantified (Not (Eq (b, c))))
+     : _ Or_error.t);
+  print_s
+    [%sexp
+      (Quantifier_solver.solve qs ~max_rounds:2 : Quantifier_solver.Result.t)];
+  [%expect
+    {|
+    ((ground (Eq (Var %guard.105) (Var %guard.104)))
+     (axioms
+      (((guard ((Eq (Var %guard.105) (Var %guard.104)))) (bound (x.bound.103))
+        (triggers (((App h ((Var x.bound.103))))))
+        (body (Eq (Ite (Eq (Var x.bound.103) (Var a)) (Var b) (Var c)) (Var c)))))))
+    (Unsat
+     (core
+      ((Theory_lemma (Or ((Eq (Var a) (Var a)))))
+       (Asserted
+        (Or
+         ((And ((Eq (Var a) (Var a)) (Eq (Var b) (Var c))))
+          (And ((Not (Eq (Var a) (Var a))) (Eq (Var c) (Var c)))))))
+       (Asserted (Not (Eq (Var b) (Var c)))))))
     |}]
 ;;

@@ -213,25 +213,42 @@ let check_ground_kernel rule premises conclusion =
     error "quantifier kernel rule reached the ground checker"
 ;;
 
-(* Substitutes [bindings] into [body] (a quantifier's ground body) and checks
-   the ground [conclusion] equals the result, requiring every [bound] variable
-   to be bound. Shared by universal instantiation and existential elimination. *)
-let check_witnessing ~bound ~body ~bindings ~conclusion ~missing_error =
+(* Substitutes [bindings] into [body] and checks [conclusion] equals the result,
+   requiring exactly the [bound] variables to be bound. Shared by universal
+   instantiation and existential elimination. *)
+let check_witnessing
+  ?(check_binding = fun _ -> Ok ())
+  ~bound
+  ~body
+  ~bindings
+  ~conclusion
+  ~missing_error
+  ()
+  =
   match Tvar.Map.of_alist bindings with
   | `Duplicate_key key ->
     Or_error.error_s
       [%message "a bound variable was witnessed twice" (key : Tvar.t)]
   | `Ok subst ->
-    if not (List.for_all bound ~f:(Map.mem subst))
+    let bound_set = Tvar.Set.of_list bound in
+    let extra_keys =
+      Map.keys subst |> List.filter ~f:(fun key -> not (Set.mem bound_set key))
+    in
+    if not (List.is_empty extra_keys)
+    then
+      Or_error.error_s
+        [%message
+          "a quantifier rule provided witnesses for variables not bound by the \
+           premise"
+            (extra_keys : Tvar.t list)]
+    else if not (List.for_all bound ~f:(Map.mem subst))
     then error missing_error
     else (
-      let expected = Formula.substitute subst (Formula.widen body) in
-      let%bind.Or_error conclusion =
-        ground_of_quantified
-          conclusion
-          ~context:"a quantifier rule's conclusion must be ground"
+      let%bind.Or_error () =
+        Or_error.all_unit (List.map bindings ~f:check_binding)
       in
-      if formula_equal expected conclusion
+      let%bind.Or_error expected = Formula.substitute_quantified subst body in
+      if formula_equal_quantified expected conclusion
       then Ok ()
       else
         error "a quantifier rule's conclusion does not match its witnessed body")
@@ -247,6 +264,7 @@ let check_forall_instantiation premises conclusion ~bound_values =
       ~conclusion
       ~missing_error:
         "universal instantiation must instantiate every bound variable"
+      ()
   | [ _ ] -> error "universal instantiation premise must be a [∀]"
   | _ -> error "universal instantiation expects a single premise"
 ;;
@@ -262,18 +280,42 @@ let check_exists_elim premises conclusion ~skolems ~assumption_tvars =
         ~conclusion
         ~missing_error:
           "existential elimination must witness every bound variable"
+        ~check_binding:(fun (bound, witness) ->
+          match witness with
+          | Formula.Var _ -> Ok ()
+          | _ ->
+            Or_error.error_s
+              [%message
+                "existential elimination witness must be a bare fresh variable"
+                  (bound : Tvar.t)
+                  (witness : Formula.any)])
+        ()
     in
-    let skolem_tvars =
-      List.fold skolems ~init:Tvar.Set.empty ~f:(fun acc (_, witness) ->
-        Set.union acc (Formula.tvars (Formula.widen_quantified witness)))
+    let skolem_tvars_by_witness =
+      List.map skolems ~f:(fun (_, witness) ->
+        Formula.tvars (Formula.widen_quantified witness))
     in
-    let forbidden = Set.union assumption_tvars (Formula.tvars premise) in
-    if Set.are_disjoint skolem_tvars forbidden
-    then Ok ()
-    else
-      error
-        "existential elimination's Skolem symbol is not fresh (it occurs in \
-         the premise or an assumption)"
+    let pairwise_disjoint =
+      let rec go seen = function
+        | [] -> true
+        | tvars :: rest ->
+          Set.are_disjoint seen tvars && go (Set.union seen tvars) rest
+      in
+      go Tvar.Set.empty skolem_tvars_by_witness
+    in
+    if not pairwise_disjoint
+    then error "existential elimination's Skolem witnesses must be distinct"
+    else (
+      let skolem_tvars =
+        List.fold skolem_tvars_by_witness ~init:Tvar.Set.empty ~f:Set.union
+      in
+      let forbidden = Set.union assumption_tvars (Formula.tvars premise) in
+      if Set.are_disjoint skolem_tvars forbidden
+      then Ok ()
+      else
+        error
+          "existential elimination's Skolem symbol is not fresh (it occurs in \
+           the premise or an assumption)")
   | [ _ ] -> error "existential elimination premise must be an [∃]"
   | _ -> error "existential elimination expects a single premise"
 ;;
@@ -325,6 +367,51 @@ let check proof =
        |> List.map ~f:(fun assumption ->
          check_well_formed assumption.Assumption.formula))
   in
+  let check_skolem_reuse () =
+    let skolem_conclusion = Tvar.Table.create () in
+    Or_error.all_unit
+      (Array.to_list proof.steps
+       |> List.map ~f:(fun step ->
+         match step.Step.justification with
+         | Kernel { rule = Exists_elim { skolems }; _ } ->
+           List.fold_until
+             skolems
+             ~init:()
+             ~f:(fun () (_, witness) ->
+               let witness_tvars =
+                 Formula.tvars (Formula.widen_quantified witness)
+               in
+               match Set.to_list witness_tvars with
+               | [] -> Continue ()
+               | tvars ->
+                 let duplicate =
+                   List.find_map tvars ~f:(fun tvar ->
+                     Hashtbl.find skolem_conclusion tvar
+                     |> Option.filter ~f:(fun previous ->
+                       not (formula_equal_quantified previous step.conclusion))
+                     |> Option.map ~f:(fun previous -> tvar, previous))
+                 in
+                 (match duplicate with
+                  | Some (tvar, previous) ->
+                    Stop
+                      (Or_error.error_s
+                         [%message
+                           "existential elimination's Skolem symbol was reused \
+                            for a different conclusion"
+                             (tvar : Tvar.t)
+                             (previous : Formula.quantified)
+                             ~current:(step.conclusion : Formula.quantified)])
+                  | None ->
+                    List.iter tvars ~f:(fun tvar ->
+                      Hashtbl.set
+                        skolem_conclusion
+                        ~key:tvar
+                        ~data:step.conclusion);
+                    Continue ()))
+             ~finish:(fun () -> Ok ())
+         | Assumption _ | Kernel _ | By_refutation _ -> Ok ()))
+  in
+  let%bind.Or_error () = check_skolem_reuse () in
   let step_at ~before id =
     let id = Id.Step.to_int id in
     if id < 0 || id >= before

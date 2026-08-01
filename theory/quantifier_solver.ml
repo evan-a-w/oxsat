@@ -8,6 +8,8 @@ module Axiom_state = struct
          justifying its instances; [None] for a universal nested inside boolean
          structure (guarded, [proof = None] fallback). *)
       given : Formula.quantified option
+    ; existential_witnesses :
+        (Tvar.t * Formula.any) list Formula.Quantified.Table.t
     ; (* Ground instances already asserted for this axiom, so re-matching an
          already-instantiated substitution is a no-op instead of growing the
          clause set forever. *)
@@ -79,13 +81,36 @@ let note_provenance t ~key ~data =
 
 let add_axiom_state t ~axiom ~given =
   t.axiom_states
-  <- { Axiom_state.axiom; given; seen = Formula.Any.Hash_set.create () }
+  <- { Axiom_state.axiom
+     ; given
+     ; existential_witnesses = Formula.Quantified.Table.create ()
+     ; seen = Formula.Any.Hash_set.create ()
+     }
      :: t.axiom_states
+;;
+
+let ground_or_error q ~context =
+  match Formula.to_any q with
+  | Some ground -> Ok ground
+  | None -> Or_error.error_string context
+;;
+
+let ground_triggers_or_error triggers =
+  Or_error.all
+    (List.map triggers ~f:(fun trigger ->
+       Or_error.all
+         (List.map
+            trigger
+            ~f:(ground_or_error ~context:"nested quantifier in trigger"))))
 ;;
 
 (* A bare top-level [∀]: register a guard-free axiom (no ground constraint until
    instantiated) and hand the [∀] itself to the proof layer to cite. *)
 let register_toplevel_forall t ~bound ~triggers ~body =
+  let%bind.Or_error triggers = ground_triggers_or_error triggers in
+  let%map.Or_error body =
+    ground_or_error body ~context:"nested quantifier in universal body"
+  in
   let axiom, given =
     Quantifier_elaboration.register_toplevel_forall ~bound ~triggers ~body
   in
@@ -97,6 +122,9 @@ let register_toplevel_forall t ~bound ~triggers ~body =
    record both the [∃] and its witnessing substitution for the proof. *)
 let assert_toplevel_exists t ~bound ~body =
   let existential : Formula.quantified = Exists (bound, body) in
+  let%bind.Or_error body =
+    ground_or_error body ~context:"nested quantifier in existential body"
+  in
   let skolems, skolem_body =
     Quantifier_elaboration.skolemize_existential ~bound body
   in
@@ -109,11 +137,97 @@ let assert_toplevel_exists t ~bound ~body =
   Solver.assert_formula t.solver skolem_body
 ;;
 
+let fresh_skolem () : Formula.any =
+  Var (Theory_core.Fresh_tvar.create ~hint:"%skolem" ())
+;;
+
+let substitute_quantified_exn subst formula =
+  Or_error.ok_exn (Formula.substitute_quantified subst formula)
+;;
+
+let witnesses_for_existential witness_cache ~bound ~existential =
+  match Hashtbl.find witness_cache existential with
+  | Some skolems -> skolems
+  | None ->
+    let skolems = List.map bound ~f:(fun v -> v, fresh_skolem ()) in
+    Hashtbl.set witness_cache ~key:existential ~data:skolems;
+    skolems
+;;
+
+let quantifier_chain_for_instance ~witness_cache ~given ~universal_values =
+  let universal_values = Tvar.Map.of_alist_exn universal_values in
+  let rec go (formula : Formula.quantified) steps =
+    match formula with
+    | Forall (bound, _triggers, body) ->
+      let bound_values =
+        List.map bound ~f:(fun v -> v, Map.find_exn universal_values v)
+      in
+      let subst = Tvar.Map.of_alist_exn bound_values in
+      let conclusion =
+        substitute_quantified_exn subst (Formula.widen_quantified body)
+      in
+      go
+        conclusion
+        (Proof_generation.Quantifier_step.Forall_instantiation
+           { bound_values; conclusion }
+         :: steps)
+    | Exists (bound, body) ->
+      let existential = formula in
+      let skolems =
+        witnesses_for_existential witness_cache ~bound ~existential
+      in
+      let subst = Tvar.Map.of_alist_exn skolems in
+      let conclusion =
+        substitute_quantified_exn subst (Formula.widen_quantified body)
+      in
+      go
+        conclusion
+        (Proof_generation.Quantifier_step.Exists_elim { skolems; conclusion }
+         :: steps)
+    | _ ->
+      (match Formula.to_any formula with
+       | Some ground ->
+         ( ground
+         , { Proof_generation.Quantifier_chain.given; steps = List.rev steps } )
+       | None ->
+         raise_s
+           [%message
+             "quantifier chain ended at a non-ground quantified formula"
+               (formula : Formula.quantified)])
+  in
+  go given []
+;;
+
+let assert_toplevel_prefix t formula =
+  let%bind.Or_error registered =
+    Quantifier_elaboration.register_toplevel_prefix formula
+  in
+  Solver.proof_add_quantified_given t.solver registered.given;
+  match registered.axiom, registered.ground with
+  | Some axiom, None ->
+    add_axiom_state t ~axiom ~given:(Some registered.given);
+    Ok `Ok
+  | None, Some _stable_ground ->
+    let witness_cache = Formula.Quantified.Table.create () in
+    let ground, chain =
+      quantifier_chain_for_instance
+        ~witness_cache
+        ~given:registered.given
+        ~universal_values:[]
+    in
+    Solver.proof_note_quantifier_chain t.solver ~ground ~chain;
+    Solver.assert_formula t.solver ground
+  | Some _, Some _ | None, None ->
+    Or_error.error_string "invalid top-level prefix registration"
+;;
+
 (* A quantifier nested inside boolean structure (under [Or]/[Not], etc.): keep
    the guard encoding. Guards are synthetic, so a refutation depending on one
    yields [proof = None]. *)
 let assert_nested_guarded t (formula : Formula.quantified) =
-  let ground, new_axioms = Quantifier_elaboration.elaborate formula in
+  let%bind.Or_error ground, new_axioms =
+    Or_error.try_with (fun () -> Quantifier_elaboration.elaborate formula)
+  in
   List.iter new_axioms ~f:(fun axiom ->
     add_axiom_state t ~axiom ~given:None;
     Option.iter axiom.guard ~f:(Solver.proof_note_synthetic t.solver));
@@ -141,9 +255,23 @@ let rec assert_formula t (formula : Formula.quantified)
            | (Ok (`Unsat _) | Error _) as stop -> Stop stop)
          ~finish:(fun `Ok -> Ok `Ok)
      | Forall (bound, triggers, body) ->
-       register_toplevel_forall t ~bound ~triggers ~body;
-       Ok `Ok
-     | Exists (bound, body) -> assert_toplevel_exists t ~bound ~body
+       (match Formula.to_any (Formula.widen_quantified body) with
+        | None ->
+          (match assert_toplevel_prefix t formula with
+           | Ok result -> Ok result
+           | Error _ -> assert_nested_guarded t formula)
+        | Some _ ->
+          let%map.Or_error () =
+            register_toplevel_forall t ~bound ~triggers ~body
+          in
+          `Ok)
+     | Exists (bound, body) ->
+       (match Formula.to_any (Formula.widen_quantified body) with
+        | None ->
+          (match assert_toplevel_prefix t formula with
+           | Ok result -> Ok result
+           | Error _ -> assert_nested_guarded t formula)
+        | Some _ -> assert_toplevel_exists t ~bound ~body)
      | _ -> assert_nested_guarded t formula)
 ;;
 
@@ -221,40 +349,52 @@ let matches_for_trigger_group
 let instantiate t : Formula.any list =
   let uf = Solver.egraph t.solver in
   let graph = Formula_egraph_uf.egraph uf in
-  List.concat_map t.axiom_states ~f:(fun { Axiom_state.axiom; given; seen } ->
-    List.concat_map axiom.triggers ~f:(fun trigger ->
-      matches_for_trigger_group uf ~bound:axiom.bound trigger graph)
-    |> List.filter_map ~f:(fun subst ->
-      let instance = Formula.substitute subst axiom.body in
-      if Hash_set.mem seen instance
-      then None
-      else (
-        note_seen t seen instance;
-        let bound_values = Map.to_alist subst in
-        (* The formula actually asserted, and the provenance key that
-           [relabel_core_step] looks it up by. A top-level universal is
-           guard-free: assert the bare instance and derive it in the proof by
-           universal instantiation of the cited [∀]. A nested one stays guarded
-           ([¬guard ∨ instance]) -- sound regardless of whether the guard is
-           forced, and its synthetic guard makes any proof decline. *)
-        let asserted =
-          match axiom.guard with
-          | None ->
-            Option.iter given ~f:(fun forall ->
-              Solver.proof_note_forall_instance
-                t.solver
-                ~instance
-                ~forall
-                ~bound_values);
-            instance
-          | Some guard -> Formula.Or [ Not guard; instance ]
-        in
-        note_provenance
-          t
-          ~key:asserted
-          ~data:
-            { Instance_provenance.body = axiom.body; bound_values; instance };
-        Some asserted)))
+  List.concat_map
+    t.axiom_states
+    ~f:(fun { Axiom_state.axiom; given; existential_witnesses; seen } ->
+      List.concat_map axiom.triggers ~f:(fun trigger ->
+        matches_for_trigger_group uf ~bound:axiom.bound trigger graph)
+      |> List.filter_map ~f:(fun subst ->
+        let stable_instance = Formula.substitute subst axiom.body in
+        if Hash_set.mem seen stable_instance
+        then None
+        else (
+          note_seen t seen stable_instance;
+          let bound_values = Map.to_alist subst in
+          (* The formula actually asserted, and the provenance key that
+             [relabel_core_step] looks it up by. A top-level quantifier prefix
+             is guard-free and is derived in the proof by a chain of checked
+             quantifier rules. A nested one stays guarded ([¬guard ∨ instance])
+             -- sound regardless of whether the guard is forced, and its
+             synthetic guard makes any proof decline. *)
+          let asserted =
+            match axiom.guard with
+            | None ->
+              (match given with
+               | Some given ->
+                 let instance, chain =
+                   quantifier_chain_for_instance
+                     ~witness_cache:existential_witnesses
+                     ~given
+                     ~universal_values:bound_values
+                 in
+                 Solver.proof_note_quantifier_chain
+                   t.solver
+                   ~ground:instance
+                   ~chain;
+                 instance
+               | None -> stable_instance)
+            | Some guard -> Formula.Or [ Not guard; stable_instance ]
+          in
+          note_provenance
+            t
+            ~key:asserted
+            ~data:
+              { Instance_provenance.body = axiom.body
+              ; bound_values
+              ; instance = asserted
+              };
+          Some asserted)))
 ;;
 
 (* [Solver.assert_formula] can only fail on an ill-formed formula; every

@@ -2,23 +2,22 @@ open! Core
 open! Import
 module Refutation_clause = Feel.Solver.Refutation_clause
 
-(* A ground instance asserted for a top-level universal, recording the [∀] it
-   came from and the witnessing substitution, so the proof derives it by a
-   checked universal-instantiation step rather than assuming it. *)
-module Forall_instance = struct
+module Quantifier_step = struct
   type t =
-    { forall : Formula.quantified
-    ; bound_values : (Tvar.t * Formula.any) list
-    }
+    | Forall_instantiation of
+        { bound_values : (Tvar.t * Formula.any) list
+        ; conclusion : Formula.quantified
+        }
+    | Exists_elim of
+        { skolems : (Tvar.t * Formula.any) list
+        ; conclusion : Formula.quantified
+        }
 end
 
-(* The ground body an existential was Skolemized to, recording the [∃] and the
-   witnessing Skolem substitution, so the proof derives it by a checked
-   existential-elimination step. *)
-module Exists_skolemization = struct
+module Quantifier_chain = struct
   type t =
-    { existential : Formula.quantified
-    ; skolems : (Tvar.t * Formula.any) list
+    { given : Formula.quantified
+    ; steps : Quantifier_step.t list
     }
 end
 
@@ -27,8 +26,7 @@ type t =
   ; (* Top-level [∀]/[∃] formulas cited as assumptions, in registration order
        (reversed). *)
     mutable quantified_givens : Formula.quantified list
-  ; forall_instances : Forall_instance.t Formula.Any.Table.t
-  ; exists_skolemizations : Exists_skolemization.t Formula.Any.Table.t
+  ; quantifier_chains : Quantifier_chain.t Formula.Any.Table.t
   ; (* Ground atoms with no real meaning (guards for universals nested inside
        boolean structure). A refutation that depends on one can't be turned into
        a real proof, so we decline -- the same fallback as a push/pop scope. *)
@@ -38,8 +36,7 @@ type t =
 let create () =
   { scopes = [ [] ]
   ; quantified_givens = []
-  ; forall_instances = Formula.Any.Table.create ()
-  ; exists_skolemizations = Formula.Any.Table.create ()
+  ; quantifier_chains = Formula.Any.Table.create ()
   ; synthetic = Formula.Any.Hash_set.create ()
   }
 ;;
@@ -54,18 +51,34 @@ let add_quantified_given t given =
   t.quantified_givens <- given :: t.quantified_givens
 ;;
 
+let note_quantifier_chain t ~ground ~chain =
+  Hashtbl.set t.quantifier_chains ~key:ground ~data:chain
+;;
+
 let note_forall_instance t ~instance ~forall ~bound_values =
-  Hashtbl.set
-    t.forall_instances
-    ~key:instance
-    ~data:{ Forall_instance.forall; bound_values }
+  note_quantifier_chain
+    t
+    ~ground:instance
+    ~chain:
+      { Quantifier_chain.given = forall
+      ; steps =
+          [ Quantifier_step.Forall_instantiation
+              { bound_values; conclusion = Formula.widen_quantified instance }
+          ]
+      }
 ;;
 
 let note_exists_skolemization t ~skolem_body ~existential ~skolems =
-  Hashtbl.set
-    t.exists_skolemizations
-    ~key:skolem_body
-    ~data:{ Exists_skolemization.existential; skolems }
+  note_quantifier_chain
+    t
+    ~ground:skolem_body
+    ~chain:
+      { Quantifier_chain.given = existential
+      ; steps =
+          [ Quantifier_step.Exists_elim
+              { skolems; conclusion = Formula.widen_quantified skolem_body }
+          ]
+      }
 ;;
 
 let note_synthetic t atom = Hash_set.add t.synthetic atom
@@ -363,31 +376,59 @@ let unsat_proof
       let assumption = add_assumption given in
       let step = add_step given (Assumption assumption) in
       Hashtbl.set given_step ~key:given ~data:step);
+    let quantifier_step_by_conclusion = Formula.Quantified.Table.create () in
+    let add_quantifier_chain_step previous (step : Quantifier_step.t) =
+      let conclusion =
+        match step with
+        | Quantifier_step.Forall_instantiation { conclusion; _ }
+        | Quantifier_step.Exists_elim { conclusion; _ } -> conclusion
+      in
+      match Hashtbl.find quantifier_step_by_conclusion conclusion with
+      | Some cached -> cached
+      | None ->
+        let rule =
+          match step with
+          | Quantifier_step.Forall_instantiation { bound_values; _ } ->
+            Proof.Kernel_rule.Forall_instantiation { bound_values }
+          | Quantifier_step.Exists_elim { skolems; _ } ->
+            Proof.Kernel_rule.Exists_elim { skolems }
+        in
+        let id =
+          add_step conclusion (Kernel { rule; premises = [| previous |] })
+        in
+        Hashtbl.set quantifier_step_by_conclusion ~key:conclusion ~data:id;
+        id
+    in
     (* One step per asserted ground formula, in assertion order: a plain
-       assumption, or -- for an instance / Skolemized body -- a checked
-       derivation from the [∀]/[∃] it came from. *)
+       assumption, or a checked chain from the [∀]/[∃] it came from. *)
     let premise_steps =
       Array.map premises ~f:(fun premise ->
         let conclusion = Formula.widen_quantified premise in
-        match Hashtbl.find t.forall_instances premise with
-        | Some { forall; bound_values } ->
-          add_step
-            conclusion
-            (Kernel
-               { rule = Forall_instantiation { bound_values }
-               ; premises = [| Hashtbl.find_exn given_step forall |]
-               })
-        | None ->
-          (match Hashtbl.find t.exists_skolemizations premise with
-           | Some { existential; skolems } ->
-             add_step
-               conclusion
-               (Kernel
-                  { rule = Exists_elim { skolems }
-                  ; premises = [| Hashtbl.find_exn given_step existential |]
-                  })
-           | None ->
-             add_step conclusion (Assumption (add_assumption conclusion))))
+        match Hashtbl.find t.quantifier_chains premise with
+        | Some { given; steps = chain_steps } ->
+          let initial = Hashtbl.find_exn given_step given in
+          let final, final_conclusion =
+            List.fold
+              chain_steps
+              ~init:(initial, given)
+              ~f:(fun (previous, _) step ->
+                let id = add_quantifier_chain_step previous step in
+                let conclusion =
+                  match (step : Quantifier_step.t) with
+                  | Quantifier_step.Forall_instantiation { conclusion; _ }
+                  | Quantifier_step.Exists_elim { conclusion; _ } -> conclusion
+                in
+                id, conclusion)
+          in
+          if Formula.compare_quantified final_conclusion conclusion = 0
+          then final
+          else
+            raise_s
+              [%message
+                "quantifier chain does not conclude its asserted premise"
+                  (final_conclusion : Formula.quantified)
+                  (conclusion : Formula.quantified)]
+        | None -> add_step conclusion (Assumption (add_assumption conclusion)))
     in
     let final_step =
       add_step

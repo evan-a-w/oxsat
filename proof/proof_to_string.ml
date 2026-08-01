@@ -153,8 +153,7 @@ let rec formula_to_string (formula : Formula.any) =
     in
     sprintf "%s %s %s" (formula_to_string a) op (formula_to_string b)
 
-(* A quantified formula: renders [∀]/[∃] with their bound variables, delegating
-   binder-free subterms to {!formula_to_string}. *)
+(* A quantified formula: renders [∀]/[∃] with their bound variables. *)
 and quantified_to_string (q : Formula.quantified) =
   let bound_to_string bound =
     String.concat ~sep:", " (List.map bound ~f:Tvar.to_string)
@@ -164,15 +163,9 @@ and quantified_to_string (q : Formula.quantified) =
   | None ->
     (match q with
      | Forall (bound, _triggers, body) ->
-       sprintf
-         "∀%s. %s"
-         (bound_to_string bound)
-         (formula_to_string (Formula.widen body))
+       sprintf "∀%s. %s" (bound_to_string bound) (quantified_to_string body)
      | Exists (bound, body) ->
-       sprintf
-         "∃%s. %s"
-         (bound_to_string bound)
-         (formula_to_string (Formula.widen body))
+       sprintf "∃%s. %s" (bound_to_string bound) (quantified_to_string body)
      | Not f -> sprintf "¬(%s)" (quantified_to_string f)
      | And fs ->
        String.concat

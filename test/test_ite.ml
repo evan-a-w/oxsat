@@ -13,6 +13,13 @@ let app f args : Formula.any = App (Tvar.of_string f, args)
 let select array index : Formula.any = Select (array, index)
 let store array index value : Formula.any = Store (array, index, value)
 
+let forall (bound, triggers, body) : Formula.quantified =
+  Forall
+    ( bound
+    , List.map triggers ~f:(List.map ~f:Formula.widen_quantified)
+    , Formula.widen_quantified body )
+;;
+
 let assert_ok solver formula =
   match Or_error.ok_exn (Solver.assert_formula solver formula) with
   | `Ok -> ()
@@ -179,7 +186,7 @@ let%expect_test "ite under a quantifier body is lowered after instantiation" =
   let x = Tvar.of_string "x" in
   let y = v "y" in
   let body = eq (app "f" [ ite (eq (Var x) (Var x)) (Var x) y ]) (Var x) in
-  assert_q_ok solver (Forall ([ x ], [ [ app "f" [ Var x ] ] ], body));
+  assert_q_ok solver (forall ([ x ], [ [ app "f" [ Var x ] ] ], body));
   assert_q_ok
     solver
     (Formula.widen_quantified (neq (app "f" [ v "a" ]) (v "a")));

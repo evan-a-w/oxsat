@@ -6,6 +6,17 @@ open! Theory
 let x = Tvar.of_string "x"
 let y = Tvar.of_string "y"
 
+let forall (bound, triggers, body) : Formula.quantified =
+  Forall
+    ( bound
+    , List.map triggers ~f:(List.map ~f:Formula.widen_quantified)
+    , Formula.widen_quantified body )
+;;
+
+let exists (bound, body) : Formula.quantified =
+  Exists (bound, Formula.widen_quantified body)
+;;
+
 let equality_literal ~positive =
   Proof.Literal.create
     ~atom:(Proof.Atom.Theory (`Eq (Formula.Var y, Formula.Var x)))
@@ -323,14 +334,14 @@ let%expect_test "kernel universal instantiation is checked" =
   let a : Formula.any = Var (Tvar.of_string "a") in
   let b : Formula.any = Var (Tvar.of_string "b") in
   let forall : Formula.quantified =
-    Forall ([ x ], [], Eq (App (f, [ Var x ]), Var x))
+    forall ([ x ], [], Eq (App (f, [ Var x ]), Var x))
   in
   let instance : Formula.quantified =
     Formula.widen_quantified (Formula.Eq (App (f, [ a ]), a))
   in
   (* A non-[∀] premise, to check the rule rejects being applied to it. *)
   let not_a_forall : Formula.quantified =
-    Exists ([ x ], Eq (App (f, [ Var x ]), Var x))
+    exists ([ x ], Eq (App (f, [ Var x ]), Var x))
   in
   let proof ?(premise = forall) rule : Proof.t =
     { assumptions = [| { name = None; formula = premise } |]
@@ -383,6 +394,130 @@ let%expect_test "kernel universal instantiation is checked" =
     |}]
 ;;
 
+let%expect_test "universal instantiation rejects witnesses for unbound \
+                 variables"
+  =
+  let x = Tvar.of_string "x" in
+  let f = Tvar.of_string "f" in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let b : Formula.any = Var (Tvar.of_string "b") in
+  let c = Tvar.of_string "c" in
+  let premise : Formula.quantified =
+    forall ([ x ], [], Eq (App (f, [ Var x ]), Var c))
+  in
+  let step_id = Proof.Id.Step.of_int_exn in
+  let assumption_id = Proof.Id.Assumption.of_int_exn in
+  let proof ~conclusion ~bound_values : Proof.t =
+    { assumptions = [| { name = Some "a0"; formula = premise } |]
+    ; steps =
+        [| { name = Some "s0"
+           ; conclusion = premise
+           ; justification = Assumption (assumption_id 0)
+           }
+         ; { name = Some "s1"
+           ; conclusion
+           ; justification =
+               Kernel
+                 { rule = Forall_instantiation { bound_values }
+                 ; premises = [| step_id 0 |]
+                 }
+           }
+        |]
+    ; conclusion = step_id 1
+    }
+  in
+  let bogus =
+    proof
+      ~conclusion:(Formula.widen_quantified (Eq (App (f, [ a ]), b)))
+      ~bound_values:[ x, a; c, b ]
+  in
+  let valid =
+    proof
+      ~conclusion:(Formula.widen_quantified (Eq (App (f, [ a ]), Var c)))
+      ~bound_values:[ x, a ]
+  in
+  print_s [%message "bogus" ~result:(Proof.check bogus : unit Or_error.t)];
+  print_s [%message "valid" ~result:(Proof.check valid : unit Or_error.t)];
+  [%expect
+    {|
+    (bogus
+     (result
+      (Error
+       ("a quantifier rule provided witnesses for variables not bound by the premise"
+        (extra_keys (c))))))
+    (valid (result (Ok ())))
+    |}]
+;;
+
+let%expect_test "existential elimination rejects non-variable witnesses" =
+  let x = Tvar.of_string "x" in
+  let sk : Formula.any = Var (Tvar.of_string "%sk") in
+  let zero : Formula.any = La_const Q.zero in
+  let positive term : Formula.quantified =
+    Formula.widen_quantified (La_compare (term, `Gt, zero))
+  in
+  let premise : Formula.quantified = exists ([ x ], positive (Var x)) in
+  let step_id = Proof.Id.Step.of_int_exn in
+  let assumption_id = Proof.Id.Assumption.of_int_exn in
+  let assumption_step : Proof.Step.t =
+    { name = Some "s0"
+    ; conclusion = premise
+    ; justification = Assumption (assumption_id 0)
+    }
+  in
+  let exists_step ~witness ~witnessed : Proof.Step.t =
+    { name = Some "s1"
+    ; conclusion = witnessed
+    ; justification =
+        Kernel
+          { rule = Exists_elim { skolems = [ x, witness ] }
+          ; premises = [| step_id 0 |]
+          }
+    }
+  in
+  let proof ~steps ~conclusion : Proof.t =
+    { assumptions = [| { name = Some "a0"; formula = premise } |]
+    ; steps
+    ; conclusion
+    }
+  in
+  let bogus =
+    proof
+      ~steps:
+        [| assumption_step
+         ; exists_step ~witness:zero ~witnessed:(positive zero)
+        |]
+      ~conclusion:(step_id 1)
+  in
+  let valid_final : Proof.Step.t =
+    { name = Some "true"
+    ; conclusion = True
+    ; justification =
+        Kernel { rule = Propositional; premises = [| step_id 1 |] }
+    }
+  in
+  let valid =
+    proof
+      ~steps:
+        [| assumption_step
+         ; exists_step ~witness:sk ~witnessed:(positive sk)
+         ; valid_final
+        |]
+      ~conclusion:(step_id 2)
+  in
+  print_s [%message "bogus" ~result:(Proof.check bogus : unit Or_error.t)];
+  print_s [%message "valid" ~result:(Proof.check valid : unit Or_error.t)];
+  [%expect
+    {|
+    (bogus
+     (result
+      (Error
+       ("existential elimination witness must be a bare fresh variable" (bound x)
+        (witness (La_const ((num 0) (den 1))))))))
+    (valid (result (Ok ())))
+    |}]
+;;
+
 let%expect_test "kernel existential elimination is checked, with a freshness \
                  side condition"
   =
@@ -390,14 +525,14 @@ let%expect_test "kernel existential elimination is checked, with a freshness \
   let f = Tvar.of_string "f" in
   let sk : Formula.any = Var (Tvar.of_string "%sk") in
   let existential : Formula.quantified =
-    Exists ([ x ], Not (Eq (App (f, [ Var x ]), Var x)))
+    exists ([ x ], Not (Eq (App (f, [ Var x ]), Var x)))
   in
   let witnessed : Formula.quantified =
     Formula.widen_quantified (Formula.Not (Eq (App (f, [ sk ]), sk)))
   in
   (* A non-[∃] premise, to check the rule rejects being applied to it. *)
   let not_an_exists : Formula.quantified =
-    Forall ([ x ], [], Not (Eq (App (f, [ Var x ]), Var x)))
+    forall ([ x ], [], Not (Eq (App (f, [ Var x ]), Var x)))
   in
   let proof
     ?(premise = existential)
@@ -492,6 +627,46 @@ let%expect_test "kernel existential elimination is checked, with a freshness \
 
     (Error
      "a Skolem introduced by existential elimination escapes into the proof's conclusion (eigenvariable condition)")
+    |}]
+;;
+
+let%expect_test "existential elimination rejects capture by an inner binder" =
+  let x = Tvar.of_string "x" in
+  let y = Tvar.of_string "y" in
+  let p = Tvar.of_string "p" in
+  let premise : Formula.quantified =
+    Exists
+      ( [ x ]
+      , Forall ([ y ], [], Formula.widen_quantified (App (p, [ Var x; Var y ])))
+      )
+  in
+  let captured : Formula.quantified =
+    Forall ([ y ], [], Formula.widen_quantified (App (p, [ Var y; Var y ])))
+  in
+  let proof : Proof.t =
+    { assumptions = [| { name = None; formula = premise } |]
+    ; steps =
+        [| { name = None
+           ; conclusion = premise
+           ; justification = Assumption (Proof.Id.Assumption.of_int_exn 0)
+           }
+         ; { name = None
+           ; conclusion = captured
+           ; justification =
+               Kernel
+                 { rule = Exists_elim { skolems = [ x, Var y ] }
+                 ; premises = [| Proof.Id.Step.of_int_exn 0 |]
+                 }
+           }
+        |]
+    ; conclusion = Proof.Id.Step.of_int_exn 1
+    }
+  in
+  print_s [%sexp (Proof.check proof : unit Or_error.t)];
+  [%expect
+    {|
+    (Error
+     ("substitution would capture an inner universal binder" (captured (y))))
     |}]
 ;;
 
