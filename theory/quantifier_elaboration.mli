@@ -14,12 +14,13 @@ open! Import
 
     Positive universals are alpha-renamed and registered as
     {!Quantifier_axiom.Axiom.t}s. A guarded universal nested under boolean
-    structure is replaced by a fresh synthetic guard atom; instances are later
-    asserted guarded by that atom. Within one positive universal subtree, all
-    inner universals are prenexed into the same axiom, including universals
-    reached through boolean structure, and inner existentials are Skolemized
-    using exactly the universals in scope at their occurrence. The resulting
-    axiom body is binder-free.
+    structure is replaced by a fresh guard atom; instances are later asserted
+    guarded by that atom. Currently every guard that NNF elaboration creates is
+    positive and can be given a definitional quantified assumption. Within one
+    positive universal subtree, all inner universals are prenexed into the same
+    axiom, including universals reached through boolean structure, and inner
+    existentials are Skolemized using exactly the universals in scope at their
+    occurrence. The resulting axiom body is binder-free.
 
     Trigger groups from hoisted universals are merged by cross-product
     concatenation in preorder: alternatives within one [forall] remain

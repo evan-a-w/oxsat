@@ -105,10 +105,11 @@ let register_guarded_forall
   let guard : Formula.any =
     Eq (Var (fresh_tvar ~hint:"%guard" ()), Var (fresh_tvar ~hint:"%guard" ()))
   in
+  let guard = { Quantifier_axiom.Guard.atom = guard; polarity = Positive } in
   axioms
   := { Quantifier_axiom.Axiom.guard = Some guard; bound; triggers; body }
      :: !axioms;
-  guard
+  guard.atom
 ;;
 
 let rec go

@@ -28,14 +28,39 @@ let print_elaborate (formula : Formula.quantified) =
       "" (ground : Formula.any) (axioms : Quantifier_axiom.Axiom.t list)]
 ;;
 
+let guarded_definition (axiom : Quantifier_axiom.Axiom.t)
+  : Formula.quantified option
+  =
+  match axiom.guard with
+  | None -> None
+  | Some { polarity = Negative; _ } -> None
+  | Some { atom; polarity = Positive } ->
+    Some
+      (Forall
+         ( axiom.bound
+         , List.map axiom.triggers ~f:(List.map ~f:Formula.widen_quantified)
+         , Formula.widen_quantified (Or [ Not atom; axiom.body ]) ))
+;;
+
+let print_elaborate_with_definitions (formula : Formula.quantified) =
+  let ground, axioms = Quantifier_elaboration.elaborate formula in
+  let definitions = List.filter_map axioms ~f:guarded_definition in
+  print_s
+    [%message
+      ""
+        (ground : Formula.any)
+        (axioms : Quantifier_axiom.Axiom.t list)
+        (definitions : Formula.quantified list)]
+;;
+
 let%expect_test "top-level forall: registers an axiom, ground is its guard" =
   print_elaborate (forall (Eq (fg xg, xg)));
   [%expect
     {|
     ((ground (Eq (Var %guard.2) (Var %guard.1)))
      (axioms
-      (((guard ((Eq (Var %guard.2) (Var %guard.1)))) (bound (x.bound.0))
-        (triggers (((App f ((Var x.bound.0))))))
+      (((guard (((atom (Eq (Var %guard.2) (Var %guard.1))) (polarity Positive))))
+        (bound (x.bound.0)) (triggers (((App f ((Var x.bound.0))))))
         (body (Eq (App f ((Var x.bound.0))) (Var x.bound.0)))))))
     |}]
 ;;
@@ -58,8 +83,8 @@ let%expect_test "negated exists becomes a triggerless (inert) forall" =
     {|
     ((ground (Eq (Var %guard.7) (Var %guard.6)))
      (axioms
-      (((guard ((Eq (Var %guard.7) (Var %guard.6)))) (bound (x.bound.5))
-        (triggers ())
+      (((guard (((atom (Eq (Var %guard.7) (Var %guard.6))) (polarity Positive))))
+        (bound (x.bound.5)) (triggers ())
         (body (Not (Eq (App f ((Var x.bound.5))) (Var x.bound.5))))))))
     |}]
 ;;
@@ -72,8 +97,9 @@ let%expect_test "forall nested under Or: guard spliced in place, axiom still \
     {|
     ((ground (Or ((Eq (Var a) (Var a)) (Eq (Var %guard.10) (Var %guard.9)))))
      (axioms
-      (((guard ((Eq (Var %guard.10) (Var %guard.9)))) (bound (x.bound.8))
-        (triggers (((App f ((Var x.bound.8))))))
+      (((guard
+         (((atom (Eq (Var %guard.10) (Var %guard.9))) (polarity Positive))))
+        (bound (x.bound.8)) (triggers (((App f ((Var x.bound.8))))))
         (body (Eq (App f ((Var x.bound.8))) (Var x.bound.8)))))))
     |}]
 ;;
@@ -90,11 +116,13 @@ let%expect_test "two independent foralls reusing the same bound-variable name \
        ((Eq (Var %guard.13) (Var %guard.12))
         (Eq (Var %guard.16) (Var %guard.15)))))
      (axioms
-      (((guard ((Eq (Var %guard.13) (Var %guard.12)))) (bound (x.bound.11))
-        (triggers (((App f ((Var x.bound.11))))))
+      (((guard
+         (((atom (Eq (Var %guard.13) (Var %guard.12))) (polarity Positive))))
+        (bound (x.bound.11)) (triggers (((App f ((Var x.bound.11))))))
         (body (Eq (App f ((Var x.bound.11))) (Var x.bound.11))))
-       ((guard ((Eq (Var %guard.16) (Var %guard.15)))) (bound (x.bound.14))
-        (triggers (((App f ((Var x.bound.14))))))
+       ((guard
+         (((atom (Eq (Var %guard.16) (Var %guard.15))) (polarity Positive))))
+        (bound (x.bound.14)) (triggers (((App f ((Var x.bound.14))))))
         (body (Not (Eq (App f ((Var x.bound.14))) (Var x.bound.14))))))))
     |}]
 ;;
@@ -788,11 +816,11 @@ let%expect_test "produce_proofs: alternating proof rejects reused existential \
     |}]
 ;;
 
-(* A quantifier nested inside boolean structure keeps the guard encoding, whose
-   guard atom is synthetic -- so a refutation depending on it declines to
-   produce a real proof (the documented fallback), while still solving. *)
-let%expect_test "produce_proofs: a nested quantifier still solves but declines \
-                 a proof"
+(* A positive guarded universal is cited through its fresh-guard definition, so
+   the guarded instance has a checked proof instead of forcing the old synthetic
+   fallback. *)
+let%expect_test "produce_proofs: a nested positive quantifier yields a checked \
+                 proof"
   =
   let qs =
     Quantifier_solver.create
@@ -822,9 +850,49 @@ let%expect_test "produce_proofs: a nested quantifier still solves but declines \
       ignore (Quantifier_solver.assert_formula qs formula : _ Or_error.t));
   (match Quantifier_solver.solve qs ~max_rounds:2 with
    | Sat _ | Unknown_but_possibly_sat _ -> print_endline "unexpected sat"
-   | Unsat { proof = None; _ } -> print_endline "unsat, no proof (nested)"
-   | Unsat { proof = Some _; _ } -> print_endline "unexpected proof");
-  [%expect {| unsat, no proof (nested) |}]
+   | Unsat { proof = None; _ } -> print_endline "no proof produced"
+   | Unsat { proof = Some proof; _ } ->
+     print_s [%message "" ~checked:(Or_error.is_ok (Proof.check proof) : bool)];
+     print_endline (Proof.to_string_hum proof));
+  [%expect
+    {|
+    (checked true)
+    Assumptions:
+      a0: ∀x.bound.42. %guard.44 ≠ %guard.43 ∨ f(x.bound.42) = x.bound.42
+      a1: bool ≠ int
+      a2: bool ≠ float
+      a3: int ≠ float
+      a4: c = d ∨ %guard.44 = %guard.43
+      a5: c ≠ d
+      a6: a = b
+      a7: f(a) ≠ b
+    Steps:
+      s0: ∀x.bound.42. %guard.44 ≠ %guard.43 ∨ f(x.bound.42) = x.bound.42   [assumption a0]
+      s1: bool ≠ int   [assumption a1]
+      s2: bool ≠ float   [assumption a2]
+      s3: int ≠ float   [assumption a3]
+      s4: c = d ∨ %guard.44 = %guard.43   [assumption a4]
+      s5: c ≠ d   [assumption a5]
+      s6: a = b   [assumption a6]
+      s7: f(a) ≠ b   [assumption a7]
+      s8: %guard.44 ≠ %guard.43 ∨ f(a) = a   [∀-instantiation {x.bound.42 := a} over [s0]]
+      s9: false   [refutation of [s1, s2, s3, s4, s5, s6, s7, s8]]
+        refutation:
+          extensions:
+            e0 := (c = d ∨ %guard.43 = %guard.44)
+            e1 := (¬(%guard.43 = %guard.44) ∨ a = f(a))
+          steps:
+            r0: c = d ∨ %guard.43 = %guard.44 ∨ ¬(e0)   [definition of e0]
+            r1: e0   [s4]
+            r2: c ≠ d   [s5]
+            r3: a = b   [s6]
+            r4: b ≠ f(a)   [s7]
+            r5: a = f(a) ∨ %guard.43 ≠ %guard.44 ∨ ¬(e1)   [definition of e1]
+            r6: e1   [s8]
+            r7: a ≠ b ∨ a ≠ f(a) ∨ b = f(a)   [EUF: b = f(a) via [a = b; a = f(a)]]
+            r8: ⊥   [RUP over [r1, r2, r3, r4, r6, r7, r0, r5]]
+    Conclusion: s9
+    |}]
 ;;
 
 (* A single universal that must be instantiated at TWO distinct, unrelated terms
@@ -1088,8 +1156,9 @@ let%expect_test "nested forall-exists: Skolem depends on enclosing universal" =
     {|
     ((ground (Eq (Var %guard.53) (Var %guard.52)))
      (axioms
-      (((guard ((Eq (Var %guard.53) (Var %guard.52)))) (bound (x.bound.50))
-        (triggers (((Var x.bound.50))))
+      (((guard
+         (((atom (Eq (Var %guard.53) (Var %guard.52))) (polarity Positive))))
+        (bound (x.bound.50)) (triggers (((Var x.bound.50))))
         (body
          (Eq (App f ((Var x.bound.50) (App %skolem.51 ((Var x.bound.50)))))
           (Var x.bound.50)))))))
@@ -1111,8 +1180,9 @@ let%expect_test "outer exists remains a ground Skolem, inner forall is hoisted" 
     {|
     ((ground (Eq (Var %guard.57) (Var %guard.56)))
      (axioms
-      (((guard ((Eq (Var %guard.57) (Var %guard.56)))) (bound (y.bound.55))
-        (triggers (((Var y.bound.55))))
+      (((guard
+         (((atom (Eq (Var %guard.57) (Var %guard.56))) (polarity Positive))))
+        (bound (y.bound.55)) (triggers (((Var y.bound.55))))
         (body (Eq (App h ((Var %skolem.54) (Var y.bound.55))) (Var y.bound.55)))))))
     |}]
 ;;
@@ -1133,7 +1203,8 @@ let%expect_test "nested foralls are prenexed into one axiom" =
     {|
     ((ground (Eq (Var %guard.61) (Var %guard.60)))
      (axioms
-      (((guard ((Eq (Var %guard.61) (Var %guard.60))))
+      (((guard
+         (((atom (Eq (Var %guard.61) (Var %guard.60))) (polarity Positive))))
         (bound (x.bound.58 y.bound.59))
         (triggers (((Var x.bound.58) (Var y.bound.59))))
         (body (Eq (App f ((Var x.bound.58) (Var y.bound.59))) (Var x.bound.58)))))))
@@ -1161,7 +1232,8 @@ let%expect_test "universal inside boolean structure of an axiom is hoisted" =
     {|
     ((ground (Eq (Var %guard.65) (Var %guard.64)))
      (axioms
-      (((guard ((Eq (Var %guard.65) (Var %guard.64))))
+      (((guard
+         (((atom (Eq (Var %guard.65) (Var %guard.64))) (polarity Positive))))
         (bound (x.bound.62 y.bound.63))
         (triggers
          (((App p ((Var x.bound.62)))
@@ -1191,7 +1263,8 @@ let%expect_test "hoisted trigger groups are concatenated" =
     {|
     ((ground (Eq (Var %guard.69) (Var %guard.68)))
      (axioms
-      (((guard ((Eq (Var %guard.69) (Var %guard.68))))
+      (((guard
+         (((atom (Eq (Var %guard.69) (Var %guard.68))) (polarity Positive))))
         (bound (x.bound.66 y.bound.67))
         (triggers (((App f ((Var x.bound.66))) (App g ((Var y.bound.67))))))
         (body (Eq (App f ((Var x.bound.66))) (App g ((Var y.bound.67)))))))))
@@ -1220,8 +1293,9 @@ let%expect_test "negative forall under universal Skolemizes with enclosing \
     {|
     ((ground (Eq (Var %guard.73) (Var %guard.72)))
      (axioms
-      (((guard ((Eq (Var %guard.73) (Var %guard.72)))) (bound (x.bound.70))
-        (triggers (((App p ((Var x.bound.70))))))
+      (((guard
+         (((atom (Eq (Var %guard.73) (Var %guard.72))) (polarity Positive))))
+        (bound (x.bound.70)) (triggers (((App p ((Var x.bound.70))))))
         (body
          (Not
           (Eq (App q ((Var x.bound.70) (App %skolem.71 ((Var x.bound.70)))))
@@ -1255,7 +1329,8 @@ let%expect_test "negative exists under universal hoists and scopes deeper \
     {|
     ((ground (Eq (Var %guard.78) (Var %guard.77)))
      (axioms
-      (((guard ((Eq (Var %guard.78) (Var %guard.77))))
+      (((guard
+         (((atom (Eq (Var %guard.78) (Var %guard.77))) (polarity Positive))))
         (bound (x.bound.74 y.bound.75)) (triggers (((App p ((Var x.bound.74))))))
         (body
          (Eq
@@ -1299,8 +1374,9 @@ let%expect_test "soundness: exact forall x exists y. y <> x is not refuted" =
     {|
     ((ground (Eq (Var %guard.82) (Var %guard.81)))
      (axioms
-      (((guard ((Eq (Var %guard.82) (Var %guard.81)))) (bound (x.bound.79))
-        (triggers (((App h ((Var x.bound.79))))))
+      (((guard
+         (((atom (Eq (Var %guard.82) (Var %guard.81))) (polarity Positive))))
+        (bound (x.bound.79)) (triggers (((App h ((Var x.bound.79))))))
         (body (Not (Eq (App %skolem.80 ((Var x.bound.79))) (Var x.bound.79)))))))
      (instances ((Not (Eq (App %skolem.80 ((Var a))) (Var a))))))
     Unknown_but_possibly_sat
@@ -1339,8 +1415,9 @@ let%expect_test "soundness: triggered forall-exists does not expose c <> c" =
     {|
     ((ground (Eq (Var %guard.90) (Var %guard.89)))
      (axioms
-      (((guard ((Eq (Var %guard.90) (Var %guard.89)))) (bound (x.bound.87))
-        (triggers (((App h ((Var x.bound.87))))))
+      (((guard
+         (((atom (Eq (Var %guard.90) (Var %guard.89))) (polarity Positive))))
+        (bound (x.bound.87)) (triggers (((App h ((Var x.bound.87))))))
         (body
          (And
           ((Not (Eq (App %skolem.88 ((Var x.bound.87))) (Var x.bound.87)))
@@ -1429,8 +1506,9 @@ let%expect_test "term ITE in an axiom body expands at the ground instance" =
     {|
     ((ground (Eq (Var %guard.105) (Var %guard.104)))
      (axioms
-      (((guard ((Eq (Var %guard.105) (Var %guard.104)))) (bound (x.bound.103))
-        (triggers (((App h ((Var x.bound.103))))))
+      (((guard
+         (((atom (Eq (Var %guard.105) (Var %guard.104))) (polarity Positive))))
+        (bound (x.bound.103)) (triggers (((App h ((Var x.bound.103))))))
         (body (Eq (Ite (Eq (Var x.bound.103) (Var a)) (Var b) (Var c)) (Var c)))))))
     (Unsat
      (core
@@ -1441,4 +1519,90 @@ let%expect_test "term ITE in an axiom body expands at the ground instance" =
           (And ((Not (Eq (Var a) (Var a))) (Eq (Var c) (Var c)))))))
        (Asserted (Not (Eq (Var b) (Var c)))))))
     |}]
+;;
+
+let%expect_test "elaboration: positive guarded forall has a prenexed definition"
+  =
+  print_elaborate_with_definitions (Or [ Eq (a, a); forall (Eq (fg xg, xg)) ]);
+  [%expect
+    {|
+    ((ground (Or ((Eq (Var a) (Var a)) (Eq (Var %guard.109) (Var %guard.108)))))
+     (axioms
+      (((guard
+         (((atom (Eq (Var %guard.109) (Var %guard.108))) (polarity Positive))))
+        (bound (x.bound.107)) (triggers (((App f ((Var x.bound.107))))))
+        (body (Eq (App f ((Var x.bound.107))) (Var x.bound.107))))))
+     (definitions
+      ((Forall (x.bound.107) (((App f ((Var x.bound.107)))))
+        (Or
+         ((Not (Eq (Var %guard.109) (Var %guard.108)))
+          (Eq (App f ((Var x.bound.107))) (Var x.bound.107))))))))
+    |}]
+;;
+
+let%expect_test "elaboration: negated exists source also has a positive guard \
+                 definition"
+  =
+  print_elaborate_with_definitions (Not (exists (Eq (fg xg, xg))));
+  [%expect
+    {|
+    ((ground (Eq (Var %guard.112) (Var %guard.111)))
+     (axioms
+      (((guard
+         (((atom (Eq (Var %guard.112) (Var %guard.111))) (polarity Positive))))
+        (bound (x.bound.110)) (triggers ())
+        (body (Not (Eq (App f ((Var x.bound.110))) (Var x.bound.110)))))))
+     (definitions
+      ((Forall (x.bound.110) ()
+        (Or
+         ((Not (Eq (Var %guard.112) (Var %guard.111)))
+          (Not (Eq (App f ((Var x.bound.110))) (Var x.bound.110)))))))))
+    |}]
+;;
+
+let%expect_test "guarded universal remains possibly satisfiable when the guard \
+                 can be falsified"
+  =
+  let qs = Quantifier_solver.create () in
+  let f arg : Formula.any = App (Tvar.of_string "f", [ arg ]) in
+  let x = Tvar.of_string "x" in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let c : Formula.any = Var (Tvar.of_string "c") in
+  let guarded_false : Formula.quantified =
+    Or
+      [ Formula.widen_quantified (Eq (c, c))
+      ; forall_raw ([ x ], [ [ f (Var x) ] ], False)
+      ]
+  in
+  List.iter
+    [ guarded_false; Formula.widen_quantified (Eq (f a, f a)) ]
+    ~f:(fun formula ->
+      ignore (Quantifier_solver.assert_formula qs formula : _ Or_error.t));
+  (match Quantifier_solver.solve qs ~max_rounds:2 with
+   | Sat _ -> print_endline "unexpected definite Sat"
+   | Unknown_but_possibly_sat _ -> print_endline "Unknown_but_possibly_sat"
+   | Unsat _ as r -> print_s [%sexp (r : Quantifier_solver.Result.t)]);
+  [%expect {| Unknown_but_possibly_sat |}]
+;;
+
+let%expect_test "produce_proofs: push scope conflicts still decline a proof" =
+  let qs =
+    Quantifier_solver.create
+      ~config:{ Solver.Config.default with produce_proofs = true }
+      ()
+  in
+  let a : Formula.any = Var (Tvar.of_string "a") in
+  let b : Formula.any = Var (Tvar.of_string "b") in
+  Quantifier_solver.push qs;
+  List.iter
+    [ Formula.widen_quantified (Eq (a, b))
+    ; Formula.widen_quantified (Not (Eq (a, b)))
+    ]
+    ~f:(fun formula ->
+      ignore (Quantifier_solver.assert_formula qs formula : _ Or_error.t));
+  (match Quantifier_solver.solve qs ~max_rounds:1 with
+   | Sat _ | Unknown_but_possibly_sat _ -> print_endline "unexpected sat"
+   | Unsat { proof = None; _ } -> print_endline "unsat, no proof (push scope)"
+   | Unsat { proof = Some _; _ } -> print_endline "unexpected proof");
+  [%expect {| unsat, no proof (push scope) |}]
 ;;
