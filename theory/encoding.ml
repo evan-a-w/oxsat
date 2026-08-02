@@ -182,6 +182,7 @@ let true_literal t ~clauses =
   | This var -> var
   | Null ->
     let var = fresh_var t in
+    if t.produce_proofs then Hashtbl.set t.tseitin_defs ~key:var ~data:(And []);
     Vec.Value.push clauses [| var |];
     t.true_var <- This var;
     var
