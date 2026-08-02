@@ -598,6 +598,15 @@ let%expect_test "guarded ADT completeness proof certificate is accepted" =
   [%expect {| (Ok ()) |}]
 ;;
 
+let%expect_test "ADT proof for match-shaped Boolean ite" =
+  let solver = create_solver ~produce_proofs:true () in
+  let x = v "x" in
+  let result = cons x nil in
+  assert_ok solver (Not (Ite (is_cons result, eq (head result) x, False)));
+  print_proof_result (Solver.solve solver);
+  [%expect {| (Unsat (proof_check (Ok ()))) |}]
+;;
+
 let%expect_test "ADT proof certificates" =
   let cases =
     [ ( create_solver
