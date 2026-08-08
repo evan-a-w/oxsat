@@ -45,7 +45,8 @@ type _ t =
   (* Types *)
   | Bool : [> `Type ] t
   | Int : [> `Type ] t
-  | Float : [> `Type ] t
+  | Real : [> `Type ] t
+  | Int64 : [> `Type ] t
   | Type : [> `Type ] t
   | Function_type : 'a t * 'a t -> ([> `Type ] as 'a) t
   | Array_type : 'a t * 'a t -> ([> `Type ] as 'a) t
@@ -82,7 +83,8 @@ module Op = struct
     | Datatype_tester of Datatype.Constructor.t
     | Bool
     | Int
-    | Float
+    | Real
+    | Int64
     | Type
     | Function_type
     | Array_type
@@ -122,7 +124,8 @@ let op : type a. a t -> Op.t =
   | Datatype_tester (constructor, _) -> Datatype_tester constructor
   | Bool -> Bool
   | Int -> Int
-  | Float -> Float
+  | Real -> Real
+  | Int64 -> Int64
   | Type -> Type
   | Function_type _ -> Function_type
   | Array_type _ -> Array_type
@@ -209,7 +212,8 @@ let args (type a) (t : a t) : any list =
   | Datatype_tester (_, arg) -> [ widen arg ]
   | Bool -> []
   | Int -> []
-  | Float -> []
+  | Real -> []
+  | Int64 -> []
   | Type -> []
   | Function_type (a, b) -> [ widen a; widen b ]
   | Array_type (index, element) -> [ widen index; widen element ]
@@ -249,7 +253,8 @@ let quantified_args (q : quantified) : quantified list =
   | Datatype_tester (_, arg) -> [ widen_quantified arg ]
   | Bool -> []
   | Int -> []
-  | Float -> []
+  | Real -> []
+  | Int64 -> []
   | Type -> []
   | Function_type (a, b) -> [ widen_quantified a; widen_quantified b ]
   | Array_type (index, element) ->
@@ -290,7 +295,8 @@ let make_opt ~(op : Op.t) ~(args : any list) : any option =
     Some (Datatype_tester (constructor, arg))
   | Bool, [] -> Some Bool
   | Int, [] -> Some Int
-  | Float, [] -> Some Float
+  | Real, [] -> Some Real
+  | Int64, [] -> Some Int64
   | Type, [] -> Some Type
   | Function_type, [ a; b ] -> Some (Function_type (a, b))
   | Array_type, [ index; element ] -> Some (Array_type (index, element))
@@ -313,7 +319,8 @@ let make_opt ~(op : Op.t) ~(args : any list) : any option =
       | Datatype_tester _
       | Bool
       | Int
-      | Float
+      | Real
+      | Int64
       | Type
       | Function_type
       | Array_type
@@ -332,7 +339,8 @@ let rec type_expr_to_formula : Type_expr.t -> any = function
   | Var v -> Type_var v
   | Base Bool -> Bool
   | Base Int -> Int
-  | Base Float -> Float
+  | Base Real -> Real
+  | Base Int64 -> Int64
   | Type_of v -> Type_of (Var v)
   | App (f, args) -> Type_app (f, List.map args ~f:type_expr_to_formula)
   | Type -> Type
@@ -511,7 +519,8 @@ let rec substitute_quantified (subst : any Tvar.Map.t) (formula : quantified)
     Datatype_tester (constructor, arg)
   | Bool -> Ok Bool
   | Int -> Ok Int
-  | Float -> Ok Float
+  | Real -> Ok Real
+  | Int64 -> Ok Int64
   | Type -> Ok Type
   | Function_type (a, b) ->
     let%map a = substitute_quantified subst (widen_quantified a)
@@ -597,7 +606,8 @@ let rec sexp_of_t : type a. (a -> Sexp.t) -> a t -> Sexp.t =
       [ [%sexp_of: Datatype.Constructor.t] constructor; sexp_of_sub arg ]
   | Bool -> Sexp.Atom "Bool"
   | Int -> Sexp.Atom "Int"
-  | Float -> Sexp.Atom "Float"
+  | Real -> Sexp.Atom "Real"
+  | Int64 -> Sexp.Atom "Int64"
   | Type -> Sexp.Atom "Type"
   | Function_type (a, b) ->
     node "Function_type" [ sexp_of_sub a; sexp_of_sub b ]
@@ -646,7 +656,9 @@ let rec any_of_sexp sexp : any =
   | Sexp.Atom "False" -> False
   | Sexp.Atom "Bool" -> Bool
   | Sexp.Atom "Int" -> Int
-  | Sexp.Atom "Float" -> Float
+  | Sexp.Atom "Real" -> Real
+  | Sexp.Atom "Float" -> Real
+  | Sexp.Atom "Int64" -> Int64
   | Sexp.Atom "Type" -> Type
   | Sexp.Atom _ -> fail ()
   | Sexp.List (Sexp.Atom tag :: args) ->
@@ -738,17 +750,18 @@ let rank : type a. a t -> int = function
   | Datatype_tester _ -> 15
   | Bool -> 16
   | Int -> 17
-  | Float -> 18
-  | Type -> 19
-  | Function_type _ -> 20
-  | Array_type _ -> 21
-  | Type_of _ -> 22
-  | Type_var _ -> 23
-  | Type_app _ -> 24
-  | La_const _ -> 25
-  | La_scale_const _ -> 26
-  | La_add _ -> 27
-  | La_compare _ -> 28
+  | Real -> 18
+  | Int64 -> 19
+  | Type -> 20
+  | Function_type _ -> 21
+  | Array_type _ -> 22
+  | Type_of _ -> 23
+  | Type_var _ -> 24
+  | Type_app _ -> 25
+  | La_const _ -> 26
+  | La_scale_const _ -> 27
+  | La_add _ -> 28
+  | La_compare _ -> 29
 ;;
 
 let lex first second = if first <> 0 then first else second ()
@@ -806,7 +819,8 @@ let rec compare_poly : type a b. a t -> b t -> int =
       (fun () -> compare_poly a1 a2)
   | Bool, Bool -> 0
   | Int, Int -> 0
-  | Float, Float -> 0
+  | Real, Real -> 0
+  | Int64, Int64 -> 0
   | Type, Type -> 0
   | Function_type (a1, b1), Function_type (a2, b2) ->
     lex (compare_poly a1 a2) (fun () -> compare_poly b1 b2)
@@ -846,7 +860,8 @@ let rec compare_poly : type a b. a t -> b t -> int =
   | Datatype_tester _, _
   | Bool, _
   | Int, _
-  | Float, _
+  | Real, _
+  | Int64, _
   | Type, _
   | Function_type _, _
   | Array_type _, _
@@ -883,7 +898,8 @@ let rec hash_fold_poly : type a. Hash.state -> a t -> Hash.state =
   | False -> state
   | Bool -> state
   | Int -> state
-  | Float -> state
+  | Real -> state
+  | Int64 -> state
   | Type -> state
   | Not f -> hash_fold_poly state f
   | And fs -> hash_fold_list_poly hash_fold_poly state fs

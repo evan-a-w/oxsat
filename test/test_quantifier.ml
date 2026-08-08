@@ -323,7 +323,7 @@ let%expect_test "max_rounds bounds an axiom whose instances keep matching \
     |> List.length
   in
   print_s [%message "" (term_count : int)];
-  [%expect {| (term_count 10) |}]
+  [%expect {| (term_count 11) |}]
 ;;
 
 let%expect_test "produce_proofs: a quantifier-driven unsat yields a checked \
@@ -363,27 +363,33 @@ let%expect_test "produce_proofs: a quantifier-driven unsat yields a checked \
     Assumptions:
       a0: ∀x.bound.20. f(x.bound.20) = x.bound.20
       a1: bool ≠ int
-      a2: bool ≠ float
-      a3: int ≠ float
-      a4: a = b
-      a5: f(a) ≠ b
+      a2: bool ≠ real
+      a3: bool ≠ int64
+      a4: int ≠ real
+      a5: int ≠ int64
+      a6: real ≠ int64
+      a7: a = b
+      a8: f(a) ≠ b
     Steps:
       s0: ∀x.bound.20. f(x.bound.20) = x.bound.20   [assumption a0]
       s1: bool ≠ int   [assumption a1]
-      s2: bool ≠ float   [assumption a2]
-      s3: int ≠ float   [assumption a3]
-      s4: a = b   [assumption a4]
-      s5: f(a) ≠ b   [assumption a5]
-      s6: f(a) = a   [∀-instantiation {x.bound.20 := a} over [s0]]
-      s7: false   [refutation of [s1, s2, s3, s4, s5, s6]]
+      s2: bool ≠ real   [assumption a2]
+      s3: bool ≠ int64   [assumption a3]
+      s4: int ≠ real   [assumption a4]
+      s5: int ≠ int64   [assumption a5]
+      s6: real ≠ int64   [assumption a6]
+      s7: a = b   [assumption a7]
+      s8: f(a) ≠ b   [assumption a8]
+      s9: f(a) = a   [∀-instantiation {x.bound.20 := a} over [s0]]
+      s10: false   [refutation of [s1, s2, s3, s4, s5, s6, s7, s8, s9]]
         refutation:
           steps:
-            r0: a = b   [s4]
-            r1: b ≠ f(a)   [s5]
-            r2: a = f(a)   [s6]
+            r0: a = b   [s7]
+            r1: b ≠ f(a)   [s8]
+            r2: a = f(a)   [s9]
             r3: a ≠ b ∨ a ≠ f(a) ∨ b = f(a)   [EUF: b = f(a) via [a = b; a = f(a)]]
             r4: ⊥   [RUP over [r0, r1, r2, r3]]
-    Conclusion: s7
+    Conclusion: s10
     |}]
 ;;
 
@@ -426,15 +432,21 @@ let%expect_test "produce_proofs: a bare existential drives a checked, fully \
     Assumptions:
       a0: ∃x. f(x) = a ∧ g(x) = a ∧ f(x) ≠ g(x)
       a1: bool ≠ int
-      a2: bool ≠ float
-      a3: int ≠ float
+      a2: bool ≠ real
+      a3: bool ≠ int64
+      a4: int ≠ real
+      a5: int ≠ int64
+      a6: real ≠ int64
     Steps:
       s0: ∃x. f(x) = a ∧ g(x) = a ∧ f(x) ≠ g(x)   [assumption a0]
       s1: bool ≠ int   [assumption a1]
-      s2: bool ≠ float   [assumption a2]
-      s3: int ≠ float   [assumption a3]
-      s4: f(%skolem.21) = a ∧ g(%skolem.21) = a ∧ f(%skolem.21) ≠ g(%skolem.21)   [∃-elimination {x := %skolem.21} over [s0]]
-      s5: false   [refutation of [s1, s2, s3, s4]]
+      s2: bool ≠ real   [assumption a2]
+      s3: bool ≠ int64   [assumption a3]
+      s4: int ≠ real   [assumption a4]
+      s5: int ≠ int64   [assumption a5]
+      s6: real ≠ int64   [assumption a6]
+      s7: f(%skolem.21) = a ∧ g(%skolem.21) = a ∧ f(%skolem.21) ≠ g(%skolem.21)   [∃-elimination {x := %skolem.21} over [s0]]
+      s8: false   [refutation of [s1, s2, s3, s4, s5, s6, s7]]
         refutation:
           extensions:
             e0 := (a = f(%skolem.21) ∧ a = g(%skolem.21) ∧ ¬(f(%skolem.21) = g(%skolem.21)))
@@ -442,10 +454,10 @@ let%expect_test "produce_proofs: a bare existential drives a checked, fully \
             r0: a = f(%skolem.21) ∨ ¬(e0)   [definition of e0]
             r1: a = g(%skolem.21) ∨ ¬(e0)   [definition of e0]
             r2: f(%skolem.21) ≠ g(%skolem.21) ∨ ¬(e0)   [definition of e0]
-            r3: e0   [s4]
+            r3: e0   [s7]
             r4: a ≠ f(%skolem.21) ∨ a ≠ g(%skolem.21) ∨ f(%skolem.21) = g(%skolem.21)   [EUF: f(%skolem.21) = g(%skolem.21) via [a = f(%skolem.21); a = g(%skolem.21)]]
             r5: ⊥   [RUP over [r3, r0, r1, r2, r4]]
-    Conclusion: s5
+    Conclusion: s8
     |}]
 ;;
 
@@ -489,28 +501,34 @@ let%expect_test "produce_proofs: forall + existential in one top-level \
       a0: ∀y.bound.22. f(y.bound.22) = y.bound.22
       a1: ∃x. f(x) = c ∧ x ≠ c
       a2: bool ≠ int
-      a3: bool ≠ float
-      a4: int ≠ float
+      a3: bool ≠ real
+      a4: bool ≠ int64
+      a5: int ≠ real
+      a6: int ≠ int64
+      a7: real ≠ int64
     Steps:
       s0: ∀y.bound.22. f(y.bound.22) = y.bound.22   [assumption a0]
       s1: ∃x. f(x) = c ∧ x ≠ c   [assumption a1]
       s2: bool ≠ int   [assumption a2]
-      s3: bool ≠ float   [assumption a3]
-      s4: int ≠ float   [assumption a4]
-      s5: f(%skolem.23) = c ∧ %skolem.23 ≠ c   [∃-elimination {x := %skolem.23} over [s1]]
-      s6: f(%skolem.23) = %skolem.23   [∀-instantiation {y.bound.22 := %skolem.23} over [s0]]
-      s7: false   [refutation of [s2, s3, s4, s5, s6]]
+      s3: bool ≠ real   [assumption a3]
+      s4: bool ≠ int64   [assumption a4]
+      s5: int ≠ real   [assumption a5]
+      s6: int ≠ int64   [assumption a6]
+      s7: real ≠ int64   [assumption a7]
+      s8: f(%skolem.23) = c ∧ %skolem.23 ≠ c   [∃-elimination {x := %skolem.23} over [s1]]
+      s9: f(%skolem.23) = %skolem.23   [∀-instantiation {y.bound.22 := %skolem.23} over [s0]]
+      s10: false   [refutation of [s2, s3, s4, s5, s6, s7, s8, s9]]
         refutation:
           extensions:
             e0 := (c = f(%skolem.23) ∧ ¬(c = %skolem.23))
           steps:
             r0: c = f(%skolem.23) ∨ ¬(e0)   [definition of e0]
             r1: c ≠ %skolem.23 ∨ ¬(e0)   [definition of e0]
-            r2: e0   [s5]
-            r3: %skolem.23 = f(%skolem.23)   [s6]
+            r2: e0   [s8]
+            r3: %skolem.23 = f(%skolem.23)   [s9]
             r4: c = %skolem.23 ∨ c ≠ f(%skolem.23) ∨ %skolem.23 ≠ f(%skolem.23)   [EUF: c = %skolem.23 via [c = f(%skolem.23); %skolem.23 = f(%skolem.23)]]
             r5: ⊥   [RUP over [r2, r3, r0, r1, r4]]
-    Conclusion: s7
+    Conclusion: s10
     |}]
 ;;
 
@@ -560,27 +578,33 @@ let%expect_test "produce_proofs: forall-exists alternation instantiates then \
     Assumptions:
       a0: ∀x.bound.24. ∃y.bound.25. f(x.bound.24) = y.bound.25 ∧ f(x.bound.24) ≠ y.bound.25
       a1: bool ≠ int
-      a2: bool ≠ float
-      a3: int ≠ float
-      a4: h(a) = h(a)
+      a2: bool ≠ real
+      a3: bool ≠ int64
+      a4: int ≠ real
+      a5: int ≠ int64
+      a6: real ≠ int64
+      a7: h(a) = h(a)
     Steps:
       s0: ∀x.bound.24. ∃y.bound.25. f(x.bound.24) = y.bound.25 ∧ f(x.bound.24) ≠ y.bound.25   [assumption a0]
       s1: bool ≠ int   [assumption a1]
-      s2: bool ≠ float   [assumption a2]
-      s3: int ≠ float   [assumption a3]
-      s4: h(a) = h(a)   [assumption a4]
-      s5: ∃y.bound.25. f(a) = y.bound.25 ∧ f(a) ≠ y.bound.25   [∀-instantiation {x.bound.24 := a} over [s0]]
-      s6: f(a) = %skolem.27 ∧ f(a) ≠ %skolem.27   [∃-elimination {y.bound.25 := %skolem.27} over [s5]]
-      s7: false   [refutation of [s1, s2, s3, s4, s6]]
+      s2: bool ≠ real   [assumption a2]
+      s3: bool ≠ int64   [assumption a3]
+      s4: int ≠ real   [assumption a4]
+      s5: int ≠ int64   [assumption a5]
+      s6: real ≠ int64   [assumption a6]
+      s7: h(a) = h(a)   [assumption a7]
+      s8: ∃y.bound.25. f(a) = y.bound.25 ∧ f(a) ≠ y.bound.25   [∀-instantiation {x.bound.24 := a} over [s0]]
+      s9: f(a) = %skolem.27 ∧ f(a) ≠ %skolem.27   [∃-elimination {y.bound.25 := %skolem.27} over [s8]]
+      s10: false   [refutation of [s1, s2, s3, s4, s5, s6, s7, s9]]
         refutation:
           extensions:
             e0 := (%skolem.27 = f(a) ∧ ¬(%skolem.27 = f(a)))
           steps:
             r0: %skolem.27 = f(a) ∨ ¬(e0)   [definition of e0]
             r1: %skolem.27 ≠ f(a) ∨ ¬(e0)   [definition of e0]
-            r2: e0   [s6]
+            r2: e0   [s9]
             r3: ⊥   [RUP over [r2, r0, r1]]
-    Conclusion: s7
+    Conclusion: s10
     |}]
 ;;
 
@@ -622,31 +646,37 @@ let%expect_test "produce_proofs: exists-forall alternation eliminates then \
     Assumptions:
       a0: ∃x.bound.28. ∀y.bound.30. f(y.bound.30) = x.bound.28
       a1: bool ≠ int
-      a2: bool ≠ float
-      a3: int ≠ float
-      a4: h(a) = h(a)
-      a5: h(b) = h(b)
-      a6: f(a) ≠ f(b)
+      a2: bool ≠ real
+      a3: bool ≠ int64
+      a4: int ≠ real
+      a5: int ≠ int64
+      a6: real ≠ int64
+      a7: h(a) = h(a)
+      a8: h(b) = h(b)
+      a9: f(a) ≠ f(b)
     Steps:
       s0: ∃x.bound.28. ∀y.bound.30. f(y.bound.30) = x.bound.28   [assumption a0]
       s1: bool ≠ int   [assumption a1]
-      s2: bool ≠ float   [assumption a2]
-      s3: int ≠ float   [assumption a3]
-      s4: h(a) = h(a)   [assumption a4]
-      s5: h(b) = h(b)   [assumption a5]
-      s6: f(a) ≠ f(b)   [assumption a6]
-      s7: ∀y.bound.30. f(y.bound.30) = %skolem.31   [∃-elimination {x.bound.28 := %skolem.31} over [s0]]
-      s8: f(a) = %skolem.31   [∀-instantiation {y.bound.30 := a} over [s7]]
-      s9: f(b) = %skolem.31   [∀-instantiation {y.bound.30 := b} over [s7]]
-      s10: false   [refutation of [s1, s2, s3, s4, s5, s6, s8, s9]]
+      s2: bool ≠ real   [assumption a2]
+      s3: bool ≠ int64   [assumption a3]
+      s4: int ≠ real   [assumption a4]
+      s5: int ≠ int64   [assumption a5]
+      s6: real ≠ int64   [assumption a6]
+      s7: h(a) = h(a)   [assumption a7]
+      s8: h(b) = h(b)   [assumption a8]
+      s9: f(a) ≠ f(b)   [assumption a9]
+      s10: ∀y.bound.30. f(y.bound.30) = %skolem.31   [∃-elimination {x.bound.28 := %skolem.31} over [s0]]
+      s11: f(a) = %skolem.31   [∀-instantiation {y.bound.30 := a} over [s10]]
+      s12: f(b) = %skolem.31   [∀-instantiation {y.bound.30 := b} over [s10]]
+      s13: false   [refutation of [s1, s2, s3, s4, s5, s6, s7, s8, s9, s11, s12]]
         refutation:
           steps:
-            r0: f(a) ≠ f(b)   [s6]
-            r1: %skolem.31 = f(a)   [s8]
-            r2: %skolem.31 = f(b)   [s9]
+            r0: f(a) ≠ f(b)   [s9]
+            r1: %skolem.31 = f(a)   [s11]
+            r2: %skolem.31 = f(b)   [s12]
             r3: %skolem.31 ≠ f(a) ∨ %skolem.31 ≠ f(b) ∨ f(a) = f(b)   [EUF: f(a) = f(b) via [%skolem.31 = f(a); %skolem.31 = f(b)]]
             r4: ⊥   [RUP over [r0, r1, r2, r3]]
-    Conclusion: s10
+    Conclusion: s13
     |}]
 ;;
 
@@ -690,39 +720,45 @@ let%expect_test "produce_proofs: forall-exists uses distinct witnesses at two \
     Assumptions:
       a0: ∀x.bound.32. ∃y.bound.33. f(x.bound.32) = y.bound.33 ∧ y.bound.33 = c
       a1: bool ≠ int
-      a2: bool ≠ float
-      a3: int ≠ float
-      a4: h(a) = h(a)
-      a5: h(b) = h(b)
-      a6: f(a) ≠ f(b)
+      a2: bool ≠ real
+      a3: bool ≠ int64
+      a4: int ≠ real
+      a5: int ≠ int64
+      a6: real ≠ int64
+      a7: h(a) = h(a)
+      a8: h(b) = h(b)
+      a9: f(a) ≠ f(b)
     Steps:
       s0: ∀x.bound.32. ∃y.bound.33. f(x.bound.32) = y.bound.33 ∧ y.bound.33 = c   [assumption a0]
       s1: bool ≠ int   [assumption a1]
-      s2: bool ≠ float   [assumption a2]
-      s3: int ≠ float   [assumption a3]
-      s4: h(a) = h(a)   [assumption a4]
-      s5: h(b) = h(b)   [assumption a5]
-      s6: f(a) ≠ f(b)   [assumption a6]
-      s7: ∃y.bound.33. f(a) = y.bound.33 ∧ y.bound.33 = c   [∀-instantiation {x.bound.32 := a} over [s0]]
-      s8: f(a) = %skolem.35 ∧ %skolem.35 = c   [∃-elimination {y.bound.33 := %skolem.35} over [s7]]
-      s9: ∃y.bound.33. f(b) = y.bound.33 ∧ y.bound.33 = c   [∀-instantiation {x.bound.32 := b} over [s0]]
-      s10: f(b) = %skolem.36 ∧ %skolem.36 = c   [∃-elimination {y.bound.33 := %skolem.36} over [s9]]
-      s11: false   [refutation of [s1, s2, s3, s4, s5, s6, s8, s10]]
+      s2: bool ≠ real   [assumption a2]
+      s3: bool ≠ int64   [assumption a3]
+      s4: int ≠ real   [assumption a4]
+      s5: int ≠ int64   [assumption a5]
+      s6: real ≠ int64   [assumption a6]
+      s7: h(a) = h(a)   [assumption a7]
+      s8: h(b) = h(b)   [assumption a8]
+      s9: f(a) ≠ f(b)   [assumption a9]
+      s10: ∃y.bound.33. f(a) = y.bound.33 ∧ y.bound.33 = c   [∀-instantiation {x.bound.32 := a} over [s0]]
+      s11: f(a) = %skolem.35 ∧ %skolem.35 = c   [∃-elimination {y.bound.33 := %skolem.35} over [s10]]
+      s12: ∃y.bound.33. f(b) = y.bound.33 ∧ y.bound.33 = c   [∀-instantiation {x.bound.32 := b} over [s0]]
+      s13: f(b) = %skolem.36 ∧ %skolem.36 = c   [∃-elimination {y.bound.33 := %skolem.36} over [s12]]
+      s14: false   [refutation of [s1, s2, s3, s4, s5, s6, s7, s8, s9, s11, s13]]
         refutation:
           extensions:
             e0 := (%skolem.35 = f(a) ∧ c = %skolem.35)
             e1 := (%skolem.36 = f(b) ∧ c = %skolem.36)
           steps:
-            r0: f(a) ≠ f(b)   [s6]
+            r0: f(a) ≠ f(b)   [s9]
             r1: %skolem.35 = f(a) ∨ ¬(e0)   [definition of e0]
             r2: c = %skolem.35 ∨ ¬(e0)   [definition of e0]
-            r3: e0   [s8]
+            r3: e0   [s11]
             r4: %skolem.36 = f(b) ∨ ¬(e1)   [definition of e1]
             r5: c = %skolem.36 ∨ ¬(e1)   [definition of e1]
-            r6: e1   [s10]
+            r6: e1   [s13]
             r7: c ≠ %skolem.35 ∨ c ≠ %skolem.36 ∨ %skolem.35 ≠ f(a) ∨ %skolem.36 ≠ f(b) ∨ f(a) = f(b)   [EUF: f(a) = f(b) via [%skolem.35 = f(a); c = %skolem.35; c = %skolem.36; %skolem.36 = f(b)]]
             r8: ⊥   [RUP over [r0, r3, r6, r1, r2, r4, r5, r7]]
-    Conclusion: s11
+    Conclusion: s14
     |}]
 ;;
 
@@ -860,38 +896,44 @@ let%expect_test "produce_proofs: a nested positive quantifier yields a checked \
     Assumptions:
       a0: ∀x.bound.42. %guard.44 ≠ %guard.43 ∨ f(x.bound.42) = x.bound.42
       a1: bool ≠ int
-      a2: bool ≠ float
-      a3: int ≠ float
-      a4: c = d ∨ %guard.44 = %guard.43
-      a5: c ≠ d
-      a6: a = b
-      a7: f(a) ≠ b
+      a2: bool ≠ real
+      a3: bool ≠ int64
+      a4: int ≠ real
+      a5: int ≠ int64
+      a6: real ≠ int64
+      a7: c = d ∨ %guard.44 = %guard.43
+      a8: c ≠ d
+      a9: a = b
+      a10: f(a) ≠ b
     Steps:
       s0: ∀x.bound.42. %guard.44 ≠ %guard.43 ∨ f(x.bound.42) = x.bound.42   [assumption a0]
       s1: bool ≠ int   [assumption a1]
-      s2: bool ≠ float   [assumption a2]
-      s3: int ≠ float   [assumption a3]
-      s4: c = d ∨ %guard.44 = %guard.43   [assumption a4]
-      s5: c ≠ d   [assumption a5]
-      s6: a = b   [assumption a6]
-      s7: f(a) ≠ b   [assumption a7]
-      s8: %guard.44 ≠ %guard.43 ∨ f(a) = a   [∀-instantiation {x.bound.42 := a} over [s0]]
-      s9: false   [refutation of [s1, s2, s3, s4, s5, s6, s7, s8]]
+      s2: bool ≠ real   [assumption a2]
+      s3: bool ≠ int64   [assumption a3]
+      s4: int ≠ real   [assumption a4]
+      s5: int ≠ int64   [assumption a5]
+      s6: real ≠ int64   [assumption a6]
+      s7: c = d ∨ %guard.44 = %guard.43   [assumption a7]
+      s8: c ≠ d   [assumption a8]
+      s9: a = b   [assumption a9]
+      s10: f(a) ≠ b   [assumption a10]
+      s11: %guard.44 ≠ %guard.43 ∨ f(a) = a   [∀-instantiation {x.bound.42 := a} over [s0]]
+      s12: false   [refutation of [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11]]
         refutation:
           extensions:
             e0 := (c = d ∨ %guard.43 = %guard.44)
             e1 := (¬(%guard.43 = %guard.44) ∨ a = f(a))
           steps:
             r0: c = d ∨ %guard.43 = %guard.44 ∨ ¬(e0)   [definition of e0]
-            r1: e0   [s4]
-            r2: c ≠ d   [s5]
-            r3: a = b   [s6]
-            r4: b ≠ f(a)   [s7]
+            r1: e0   [s7]
+            r2: c ≠ d   [s8]
+            r3: a = b   [s9]
+            r4: b ≠ f(a)   [s10]
             r5: a = f(a) ∨ %guard.43 ≠ %guard.44 ∨ ¬(e1)   [definition of e1]
-            r6: e1   [s8]
+            r6: e1   [s11]
             r7: a ≠ b ∨ a ≠ f(a) ∨ b = f(a)   [EUF: b = f(a) via [a = b; a = f(a)]]
             r8: ⊥   [RUP over [r1, r2, r3, r4, r6, r7, r0, r5]]
-    Conclusion: s9
+    Conclusion: s12
     |}]
 ;;
 
@@ -933,26 +975,32 @@ let%expect_test "produce_proofs: one universal instantiated at two terms" =
     Assumptions:
       a0: ∀x.bound.45. f(x.bound.45) = c
       a1: bool ≠ int
-      a2: bool ≠ float
-      a3: int ≠ float
-      a4: f(a) ≠ f(b)
+      a2: bool ≠ real
+      a3: bool ≠ int64
+      a4: int ≠ real
+      a5: int ≠ int64
+      a6: real ≠ int64
+      a7: f(a) ≠ f(b)
     Steps:
       s0: ∀x.bound.45. f(x.bound.45) = c   [assumption a0]
       s1: bool ≠ int   [assumption a1]
-      s2: bool ≠ float   [assumption a2]
-      s3: int ≠ float   [assumption a3]
-      s4: f(a) ≠ f(b)   [assumption a4]
-      s5: f(a) = c   [∀-instantiation {x.bound.45 := a} over [s0]]
-      s6: f(b) = c   [∀-instantiation {x.bound.45 := b} over [s0]]
-      s7: false   [refutation of [s1, s2, s3, s4, s5, s6]]
+      s2: bool ≠ real   [assumption a2]
+      s3: bool ≠ int64   [assumption a3]
+      s4: int ≠ real   [assumption a4]
+      s5: int ≠ int64   [assumption a5]
+      s6: real ≠ int64   [assumption a6]
+      s7: f(a) ≠ f(b)   [assumption a7]
+      s8: f(a) = c   [∀-instantiation {x.bound.45 := a} over [s0]]
+      s9: f(b) = c   [∀-instantiation {x.bound.45 := b} over [s0]]
+      s10: false   [refutation of [s1, s2, s3, s4, s5, s6, s7, s8, s9]]
         refutation:
           steps:
-            r0: f(a) ≠ f(b)   [s4]
-            r1: c = f(a)   [s5]
-            r2: c = f(b)   [s6]
+            r0: f(a) ≠ f(b)   [s7]
+            r1: c = f(a)   [s8]
+            r2: c = f(b)   [s9]
             r3: c ≠ f(a) ∨ c ≠ f(b) ∨ f(a) = f(b)   [EUF: f(a) = f(b) via [c = f(a); c = f(b)]]
             r4: ⊥   [RUP over [r0, r1, r2, r3]]
-    Conclusion: s7
+    Conclusion: s10
     |}]
 ;;
 
@@ -1620,23 +1668,29 @@ let%expect_test "produce_proofs: push scope conflicts produce a checked proof" =
     (checked true)
     Assumptions:
       a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: a = b
-      a4: a ≠ b
+      a1: bool ≠ real
+      a2: bool ≠ int64
+      a3: int ≠ real
+      a4: int ≠ int64
+      a5: real ≠ int64
+      a6: a = b
+      a7: a ≠ b
     Steps:
       s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: a = b   [assumption a3]
-      s4: a ≠ b   [assumption a4]
-      s5: false   [refutation of [s0, s1, s2, s3, s4]]
+      s1: bool ≠ real   [assumption a1]
+      s2: bool ≠ int64   [assumption a2]
+      s3: int ≠ real   [assumption a3]
+      s4: int ≠ int64   [assumption a4]
+      s5: real ≠ int64   [assumption a5]
+      s6: a = b   [assumption a6]
+      s7: a ≠ b   [assumption a7]
+      s8: false   [refutation of [s0, s1, s2, s3, s4, s5, s6, s7]]
         refutation:
           steps:
-            r0: a = b   [s3]
-            r1: a ≠ b   [s4]
+            r0: a = b   [s6]
+            r1: a ≠ b   [s7]
             r2: ⊥   [RUP over [r0, r1]]
-    Conclusion: s5
+    Conclusion: s8
     |}]
 ;;
 
@@ -1654,23 +1708,29 @@ let%expect_test "produce_proofs: nested push scopes produce a checked proof" =
     (checked true)
     Assumptions:
       a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: a = b
-      a4: a ≠ b
+      a1: bool ≠ real
+      a2: bool ≠ int64
+      a3: int ≠ real
+      a4: int ≠ int64
+      a5: real ≠ int64
+      a6: a = b
+      a7: a ≠ b
     Steps:
       s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: a = b   [assumption a3]
-      s4: a ≠ b   [assumption a4]
-      s5: false   [refutation of [s0, s1, s2, s3, s4]]
+      s1: bool ≠ real   [assumption a1]
+      s2: bool ≠ int64   [assumption a2]
+      s3: int ≠ real   [assumption a3]
+      s4: int ≠ int64   [assumption a4]
+      s5: real ≠ int64   [assumption a5]
+      s6: a = b   [assumption a6]
+      s7: a ≠ b   [assumption a7]
+      s8: false   [refutation of [s0, s1, s2, s3, s4, s5, s6, s7]]
         refutation:
           steps:
-            r0: a = b   [s3]
-            r1: a ≠ b   [s4]
+            r0: a = b   [s6]
+            r1: a ≠ b   [s7]
             r2: ⊥   [RUP over [r0, r1]]
-    Conclusion: s5
+    Conclusion: s8
     |}]
 ;;
 
@@ -1689,23 +1749,29 @@ let%expect_test "produce_proofs: scoped and base assertions mix in a checked \
     (checked true)
     Assumptions:
       a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: a = b
-      a4: a ≠ b
+      a1: bool ≠ real
+      a2: bool ≠ int64
+      a3: int ≠ real
+      a4: int ≠ int64
+      a5: real ≠ int64
+      a6: a = b
+      a7: a ≠ b
     Steps:
       s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: a = b   [assumption a3]
-      s4: a ≠ b   [assumption a4]
-      s5: false   [refutation of [s0, s1, s2, s3, s4]]
+      s1: bool ≠ real   [assumption a1]
+      s2: bool ≠ int64   [assumption a2]
+      s3: int ≠ real   [assumption a3]
+      s4: int ≠ int64   [assumption a4]
+      s5: real ≠ int64   [assumption a5]
+      s6: a = b   [assumption a6]
+      s7: a ≠ b   [assumption a7]
+      s8: false   [refutation of [s0, s1, s2, s3, s4, s5, s6, s7]]
         refutation:
           steps:
-            r0: a = b   [s3]
-            r1: a ≠ b   [s4]
+            r0: a = b   [s6]
+            r1: a ≠ b   [s7]
             r2: ⊥   [RUP over [r0, r1]]
-    Conclusion: s5
+    Conclusion: s8
     |}]
 ;;
 
@@ -1741,27 +1807,33 @@ let%expect_test "produce_proofs: popped scoped assertions are not cited" =
     ((checked true) (cites_retracted false))
     Assumptions:
       a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: a = b
-      a4: b = c
-      a5: a ≠ c
+      a1: bool ≠ real
+      a2: bool ≠ int64
+      a3: int ≠ real
+      a4: int ≠ int64
+      a5: real ≠ int64
+      a6: a = b
+      a7: b = c
+      a8: a ≠ c
     Steps:
       s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: a = b   [assumption a3]
-      s4: b = c   [assumption a4]
-      s5: a ≠ c   [assumption a5]
-      s6: false   [refutation of [s0, s1, s2, s3, s4, s5]]
+      s1: bool ≠ real   [assumption a1]
+      s2: bool ≠ int64   [assumption a2]
+      s3: int ≠ real   [assumption a3]
+      s4: int ≠ int64   [assumption a4]
+      s5: real ≠ int64   [assumption a5]
+      s6: a = b   [assumption a6]
+      s7: b = c   [assumption a7]
+      s8: a ≠ c   [assumption a8]
+      s9: false   [refutation of [s0, s1, s2, s3, s4, s5, s6, s7, s8]]
         refutation:
           steps:
-            r0: a = b   [s3]
-            r1: b = c   [s4]
-            r2: a ≠ c   [s5]
+            r0: a = b   [s6]
+            r1: b = c   [s7]
+            r2: a ≠ c   [s8]
             r3: a ≠ b ∨ a = c ∨ b ≠ c   [EUF: a = c via [a = b; b = c]]
             r4: ⊥   [RUP over [r0, r1, r2, r3]]
-    Conclusion: s6
+    Conclusion: s9
     |}]
 ;;
 
@@ -1790,27 +1862,33 @@ let%expect_test "produce_proofs: scoped conflict with quantifier instantiation \
     Assumptions:
       a0: ∀scoped_x.bound.116. scoped_f(scoped_x.bound.116) = scoped_x.bound.116
       a1: bool ≠ int
-      a2: bool ≠ float
-      a3: int ≠ float
-      a4: a = b
-      a5: scoped_f(a) ≠ b
+      a2: bool ≠ real
+      a3: bool ≠ int64
+      a4: int ≠ real
+      a5: int ≠ int64
+      a6: real ≠ int64
+      a7: a = b
+      a8: scoped_f(a) ≠ b
     Steps:
       s0: ∀scoped_x.bound.116. scoped_f(scoped_x.bound.116) = scoped_x.bound.116   [assumption a0]
       s1: bool ≠ int   [assumption a1]
-      s2: bool ≠ float   [assumption a2]
-      s3: int ≠ float   [assumption a3]
-      s4: a = b   [assumption a4]
-      s5: scoped_f(a) ≠ b   [assumption a5]
-      s6: scoped_f(a) = a   [∀-instantiation {scoped_x.bound.116 := a} over [s0]]
-      s7: false   [refutation of [s1, s2, s3, s4, s5, s6]]
+      s2: bool ≠ real   [assumption a2]
+      s3: bool ≠ int64   [assumption a3]
+      s4: int ≠ real   [assumption a4]
+      s5: int ≠ int64   [assumption a5]
+      s6: real ≠ int64   [assumption a6]
+      s7: a = b   [assumption a7]
+      s8: scoped_f(a) ≠ b   [assumption a8]
+      s9: scoped_f(a) = a   [∀-instantiation {scoped_x.bound.116 := a} over [s0]]
+      s10: false   [refutation of [s1, s2, s3, s4, s5, s6, s7, s8, s9]]
         refutation:
           steps:
-            r0: a = b   [s4]
-            r1: b ≠ scoped_f(a)   [s5]
-            r2: a = scoped_f(a)   [s6]
+            r0: a = b   [s7]
+            r1: b ≠ scoped_f(a)   [s8]
+            r2: a = scoped_f(a)   [s9]
             r3: a ≠ b ∨ a ≠ scoped_f(a) ∨ b = scoped_f(a)   [EUF: b = scoped_f(a) via [a = b; a = scoped_f(a)]]
             r4: ⊥   [RUP over [r0, r1, r2, r3]]
-    Conclusion: s7
+    Conclusion: s10
     |}]
 ;;
 

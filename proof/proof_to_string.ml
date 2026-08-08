@@ -8,7 +8,9 @@ open! Theory_core
 let q_to_string q =
   let num = Q.num q
   and den = Q.den q in
-  if den = 1 then Int.to_string num else sprintf "%d/%d" num den
+  if Bigint.(den = one)
+  then Bigint.to_string num
+  else sprintf "%s/%s" (Bigint.to_string num) (Bigint.to_string den)
 ;;
 
 let rec type_expr_to_string (t : Type_expr.t) =
@@ -19,7 +21,8 @@ let rec type_expr_to_string (t : Type_expr.t) =
   | Var v -> sprintf "typeof(%s)" (Tvar.to_string v)
   | Base Bool -> "bool"
   | Base Int -> "int"
-  | Base Float -> "float"
+  | Base Real -> "real"
+  | Base Int64 -> "int64"
   | Type_of v -> sprintf "typeof(%s)" (Tvar.to_string v)
   | App (f, args) ->
     sprintf
@@ -56,8 +59,14 @@ let linear_expr_to_string ({ coeffs; const } : Linear_expr.t) =
 
 let is_concrete_type (formula : Formula.any) =
   match formula with
-  | Bool | Int | Float | Type | Function_type _ | Array_type _ | Type_app _ ->
-    true
+  | Bool
+  | Int
+  | Real
+  | Int64
+  | Type
+  | Function_type _
+  | Array_type _
+  | Type_app _ -> true
   | _ -> false
 ;;
 
@@ -116,7 +125,8 @@ let rec formula_to_string (formula : Formula.any) =
       (formula_to_string argument)
   | Bool -> "bool"
   | Int -> "int"
-  | Float -> "float"
+  | Real -> "real"
+  | Int64 -> "int64"
   | Type -> "type"
   | Function_type (a, b) ->
     sprintf "(%s -> %s)" (formula_to_string a) (formula_to_string b)
@@ -229,6 +239,8 @@ let theory_atom_to_string (atom : Atom.t) =
     (match type_expr_judgement a b with
      | Some judgement -> judgement
      | None -> sprintf "%s = %s" (type_expr_to_string a) (type_expr_to_string b))
+  | `Has_type (v, type_expr) ->
+    sprintf "%s : %s" (Tvar.to_string v) (type_expr_to_string type_expr)
   | `Le (e, c) -> sprintf "%s ≤ %s" (linear_expr_to_string e) (q_to_string c)
 ;;
 
@@ -250,7 +262,8 @@ let negated_atom_to_string (atom : Proof_atom.t) =
     (match type_expr_judgement a b with
      | Some judgement -> sprintf "¬(%s)" judgement
      | None -> sprintf "%s ≠ %s" (type_expr_to_string a) (type_expr_to_string b))
-  | Theory (`Le _) | Extension _ -> sprintf "¬(%s)" (proof_atom_to_string atom)
+  | Theory (`Has_type _) | Theory (`Le _) | Extension _ ->
+    sprintf "¬(%s)" (proof_atom_to_string atom)
 ;;
 
 let literal_to_string (literal : Proof_literal.t) =
@@ -384,13 +397,19 @@ let certificate_to_string ~clause (certificate : Proof_theory_certificate.t) =
             if Q.equal coefficient Q.one
             then sprintf "(%s)" assumed
             else sprintf "%s·(%s)" (q_to_string coefficient) assumed)))
-  | Integer_split { variable; floor; ceil } ->
+  | Integer_split { guard; variable; floor; ceil } ->
     sprintf
-      "integer split: %s ≤ %s ∨ %s ≥ %s"
+      "integer split under %s: %s ≤ %s ∨ %s ≥ %s"
+      (theory_atom_to_string guard)
       (Tvar.to_string variable)
       (q_to_string floor)
       (Tvar.to_string variable)
       (q_to_string ceil)
+  | Type_domain { guard; consequence } ->
+    sprintf
+      "type-domain implication: %s ⟹ %s"
+      (theory_atom_to_string guard)
+      (theory_atom_to_string consequence)
   | Type_theory { left; right; premise_literals } ->
     sprintf
       "type clash: %s vs %s, given [%s]"
@@ -454,6 +473,15 @@ let certificate_to_string ~clause (certificate : Proof_theory_certificate.t) =
     (match certificate with
      | Equality_implies_type_equality (a, b) ->
        sprintf "%s = %s ⟹ types equal" (Tvar.to_string a) (Tvar.to_string b)
+     | Equality_implies_has_type { source; target; type_ } ->
+       sprintf
+         "%s = %s ∧ %s : %s ⟹ %s : %s"
+         (Tvar.to_string source)
+         (Tvar.to_string target)
+         (Tvar.to_string source)
+         (type_expr_to_string type_)
+         (Tvar.to_string target)
+         (type_expr_to_string type_)
      | Equality_implies_le { left; right; direction } ->
        let l, r =
          match direction with

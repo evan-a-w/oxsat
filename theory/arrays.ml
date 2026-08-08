@@ -14,10 +14,7 @@ module Type_premise = struct
   include functor Comparable.Make
   include functor Hashable.Make
 
-  let atom { var; type_expr } =
-    (Tvar_types.has_type var type_expr :> Atom.Equality.t)
-  ;;
-
+  let atom { var; type_expr } = (Tvar_types.has_type var type_expr :> Atom.t)
   let to_certificate { var; type_expr } = var, type_expr
 end
 
@@ -82,6 +79,10 @@ let add_atom t ~atom =
   note_array_shapes t right
 ;;
 
+let add_type t ~type_expr =
+  note_array_shapes t (Formula.type_expr_to_formula type_expr)
+;;
+
 let is_syntactic_array_term t = function
   | Formula.Store _ -> true
   | term -> Hash_set.mem t.array_terms term
@@ -132,12 +133,15 @@ let class_info info_by_repr egraph term =
   repr, Hashtbl.find info_by_repr repr
 ;;
 
-let eq left right : Atom.Equality.t = `Eq (left, right)
+let eq left right : Atom.t = `Eq (left, right)
 
 let register_lemma_atoms egraph literals =
   List.iter literals ~f:(fun (atom, _) ->
-    if Option.is_none (Formula_egraph_uf.atom_value egraph ~atom)
-    then Formula_egraph_uf.add_atom egraph ~atom)
+    match (atom : Atom.t) with
+    | #Atom.Equality.t as atom ->
+      if Option.is_none (Formula_egraph_uf.atom_value egraph ~atom)
+      then Formula_egraph_uf.add_atom egraph ~atom
+    | `Has_type _ | `Le _ -> ())
 ;;
 
 let row1 t egraph terms =

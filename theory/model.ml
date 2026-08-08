@@ -139,6 +139,64 @@ let check_type_atom t ~a ~b ~expected =
   | _ -> Ok ()
 ;;
 
+let check_numeric_domain t ~var ~type_expr =
+  match
+    Numeric_domain.of_type_expr type_expr, Map.find t.tvar_assignments var
+  with
+  | Some domain, Some { numeric = Some { value; eps_coeff }; _ } ->
+    let%bind.Or_error () =
+      if domain.integral
+         && ((not (Q.is_integral value)) || not (Q.is_zero eps_coeff))
+      then
+        error
+          [%message
+            "integral type has a non-integral numeric witness"
+              (var : Tvar.t)
+              (type_expr : Type_expr.t)
+              (value : Q.t)
+              (eps_coeff : Q.t)]
+      else Ok ()
+    in
+    (match domain.bounds with
+     | None -> Ok ()
+     | Some { lower; upper } ->
+       if Q.compare value lower < 0 || Q.compare value upper > 0
+       then
+         error
+           [%message
+             "bounded integer type has an out-of-range numeric witness"
+               (var : Tvar.t)
+               (type_expr : Type_expr.t)
+               (value : Q.t)
+               (lower : Q.t)
+               (upper : Q.t)]
+       else Ok ())
+  | Some _, Some { numeric = None; _ } | Some _, None | None, _ -> Ok ()
+;;
+
+let check_has_type_atom t ~var ~type_expr ~expected =
+  match Map.find t.tvar_assignments var with
+  | Some { type_ = Some assigned; _ }
+    when is_ground assigned && is_ground type_expr ->
+    let has_type = Type_lattice.is_subtype assigned ~of_:type_expr in
+    if not (Bool.equal has_type expected)
+    then
+      error
+        [%message
+          "type membership value disagrees with the assigned ground type"
+            (var : Tvar.t)
+            (assigned : Type_expr.t)
+            (type_expr : Type_expr.t)
+            (expected : bool)
+            (has_type : bool)]
+    else if expected
+    then (
+      let%bind.Or_error () = check_numeric_domain t ~var ~type_expr:assigned in
+      check_numeric_domain t ~var ~type_expr)
+    else Ok ()
+  | _ -> Ok ()
+;;
+
 let repr t term = Map.find t.euf_classes term
 
 (* An EUF equality atom is checkable iff both sides are registered terms with a
@@ -173,6 +231,8 @@ let check_atom_consistency t ~atom ~value =
   | `Le (expression, bound) ->
     check_linear_atom t ~expression ~bound ~expected:value
   | `Type_eq (a, b) -> check_type_atom t ~a ~b ~expected:value
+  | `Has_type (var, type_expr) ->
+    check_has_type_atom t ~var ~type_expr ~expected:value
   | `Eq (a, b) -> check_euf_atom t ~a ~b ~expected:value
 ;;
 

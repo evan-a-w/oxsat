@@ -4,6 +4,6 @@
  (preprocess
   (pps ppx_jane))
  (inline_tests)
- (libraries core feel)
+ (libraries core bignum.bigint feel)
  (flags
   (:standard -extension-universe beta)))

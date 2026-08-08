@@ -4,7 +4,7 @@ open! Import
 module Atom = struct
   type t =
     [ `Le of Linear_expr.t * Q.t
-    | `Type_eq of Type_expr.t * Type_expr.t
+    | `Has_type of Tvar.t * Type_expr.t
     ]
   [@@deriving sexp, compare, hash]
 end
@@ -16,7 +16,8 @@ module Last_lemma = struct
     | None
     | Linear_arithmetic of (Atom.t * Q.t) list
     | Integer_split of
-        { variable : Tvar.t
+        { guard : Atom.t
+        ; variable : Tvar.t
         ; floor : Q.t
         ; ceil : Q.t
         }
@@ -43,7 +44,7 @@ type t =
   ; tvars_to_check_for_equality : Tvar.Hash_set.t
   ; tvar_by_simplex_var : Tvar.t Int.Table.t
   ; integral_tvars : Tvar.Hash_set.t
-  ; (* The [`Type_eq] atom (and its value) that most recently made a tvar
+  ; (* The [`Has_type] atom (and its value) that most recently made a tvar
        integral, so a case-split lemma for that tvar can be guarded on it. *)
     integral_atom_by_tvar : (Atom.t * bool) Tvar.Table.t
   ; non_integral_ints : unit Tvar.Hash_queue.t
@@ -206,12 +207,12 @@ let add_constraint
 
 let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
   match value, atom with
-  | true, `Type_eq (Type_expr.Var tvar, Base Int)
-  | true, `Type_eq (Base Int, Type_expr.Var tvar) ->
-    set_integral t ~decision_level ~tvar ~integral:true ~atom ~value
-  | true, `Type_eq (Type_expr.Var _, Base Float)
-  | true, `Type_eq (Base Float, Type_expr.Var _) -> ()
-  | true, `Type_eq (_, _) | false, `Type_eq _ -> ()
+  | true, `Has_type (tvar, type_expr) ->
+    (match Numeric_domain.of_type_expr type_expr with
+     | Some { integral = true; _ } ->
+       set_integral t ~decision_level ~tvar ~integral:true ~atom ~value
+     | Some { integral = false; _ } | None -> ())
+  | false, `Has_type _ -> ()
   | true, `Le (le, c) ->
     add_constraint t ~op:`Le ~le ~c ~decision_level ~atom ~value
   | false, `Le (le, c) ->
@@ -277,11 +278,12 @@ let maybe_get_lemma t =
            else Q.(value - one), value
          else Q.floor value, Q.ceil value
        in
-       t.last_lemma <- Integer_split { variable = tvar; floor; ceil };
+       t.last_lemma
+       <- Integer_split { guard = integral_atom; variable = tvar; floor; ceil };
        (* this is NOT a unit clause, and doesn't depend on the current
           assignments / constraints etc. However, this is always true for
           integers. We do need to depend on the type of the var being an
-          integer, because it's not always true for floats *)
+          integer, because it's not true for arbitrary reals. *)
        `Lemma
          [ integral_atom, not integral_value
          ; ( `Le

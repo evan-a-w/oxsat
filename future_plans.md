@@ -2,13 +2,14 @@
 
 ## Arithmetic / big integers
 
-- Integrate the standalone `ds` big integer module into `theory_core/Q.t`.
-- Preserve the current small-int fast path if possible, but make every rational
-  operation overflow-safe.
-- Add rational tests around values outside OCaml `int` / machine-integer bounds,
-  especially `2^63` and C-like overflow limits.
-- Re-run arithmetic, simplex, branch-and-bound, SMT, and proof tests after Q is
-  migrated.
+Done: `theory_core/Q.t` now stores numerator/denominator as arbitrary-precision
+`Bigint.t`, which is required for exact Int64 bounds.
+
+Remaining:
+
+- Preserve the current small-int fast path if performance regresses.
+- Add more rational stress tests around very large values and C-like overflow
+  limits.
 - Benchmark the rational migration; if performance regresses, consider a hybrid
   small/big representation.
 

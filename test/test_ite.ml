@@ -242,31 +242,37 @@ let%expect_test "ite-lowered proof prints human-readable refutation text" =
     {|
     Assumptions:
       a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: c1 = c2
-      a4: (c1 = c2 ∧ x ≠ x) ∨ (c1 ≠ c2 ∧ y ≠ x)
+      a1: bool ≠ real
+      a2: bool ≠ int64
+      a3: int ≠ real
+      a4: int ≠ int64
+      a5: real ≠ int64
+      a6: c1 = c2
+      a7: (c1 = c2 ∧ x ≠ x) ∨ (c1 ≠ c2 ∧ y ≠ x)
     Steps:
       s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: c1 = c2   [assumption a3]
-      s4: (c1 = c2 ∧ x ≠ x) ∨ (c1 ≠ c2 ∧ y ≠ x)   [assumption a4]
-      s5: false   [refutation of [s0, s1, s2, s3, s4]]
+      s1: bool ≠ real   [assumption a1]
+      s2: bool ≠ int64   [assumption a2]
+      s3: int ≠ real   [assumption a3]
+      s4: int ≠ int64   [assumption a4]
+      s5: real ≠ int64   [assumption a5]
+      s6: c1 = c2   [assumption a6]
+      s7: (c1 = c2 ∧ x ≠ x) ∨ (c1 ≠ c2 ∧ y ≠ x)   [assumption a7]
+      s8: false   [refutation of [s0, s1, s2, s3, s4, s5, s6, s7]]
         refutation:
           extensions:
             e0 := (c2 = c1 ∧ ¬(x = x))
             e1 := (¬(c2 = c1) ∧ ¬(x = y))
             e2 := (e0 ∨ e1)
           steps:
-            r0: c2 = c1   [s3]
+            r0: c2 = c1   [s6]
             r1: x ≠ x ∨ ¬(e0)   [definition of e0]
             r2: c2 ≠ c1 ∨ ¬(e1)   [definition of e1]
             r3: e0 ∨ e1 ∨ ¬(e2)   [definition of e2]
-            r4: e2   [s4]
+            r4: e2   [s7]
             r5: x = x   [EUF: x = x via []]
             r6: ⊥   [RUP over [r0, r2, r4, r5, r1, r3]]
-    Conclusion: s5
+    Conclusion: s8
 
     (check (result (Ok ())))
     |}]

@@ -15,6 +15,7 @@ let neq a b : Formula.any = Not (eq a b)
 let xv = Tvar.of_string "x"
 let yv = Tvar.of_string "y"
 let int_type : Type_expr.t = Base Int
+let int64_type : Type_expr.t = Base Int64
 let config = { Solver.Config.default with produce_proofs = true }
 
 let assert_ok solver formula =
@@ -34,6 +35,67 @@ let check_proof (result : Solver_result.t) =
        print_string (Proof.to_string_hum proof))
 ;;
 
+let%expect_test "Int64 integer split proof checks" =
+  let solver = Solver.create ~config () in
+  Solver.assert_type solver xv int64_type;
+  assert_ok
+    solver
+    (La_compare (La_scale_const (Q.of_int 2, Var xv), `Le, La_const (Q.of_int 3)));
+  assert_ok
+    solver
+    (La_compare (La_scale_const (Q.of_int 2, Var xv), `Ge, La_const (Q.of_int 3)));
+  match Solver.solve solver with
+  | Sat _ -> print_endline "unexpectedly sat"
+  | Unsat { proof; core = _ } ->
+    print_s
+      [%message
+        "proof"
+          ~produced:(Option.is_some proof : bool)
+          ~checked:
+            (Option.value_map proof ~default:false ~f:(fun proof ->
+               Proof.check proof |> Or_error.is_ok)
+             : bool)];
+    [%expect {| (proof (produced true) (checked true)) |}]
+;;
+
+let%expect_test "Int64 bound proof checks" =
+  let solver = Solver.create ~config () in
+  Solver.assert_type solver xv int64_type;
+  assert_ok
+    solver
+    (La_compare (Var xv, `Gt, La_const (Q.of_int64 Int64.max_value)));
+  match Solver.solve solver with
+  | Sat _ -> print_endline "unexpectedly sat"
+  | Unsat { proof; core = _ } ->
+    print_s
+      [%message
+        "proof"
+          ~produced:(Option.is_some proof : bool)
+          ~checked:
+            (Option.value_map proof ~default:false ~f:(fun proof ->
+               Proof.check proof |> Or_error.is_ok)
+             : bool)];
+    [%expect {| (proof (produced true) (checked true)) |}]
+;;
+
+let%expect_test "subtype implication proof checks" =
+  let solver = Solver.create ~config () in
+  Solver.assert_type solver xv int64_type;
+  assert_ok solver (Not (Eq (Type_var xv, Int)));
+  match Solver.solve solver with
+  | Sat _ -> print_endline "unexpectedly sat"
+  | Unsat { proof; core = _ } ->
+    print_s
+      [%message
+        "proof"
+          ~produced:(Option.is_some proof : bool)
+          ~checked:
+            (Option.value_map proof ~default:false ~f:(fun proof ->
+               Proof.check proof |> Or_error.is_ok)
+             : bool)];
+    [%expect {| (proof (produced true) (checked true)) |}]
+;;
+
 let%expect_test "EUF transitivity conflict" =
   let solver = Solver.create ~config () in
   assert_ok solver (eq x y);
@@ -44,27 +106,33 @@ let%expect_test "EUF transitivity conflict" =
     {|
     Assumptions:
       a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: x = y
-      a4: y ≠ z
-      a5: x = z
+      a1: bool ≠ real
+      a2: bool ≠ int64
+      a3: int ≠ real
+      a4: int ≠ int64
+      a5: real ≠ int64
+      a6: x = y
+      a7: y ≠ z
+      a8: x = z
     Steps:
       s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: x = y   [assumption a3]
-      s4: y ≠ z   [assumption a4]
-      s5: x = z   [assumption a5]
-      s6: false   [refutation of [s0, s1, s2, s3, s4, s5]]
+      s1: bool ≠ real   [assumption a1]
+      s2: bool ≠ int64   [assumption a2]
+      s3: int ≠ real   [assumption a3]
+      s4: int ≠ int64   [assumption a4]
+      s5: real ≠ int64   [assumption a5]
+      s6: x = y   [assumption a6]
+      s7: y ≠ z   [assumption a7]
+      s8: x = z   [assumption a8]
+      s9: false   [refutation of [s0, s1, s2, s3, s4, s5, s6, s7, s8]]
         refutation:
           steps:
-            r0: x = y   [s3]
-            r1: y ≠ z   [s4]
-            r2: x = z   [s5]
+            r0: x = y   [s6]
+            r1: y ≠ z   [s7]
+            r2: x = z   [s8]
             r3: x ≠ y ∨ x ≠ z ∨ y = z   [EUF: y = z via [x = y; x = z]]
             r4: ⊥   [RUP over [r0, r1, r2, r3]]
-    Conclusion: s6
+    Conclusion: s9
     |}]
 ;;
 
@@ -77,55 +145,66 @@ let%expect_test "EUF congruence conflict" =
     {|
     Assumptions:
       a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: x = y
-      a4: f(x) ≠ f(y)
+      a1: bool ≠ real
+      a2: bool ≠ int64
+      a3: int ≠ real
+      a4: int ≠ int64
+      a5: real ≠ int64
+      a6: x = y
+      a7: f(x) ≠ f(y)
     Steps:
       s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: x = y   [assumption a3]
-      s4: f(x) ≠ f(y)   [assumption a4]
-      s5: false   [refutation of [s0, s1, s2, s3, s4]]
+      s1: bool ≠ real   [assumption a1]
+      s2: bool ≠ int64   [assumption a2]
+      s3: int ≠ real   [assumption a3]
+      s4: int ≠ int64   [assumption a4]
+      s5: real ≠ int64   [assumption a5]
+      s6: x = y   [assumption a6]
+      s7: f(x) ≠ f(y)   [assumption a7]
+      s8: false   [refutation of [s0, s1, s2, s3, s4, s5, s6, s7]]
         refutation:
           steps:
-            r0: x = y   [s3]
-            r1: f(x) ≠ f(y)   [s4]
+            r0: x = y   [s6]
+            r1: f(x) ≠ f(y)   [s7]
             r2: x ≠ y ∨ f(x) = f(y)   [EUF: f(x) = f(y) via [x = y; congruence(f(x) = f(y) from [x = y])]]
             r3: ⊥   [RUP over [r0, r1, r2]]
-    Conclusion: s5
+    Conclusion: s8
     |}]
 ;;
 
-let%expect_test "type-theory conflict (Int vs Float)" =
+let%expect_test "type-theory conflict (Int vs Bool)" =
   let solver = Solver.create ~config () in
   Solver.assert_type solver xv int_type;
-  Solver.assert_type solver xv (Base Float);
+  Solver.assert_type solver xv (Base Bool);
   check_proof (Solver.solve solver);
   [%expect
     {|
     Assumptions:
       a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: x : int
-      a4: x : float
+      a1: bool ≠ real
+      a2: bool ≠ int64
+      a3: int ≠ real
+      a4: int ≠ int64
+      a5: real ≠ int64
+      a6: x : int
+      a7: x : bool
     Steps:
       s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: x : int   [assumption a3]
-      s4: x : float   [assumption a4]
-      s5: false   [refutation of [s0, s1, s2, s3, s4]]
+      s1: bool ≠ real   [assumption a1]
+      s2: bool ≠ int64   [assumption a2]
+      s3: int ≠ real   [assumption a3]
+      s4: int ≠ int64   [assumption a4]
+      s5: real ≠ int64   [assumption a5]
+      s6: x : int   [assumption a6]
+      s7: x : bool   [assumption a7]
+      s8: false   [refutation of [s0, s1, s2, s3, s4, s5, s6, s7]]
         refutation:
           steps:
-            r0: int ≠ float   [s2]
-            r1: x : int   [s3]
-            r2: x : float   [s4]
-            r3: ¬(x : int) ∨ ¬(x : float) ∨ int = float   [EUF: int = float via [x : int; x : float]]
-            r4: ⊥   [RUP over [r0, r1, r2, r3]]
-    Conclusion: s5
+            r0: x : int   [s6]
+            r1: x : bool   [s7]
+            r2: ¬(x : bool) ∨ ¬(x : int)   [type clash: bool vs int, given [x : bool, x : int]]
+            r3: ⊥   [RUP over [r0, r1, r2]]
+    Conclusion: s8
     |}]
 ;;
 
@@ -138,24 +217,30 @@ let%expect_test "linear-arithmetic (Farkas) conflict" =
     {|
     Assumptions:
       a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: x ≥ 5
-      a4: x ≤ 3
+      a1: bool ≠ real
+      a2: bool ≠ int64
+      a3: int ≠ real
+      a4: int ≠ int64
+      a5: real ≠ int64
+      a6: x ≥ 5
+      a7: x ≤ 3
     Steps:
       s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: x ≥ 5   [assumption a3]
-      s4: x ≤ 3   [assumption a4]
-      s5: false   [refutation of [s0, s1, s2, s3, s4]]
+      s1: bool ≠ real   [assumption a1]
+      s2: bool ≠ int64   [assumption a2]
+      s3: int ≠ real   [assumption a3]
+      s4: int ≠ int64   [assumption a4]
+      s5: real ≠ int64   [assumption a5]
+      s6: x ≥ 5   [assumption a6]
+      s7: x ≤ 3   [assumption a7]
+      s8: false   [refutation of [s0, s1, s2, s3, s4, s5, s6, s7]]
         refutation:
           steps:
-            r0: -x ≤ -5   [s3]
-            r1: x ≤ 3   [s4]
+            r0: -x ≤ -5   [s6]
+            r1: x ≤ 3   [s7]
             r2: ¬(-x ≤ -5) ∨ ¬(x ≤ 3)   [Farkas: (-x ≤ -5) + (x ≤ 3) ⟹ false]
             r3: ⊥   [RUP over [r0, r1, r2]]
-    Conclusion: s5
+    Conclusion: s8
     |}]
 ;;
 
@@ -176,30 +261,36 @@ let%expect_test "integer variable with no feasible integer point" =
     {|
     Assumptions:
       a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: x : int
-      a4: 3*x ≥ 1
-      a5: 3*x ≤ 2
+      a1: bool ≠ real
+      a2: bool ≠ int64
+      a3: int ≠ real
+      a4: int ≠ int64
+      a5: real ≠ int64
+      a6: x : int
+      a7: 3*x ≥ 1
+      a8: 3*x ≤ 2
     Steps:
       s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: x : int   [assumption a3]
-      s4: 3*x ≥ 1   [assumption a4]
-      s5: 3*x ≤ 2   [assumption a5]
-      s6: false   [refutation of [s0, s1, s2, s3, s4, s5]]
+      s1: bool ≠ real   [assumption a1]
+      s2: bool ≠ int64   [assumption a2]
+      s3: int ≠ real   [assumption a3]
+      s4: int ≠ int64   [assumption a4]
+      s5: real ≠ int64   [assumption a5]
+      s6: x : int   [assumption a6]
+      s7: 3*x ≥ 1   [assumption a7]
+      s8: 3*x ≤ 2   [assumption a8]
+      s9: false   [refutation of [s0, s1, s2, s3, s4, s5, s6, s7, s8]]
         refutation:
           steps:
-            r0: x : int   [s3]
-            r1: -3x ≤ -1   [s4]
-            r2: 3x ≤ 2   [s5]
-            r3: ¬(x : int) ∨ -x ≤ -1 ∨ x ≤ 0   [integer split: x ≤ 0 ∨ x ≥ 1]
+            r0: x : int   [s6]
+            r1: -3x ≤ -1   [s7]
+            r2: 3x ≤ 2   [s8]
+            r3: ¬(x : int) ∨ -x ≤ -1 ∨ x ≤ 0   [integer split under x : int: x ≤ 0 ∨ x ≥ 1]
             r4: ¬(-x ≤ -1) ∨ ¬(3x ≤ 2)   [Farkas: 3·(-x ≤ -1) + (3x ≤ 2) ⟹ false]
             r5: ¬(-x ≤ -1)   [RUP over [r0, r1, r2, r4]]
             r6: ¬(-3x ≤ -1) ∨ ¬(x ≤ 0)   [Farkas: 3·(x ≤ 0) + (-3x ≤ -1) ⟹ false]
             r7: ⊥   [RUP over [r0, r1, r2, r4, r6, r3]]
-    Conclusion: s6
+    Conclusion: s9
     |}]
 ;;
 
@@ -214,30 +305,36 @@ let%expect_test "Nelson-Oppen bridge (bare-var-eq + LA)" =
     {|
     Assumptions:
       a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: x = y
-      a4: x ≥ 3
-      a5: x ≤ 3
-      a6: y ≤ 2
+      a1: bool ≠ real
+      a2: bool ≠ int64
+      a3: int ≠ real
+      a4: int ≠ int64
+      a5: real ≠ int64
+      a6: x = y
+      a7: x ≥ 3
+      a8: x ≤ 3
+      a9: y ≤ 2
     Steps:
       s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: x = y   [assumption a3]
-      s4: x ≥ 3   [assumption a4]
-      s5: x ≤ 3   [assumption a5]
-      s6: y ≤ 2   [assumption a6]
-      s7: false   [refutation of [s0, s1, s2, s3, s4, s5, s6]]
+      s1: bool ≠ real   [assumption a1]
+      s2: bool ≠ int64   [assumption a2]
+      s3: int ≠ real   [assumption a3]
+      s4: int ≠ int64   [assumption a4]
+      s5: real ≠ int64   [assumption a5]
+      s6: x = y   [assumption a6]
+      s7: x ≥ 3   [assumption a7]
+      s8: x ≤ 3   [assumption a8]
+      s9: y ≤ 2   [assumption a9]
+      s10: false   [refutation of [s0, s1, s2, s3, s4, s5, s6, s7, s8, s9]]
         refutation:
           steps:
-            r0: x = y   [s3]
-            r1: -x ≤ -3   [s4]
-            r2: y ≤ 2   [s6]
+            r0: x = y   [s6]
+            r1: -x ≤ -3   [s7]
+            r2: y ≤ 2   [s9]
             r3: x ≠ y ∨ x + -y ≤ 0   [x = y ⟹ x ≤ y]
             r4: ¬(-x ≤ -3) ∨ ¬(x + -y ≤ 0) ∨ ¬(y ≤ 2)   [Farkas: (x + -y ≤ 0) + (-x ≤ -3) + (y ≤ 2) ⟹ false]
             r5: ⊥   [RUP over [r0, r1, r2, r3, r4]]
-    Conclusion: s7
+    Conclusion: s10
     |}]
 ;;
 
@@ -253,29 +350,35 @@ let%expect_test "propositional-over-atoms conflict" =
     {|
     Assumptions:
       a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: x = y ∨ y = z
-      a4: x ≠ y
-      a5: y ≠ z
+      a1: bool ≠ real
+      a2: bool ≠ int64
+      a3: int ≠ real
+      a4: int ≠ int64
+      a5: real ≠ int64
+      a6: x = y ∨ y = z
+      a7: x ≠ y
+      a8: y ≠ z
     Steps:
       s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: x = y ∨ y = z   [assumption a3]
-      s4: x ≠ y   [assumption a4]
-      s5: y ≠ z   [assumption a5]
-      s6: false   [refutation of [s0, s1, s2, s3, s4, s5]]
+      s1: bool ≠ real   [assumption a1]
+      s2: bool ≠ int64   [assumption a2]
+      s3: int ≠ real   [assumption a3]
+      s4: int ≠ int64   [assumption a4]
+      s5: real ≠ int64   [assumption a5]
+      s6: x = y ∨ y = z   [assumption a6]
+      s7: x ≠ y   [assumption a7]
+      s8: y ≠ z   [assumption a8]
+      s9: false   [refutation of [s0, s1, s2, s3, s4, s5, s6, s7, s8]]
         refutation:
           extensions:
             e0 := (x = y ∨ y = z)
           steps:
             r0: x = y ∨ y = z ∨ ¬(e0)   [definition of e0]
-            r1: e0   [s3]
-            r2: x ≠ y   [s4]
-            r3: y ≠ z   [s5]
+            r1: e0   [s6]
+            r2: x ≠ y   [s7]
+            r3: y ≠ z   [s8]
             r4: ⊥   [RUP over [r1, r2, r3, r0]]
-    Conclusion: s6
+    Conclusion: s9
     |}]
 ;;
 
@@ -307,33 +410,39 @@ let%expect_test "case-split with Nelson-Oppen + Farkas reasoning" =
     {|
     Assumptions:
       a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: x = y ∨ x = z
-      a4: x ≠ y
-      a5: x ≥ 5
-      a6: z ≤ 3
+      a1: bool ≠ real
+      a2: bool ≠ int64
+      a3: int ≠ real
+      a4: int ≠ int64
+      a5: real ≠ int64
+      a6: x = y ∨ x = z
+      a7: x ≠ y
+      a8: x ≥ 5
+      a9: z ≤ 3
     Steps:
       s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: x = y ∨ x = z   [assumption a3]
-      s4: x ≠ y   [assumption a4]
-      s5: x ≥ 5   [assumption a5]
-      s6: z ≤ 3   [assumption a6]
-      s7: false   [refutation of [s0, s1, s2, s3, s4, s5, s6]]
+      s1: bool ≠ real   [assumption a1]
+      s2: bool ≠ int64   [assumption a2]
+      s3: int ≠ real   [assumption a3]
+      s4: int ≠ int64   [assumption a4]
+      s5: real ≠ int64   [assumption a5]
+      s6: x = y ∨ x = z   [assumption a6]
+      s7: x ≠ y   [assumption a7]
+      s8: x ≥ 5   [assumption a8]
+      s9: z ≤ 3   [assumption a9]
+      s10: false   [refutation of [s0, s1, s2, s3, s4, s5, s6, s7, s8, s9]]
         refutation:
           extensions:
             e0 := (x = y ∨ x = z)
           steps:
             r0: x = y ∨ x = z ∨ ¬(e0)   [definition of e0]
-            r1: e0   [s3]
-            r2: x ≠ y   [s4]
-            r3: -x ≤ -5   [s5]
-            r4: z ≤ 3   [s6]
+            r1: e0   [s6]
+            r2: x ≠ y   [s7]
+            r3: -x ≤ -5   [s8]
+            r4: z ≤ 3   [s9]
             r5: x ≠ z ∨ x + -z ≤ 0   [x = z ⟹ x ≤ z]
             r6: ¬(-x ≤ -5) ∨ ¬(x + -z ≤ 0) ∨ ¬(z ≤ 3)   [Farkas: (x + -z ≤ 0) + (-x ≤ -5) + (z ≤ 3) ⟹ false]
             r7: ⊥   [RUP over [r1, r2, r3, r4, r6, r0, r5]]
-    Conclusion: s7
+    Conclusion: s10
     |}]
 ;;

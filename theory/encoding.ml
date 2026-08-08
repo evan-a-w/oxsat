@@ -140,6 +140,9 @@ let record_atom_tvars t (atom : Atom.t) =
   | `Type_eq (a, b) ->
     record_type_expr_tvars t a;
     record_type_expr_tvars t b
+  | `Has_type (v, type_expr) ->
+    record_tvar t v Formula.Theory.(Packed.T Type);
+    record_type_expr_tvars t type_expr
   | `Le (le, _) ->
     Map.iter_keys le.coeffs ~f:(fun v ->
       record_tvar t v Formula.Theory.(Packed.T La))
@@ -258,7 +261,7 @@ let rec shape_of : type a. a Formula.t -> Shape.t =
   | Select (_, _) | Store (_, _, _) -> Array
   | Datatype_constructor _ | Datatype_selector _ -> Adt
   | Datatype_tester _ -> Bool
-  | Bool | Int | Float | Type
+  | Bool | Int | Real | Int64 | Type
   | Function_type (_, _)
   | Array_type (_, _)
   | Type_of _ | Type_var _
@@ -285,7 +288,8 @@ let rec type_expr_of : type a. a Formula.t -> Type_expr.t Or_error.t =
   | Type_var v -> Ok (Type_expr.Var v)
   | Bool -> Ok (Type_expr.Base Bool)
   | Int -> Ok (Type_expr.Base Int)
-  | Float -> Ok (Type_expr.Base Float)
+  | Real -> Ok (Type_expr.Base Real)
+  | Int64 -> Ok (Type_expr.Base Int64)
   | Type -> Ok Type_expr.Type
   | Function_type (a, b) ->
     let%bind.Or_error a = type_expr_of a in
@@ -358,6 +362,28 @@ let le_atoms_of_eq (a : Linear_expr.t) (b : Linear_expr.t) : Atom.t list =
   [ `Le (diff, Q.zero); `Le (Linear_expr.neg diff, Q.zero) ]
 ;;
 
+let has_type_atom
+  : type a. a Formula.t -> a Formula.t -> Atom.t option Or_error.t
+  =
+  fun a b ->
+  match a, b with
+  | Var v, _ ->
+    let%map.Or_error type_expr = type_expr_of b in
+    Some (`Has_type (v, type_expr))
+  | _, Var v ->
+    let%map.Or_error type_expr = type_expr_of a in
+    Some (`Has_type (v, type_expr))
+  | Type_var a, Type_var b ->
+    Ok (Some (`Type_eq (Type_expr.Var a, Type_expr.Var b)))
+  | Type_var v, _ ->
+    let%map.Or_error type_expr = type_expr_of b in
+    Some (`Has_type (v, type_expr))
+  | _, Type_var v ->
+    let%map.Or_error type_expr = type_expr_of a in
+    Some (`Has_type (v, type_expr))
+  | _ -> Ok None
+;;
+
 let compare_atom
   (a : Linear_expr.t)
   (op : [ `Le | `Ge | `Lt | `Gt ])
@@ -413,9 +439,13 @@ and eq_formula_of
     (* [a <-> b] as [(¬a \/ b) /\ (a \/ ¬b)] *)
     Ok (F.And [ F.Or [ F.Not a; b ]; F.Or [ a; F.Not b ] ])
   | Type, _ | _, Type ->
-    let%bind.Or_error a = type_expr_of a in
-    let%bind.Or_error b = type_expr_of b in
-    Ok (F.Atom (`Type_eq (a, b)))
+    let%bind.Or_error has_type = has_type_atom a b in
+    (match has_type with
+     | Some atom -> Ok (F.Atom atom)
+     | None ->
+       let%bind.Or_error a = type_expr_of a in
+       let%bind.Or_error b = type_expr_of b in
+       Ok (F.Atom (`Type_eq (a, b))))
   | La, _ | _, La ->
     let%bind.Or_error a = linear_expr_of a in
     let%bind.Or_error b = linear_expr_of b in
@@ -454,9 +484,13 @@ and neq_formula_of
     let%bind.Or_error eq = eq_formula_of a b in
     Ok (F.Not eq)
   | Type, _ | _, Type ->
-    let%bind.Or_error a = type_expr_of a in
-    let%bind.Or_error b = type_expr_of b in
-    Ok (F.Not (F.Atom (`Type_eq (a, b))))
+    let%bind.Or_error has_type = has_type_atom a b in
+    (match has_type with
+     | Some atom -> Ok (F.Not (F.Atom atom))
+     | None ->
+       let%bind.Or_error a = type_expr_of a in
+       let%bind.Or_error b = type_expr_of b in
+       Ok (F.Not (F.Atom (`Type_eq (a, b)))))
   | La, _ | _, La ->
     let%bind.Or_error a = linear_expr_of a in
     let%bind.Or_error b = linear_expr_of b in
@@ -501,6 +535,8 @@ let atom_to_formula : Atom.t -> Formula.any = function
   | `Eq (a, b) -> Eq (a, b)
   | `Type_eq (a, b) ->
     Eq (Formula.type_expr_to_formula a, Formula.type_expr_to_formula b)
+  | `Has_type (v, type_expr) ->
+    Eq (Type_var v, Formula.type_expr_to_formula type_expr)
   | `Le (le, c) -> La_compare (linear_expr_to_formula le, `Le, La_const c)
 ;;
 

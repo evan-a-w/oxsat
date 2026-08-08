@@ -5,7 +5,8 @@ module Base = struct
   type t =
     | Bool
     | Int
-    | Float
+    | Real
+    | Int64
   [@@deriving sexp, compare, equal, hash, enumerate]
 
   include functor Hashable.Make

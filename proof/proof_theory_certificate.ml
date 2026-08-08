@@ -55,9 +55,18 @@ end
 
 module Integer_split = struct
   type t =
-    { variable : Tvar.t
+    { guard : Atom.t
+    ; variable : Tvar.t
     ; floor : Q.t
     ; ceil : Q.t
+    }
+  [@@deriving sexp, compare]
+end
+
+module Type_domain = struct
+  type t =
+    { guard : Atom.t
+    ; consequence : Atom.t
     }
   [@@deriving sexp, compare]
 end
@@ -164,6 +173,11 @@ module Bare_var_eq = struct
 
   type t =
     | Equality_implies_type_equality of Tvar.t * Tvar.t
+    | Equality_implies_has_type of
+        { source : Tvar.t
+        ; target : Tvar.t
+        ; type_ : Type_expr.t
+        }
     | Equality_implies_le of
         { left : Tvar.t
         ; right : Tvar.t
@@ -177,6 +191,7 @@ type t =
   | Euf of Euf.t
   | Linear_arithmetic of Linear_arithmetic.t
   | Integer_split of Integer_split.t
+  | Type_domain of Type_domain.t
   | Type_theory of Type_theory.t
   | Array of Array.t
   | Adt of Adt.t

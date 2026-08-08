@@ -169,7 +169,8 @@ let rec go
     | Datatype_tester _
     | Bool
     | Int
-    | Float
+    | Real
+    | Int64
     | Type
     | Function_type _
     | Array_type _
@@ -298,7 +299,8 @@ and go_axiom_body
     | Datatype_tester _
     | Bool
     | Int
-    | Float
+    | Real
+    | Int64
     | Type
     | Function_type _
     | Array_type _

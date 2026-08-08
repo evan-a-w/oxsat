@@ -31,12 +31,14 @@ end
 
 type t =
   [ Equality.t
+  | `Has_type of Tvar.t * Type_expr.t
   | `Le of Linear_expr.t * Q.t
   ]
 [@@deriving sexp, compare, hash]
 
 let normalize = function
   | #Equality.t as x -> (Equality.normalize x :> t)
+  | `Has_type _ as x -> x
   | `Le (expr, c) ->
     let full, _factor = Linear_expr.(primitive (expr - const c)) in
     `Le ({ full with const = Q.zero }, Q.neg full.const)

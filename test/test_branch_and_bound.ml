@@ -14,9 +14,9 @@ let ge tvar c : Branch_and_bound.Atom.t =
   `Le (Linear_expr.neg (Linear_expr.var tvar), Q.of_int (-c))
 ;;
 
-let is_int tvar : Branch_and_bound.Atom.t =
-  `Type_eq (Type_expr.Var tvar, Base Int)
-;;
+let is_int tvar : Branch_and_bound.Atom.t = `Has_type (tvar, Base Int)
+let is_int64 tvar : Branch_and_bound.Atom.t = `Has_type (tvar, Base Int64)
+let is_real tvar : Branch_and_bound.Atom.t = `Has_type (tvar, Base Real)
 
 let print_lemma t =
   print_s
@@ -76,7 +76,7 @@ let%expect_test "integral var with non-integral relaxed solution yields a \
   [%expect
     {|
     (Lemma
-     (((Type_eq ((Var x) (Base Int))) false)
+     (((Has_type (x (Base Int))) false)
       ((Le
         (((coeffs ((x ((num 1) (den 1))))) (const ((num 0) (den 1))))
          ((num 1) (den 1))))
@@ -108,6 +108,97 @@ let%expect_test "integral var with non-integral relaxed solution yields a \
     |}]
 ;;
 
+let%expect_test "Int64 var with non-integral relaxed solution also branches" =
+  let t = Branch_and_bound.create () in
+  Branch_and_bound.assert_atom
+    t
+    ~decision_level:0
+    ~atom:(is_int64 x)
+    ~value:true;
+  Branch_and_bound.assert_atom
+    t
+    ~decision_level:0
+    ~atom:(`Le (Linear_expr.scale (Q.of_int 2) (Linear_expr.var x), Q.of_int 3))
+    ~value:true;
+  Branch_and_bound.assert_atom
+    t
+    ~decision_level:0
+    ~atom:
+      (`Le
+        ( Linear_expr.neg (Linear_expr.scale (Q.of_int 2) (Linear_expr.var x))
+        , Q.of_int (-3) ))
+    ~value:true;
+  print_lemma t;
+  [%expect
+    {|
+    (Lemma
+     (((Has_type (x (Base Int64))) false)
+      ((Le
+        (((coeffs ((x ((num 1) (den 1))))) (const ((num 0) (den 1))))
+         ((num 1) (den 1))))
+       true)
+      ((Le
+        (((coeffs ((x ((num -1) (den 1))))) (const ((num 0) (den 1))))
+         ((num -2) (den 1))))
+       true)))
+    |}]
+;;
+
+let%expect_test "integral var with negative non-integral relaxed solution \
+                 branches on adjacent bounds"
+  =
+  let t = Branch_and_bound.create () in
+  Branch_and_bound.assert_atom t ~decision_level:0 ~atom:(is_int x) ~value:true;
+  Branch_and_bound.assert_atom
+    t
+    ~decision_level:0
+    ~atom:
+      (`Le (Linear_expr.scale (Q.of_int 2) (Linear_expr.var x), Q.of_int (-1)))
+    ~value:true;
+  Branch_and_bound.assert_atom
+    t
+    ~decision_level:0
+    ~atom:
+      (`Le
+        ( Linear_expr.neg (Linear_expr.scale (Q.of_int 2) (Linear_expr.var x))
+        , Q.of_int 1 ))
+    ~value:true;
+  print_lemma t;
+  [%expect
+    {|
+    (Lemma
+     (((Has_type (x (Base Int))) false)
+      ((Le
+        (((coeffs ((x ((num 1) (den 1))))) (const ((num 0) (den 1))))
+         ((num -1) (den 1))))
+       true)
+      ((Le
+        (((coeffs ((x ((num -1) (den 1))))) (const ((num 0) (den 1))))
+         ((num 0) (den 1))))
+       true)))
+    |}]
+;;
+
+let%expect_test "Real var with non-integral relaxed solution does not branch" =
+  let t = Branch_and_bound.create () in
+  Branch_and_bound.assert_atom t ~decision_level:0 ~atom:(is_real x) ~value:true;
+  Branch_and_bound.assert_atom
+    t
+    ~decision_level:0
+    ~atom:(`Le (Linear_expr.scale (Q.of_int 2) (Linear_expr.var x), Q.of_int 3))
+    ~value:true;
+  Branch_and_bound.assert_atom
+    t
+    ~decision_level:0
+    ~atom:
+      (`Le
+        ( Linear_expr.neg (Linear_expr.scale (Q.of_int 2) (Linear_expr.var x))
+        , Q.of_int (-3) ))
+    ~value:true;
+  print_lemma t;
+  [%expect {| Consistent |}]
+;;
+
 let%expect_test "strict bounds around an integer produce adjacent split bounds" =
   let t = Branch_and_bound.create () in
   Branch_and_bound.assert_atom t ~decision_level:0 ~atom:(is_int x) ~value:true;
@@ -119,7 +210,7 @@ let%expect_test "strict bounds around an integer produce adjacent split bounds" 
   [%expect
     {|
     (Lemma
-     (((Type_eq ((Var x) (Base Int))) false)
+     (((Has_type (x (Base Int))) false)
       ((Le
         (((coeffs ((x ((num 1) (den 1))))) (const ((num 0) (den 1))))
          ((num 1) (den 1))))
@@ -158,7 +249,7 @@ let%expect_test "case-split lemma is guarded on integrality, not just asserted \
   [%expect
     {|
     (Lemma
-     (((Type_eq ((Var x) (Base Int))) false)
+     (((Has_type (x (Base Int))) false)
       ((Le
         (((coeffs ((x ((num 1) (den 1))))) (const ((num 0) (den 1))))
          ((num 1) (den 1))))

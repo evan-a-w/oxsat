@@ -2,7 +2,9 @@ open! Core
 open! Feel.Import
 
 (** The equality atoms, which the egraph handles natively: a term equality over
-    [Formula.any], or a type equality over [Type_expr.t]. *)
+    [Formula.any], or an exact type equality over [Type_expr.t]. Type membership
+    facts such as [x : Int] are represented by [`Has_type], not by exact type
+    equality. *)
 module Equality : sig
   type t =
     [ `Eq of Formula.any * Formula.any
@@ -28,6 +30,7 @@ end
       [Not (Atom (`Le (Linear_expr.neg (Linear_expr.var x), Q.neg c)))] *)
 type t =
   [ Equality.t
+  | `Has_type of Tvar.t * Type_expr.t
   | `Le of Linear_expr.t * Q.t
   ]
 [@@deriving sexp]

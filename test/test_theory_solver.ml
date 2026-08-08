@@ -485,13 +485,21 @@ let%expect_test "stats passthrough" =
 let xv = Tvar.of_string "x"
 let yv = Tvar.of_string "y"
 let int_type : Type_expr.t = Base Int
-let float_type : Type_expr.t = Base Float
+let real_type : Type_expr.t = Base Real
+let int64_type : Type_expr.t = Base Int64
 let array_ctor = Tvar.of_string "Array"
 let array_of (elem : Type_expr.t) : Type_expr.t = App (array_ctor, [ elem ])
 let type_eq te1 te2 : Formula.any = Eq (te1, te2)
 let ft_int : Formula.any = Int
-let ft_float : Formula.any = Float
+let ft_real : Formula.any = Real
+let ft_int64 : Formula.any = Int64
 let ft_array (elem : Formula.any) : Formula.any = Type_app (array_ctor, [ elem ])
+
+let print_sat_status result =
+  match (result : Solver_result.t) with
+  | Sat _ -> print_endline "SAT"
+  | Unsat _ -> print_endline "UNSAT"
+;;
 
 let%expect_test "Has_type: basic assert and get_type" =
   let solver = Solver.create () in
@@ -505,35 +513,125 @@ let%expect_test "Has_type: basic assert and get_type" =
     |}]
 ;;
 
-let%expect_test "Has_type: conflicting ground types are unsat" =
+let%expect_test "Has_type: subtype-related ground types meet" =
   let solver = Solver.create () in
   Solver.assert_type solver xv int_type;
-  Solver.assert_type solver xv float_type;
+  Solver.assert_type solver xv real_type;
+  print_result (Solver.solve solver);
+  [%expect
+    {|
+    (Sat
+     (tvar_assignments ((x ((type_ ((Base Int))) (numeric ()) (euf_repr ()))))))
+    |}]
+;;
+
+let%expect_test "Has_type: disjoint ground types are unsat" =
+  let solver = Solver.create () in
+  Solver.assert_type solver xv int_type;
+  Solver.assert_type solver xv (Base Bool);
   print_result (Solver.solve solver);
   [%expect
     {|
     (Unsat
      (core
       ((Theory_lemma
-        (Or
-         ((Not (Eq (Type_var x) Float)) (Not (Eq (Type_var x) Int))
-          (Eq Int Float))))
-       (Asserted (Eq (Type_var x) Float)) (Asserted (Eq (Type_var x) Int))
-       (Asserted (Not (Eq Int Float))))))
+        (Or ((Not (Eq (Type_var x) Bool)) (Not (Eq (Type_var x) Int)))))
+       (Asserted (Eq (Type_var x) Bool)) (Asserted (Eq (Type_var x) Int)))))
     |}]
 ;;
 
 let%expect_test "Has_type: two variables can have different types" =
   let solver = Solver.create () in
   Solver.assert_type solver xv int_type;
-  Solver.assert_type solver yv float_type;
+  Solver.assert_type solver yv real_type;
   print_result (Solver.solve solver);
   [%expect
     {|
     (Sat
      (tvar_assignments
       ((x ((type_ ((Base Int))) (numeric ()) (euf_repr ())))
-       (y ((type_ ((Base Float))) (numeric ()) (euf_repr ()))))))
+       (y ((type_ ((Base Real))) (numeric ()) (euf_repr ()))))))
+    |}]
+;;
+
+let%expect_test "Has_type: Int64 is integral and bounded" =
+  let solver = Solver.create () in
+  Solver.assert_type solver xv int64_type;
+  assert_ok
+    solver
+    (La_compare (La_scale_const (Q.of_int 2, Var xv), `Le, La_const (Q.of_int 3)));
+  assert_ok
+    solver
+    (La_compare (La_scale_const (Q.of_int 2, Var xv), `Ge, La_const (Q.of_int 3)));
+  print_sat_status (Solver.solve solver);
+  [%expect {| UNSAT |}]
+;;
+
+let%expect_test "Has_type: Int64 upper and lower bounds are enforced" =
+  let max_int64 = Q.of_int64 Int64.max_value in
+  let min_int64 = Q.of_int64 Int64.min_value in
+  let upper = Solver.create () in
+  Solver.assert_type upper xv int64_type;
+  assert_ok upper (La_compare (Var xv, `Gt, La_const max_int64));
+  print_sat_status (Solver.solve upper);
+  let lower = Solver.create () in
+  Solver.assert_type lower xv int64_type;
+  assert_ok lower (La_compare (Var xv, `Lt, La_const min_int64));
+  print_sat_status (Solver.solve lower);
+  [%expect {|
+    UNSAT
+    UNSAT
+    |}]
+;;
+
+let%expect_test "Has_type: Real does not trigger integrality" =
+  let solver = Solver.create () in
+  Solver.assert_type solver xv real_type;
+  assert_ok
+    solver
+    (La_compare (La_scale_const (Q.of_int 2, Var xv), `Le, La_const (Q.of_int 3)));
+  assert_ok
+    solver
+    (La_compare (La_scale_const (Q.of_int 2, Var xv), `Ge, La_const (Q.of_int 3)));
+  print_sat_status (Solver.solve solver);
+  [%expect {| SAT |}]
+;;
+
+let%expect_test "Has_type: Int64 entails Int and Real without exact type \
+                 equality"
+  =
+  let solver = Solver.create () in
+  Solver.assert_type solver xv int64_type;
+  Solver.assert_type solver xv int_type;
+  Solver.assert_type solver xv real_type;
+  print_result (Solver.solve solver);
+  let exact = Solver.create () in
+  assert_ok exact (Eq (Int64, Int));
+  print_sat_status (Solver.solve exact);
+  [%expect
+    {|
+    (Sat
+     (tvar_assignments
+      ((x
+        ((type_ ((Base Int64)))
+         (numeric (((value ((num 0) (den 1))) (eps_coeff ((num 0) (den 1))))))
+         (euf_repr ()))))))
+    UNSAT (at assert time)
+    SAT
+    |}]
+;;
+
+let%expect_test "Has_type: Int64 conflicts with a negated Int supertype" =
+  let solver = Solver.create () in
+  Solver.assert_type solver xv int64_type;
+  assert_ok solver (Not (Eq (Type_var xv, Int)));
+  print_result (Solver.solve solver);
+  [%expect
+    {|
+    (Unsat
+     (core
+      ((Theory_lemma (Or ((Not (Eq (Type_var x) Int64)) (Eq (Type_var x) Int))))
+       (Asserted (Eq (Type_var x) Int64)) (Asserted (Not (Eq (Type_var x) Int))))))
     |}]
 ;;
 
@@ -556,13 +654,12 @@ let%expect_test "Has_type: structural conflict (Array vs Int)" =
     |}]
 ;;
 
-let%expect_test "Has_type: same constructor, different type args — sat without \
-                 TypeEq constraints"
-  =
+let%expect_test "Has_type: same constructor, symbolic type args are allowed" =
   let a = Tvar.of_string "a" in
   let b = Tvar.of_string "b" in
   let solver = Solver.create () in
-  (* Array('a) and Array('b) have the same head — no top-level conflict *)
+  (* Array('a) and Array('b) have the same head, but the symbolic arguments are
+     not known incompatible. *)
   Solver.assert_type solver xv (array_of (Var a));
   Solver.assert_type solver xv (array_of (Var b));
   print_result (Solver.solve solver);
@@ -574,7 +671,17 @@ let%expect_test "Has_type: same constructor, different type args — sat without
     |}]
 ;;
 
-let%expect_test "Has_type: push/pop retracts type conflict" =
+let%expect_test "Has_type: same constructor, incompatible ground type args \
+                 conflict"
+  =
+  let solver = Solver.create () in
+  Solver.assert_type solver xv (array_of int_type);
+  Solver.assert_type solver xv (array_of (Base Bool));
+  print_sat_status (Solver.solve solver);
+  [%expect {| UNSAT |}]
+;;
+
+let%expect_test "Has_type: push/pop retracts subtype refinement" =
   let solver = Solver.create () in
   Solver.assert_type solver xv int_type;
   print_result (Solver.solve solver);
@@ -584,18 +691,12 @@ let%expect_test "Has_type: push/pop retracts type conflict" =
      (tvar_assignments ((x ((type_ ((Base Int))) (numeric ()) (euf_repr ()))))))
     |}];
   Solver.push solver;
-  Solver.assert_type solver xv float_type;
+  Solver.assert_type solver xv real_type;
   print_result (Solver.solve solver);
   [%expect
     {|
-    (Unsat
-     (core
-      ((Theory_lemma
-        (Or
-         ((Not (Eq (Type_var x) Float)) (Not (Eq (Type_var x) Int))
-          (Eq Int Float))))
-       (Asserted (Eq (Type_var x) Float)) (Asserted (Eq (Type_var x) Int))
-       (Asserted (Not (Eq Int Float))))))
+    (Sat
+     (tvar_assignments ((x ((type_ ((Base Int))) (numeric ()) (euf_repr ()))))))
     |}];
   Solver.pop solver;
   print_result (Solver.solve solver);
@@ -613,35 +714,37 @@ let%expect_test "Has_type: get_type reflects pushed/popped state" =
   print_s [%sexp (Solver.get_type solver xv : Type_expr.t option)];
   [%expect {| ((Base Int)) |}];
   Solver.push solver;
-  Solver.assert_type solver xv float_type;
-  (* conflicting, but get_type reflects the last literal asserted *)
+  Solver.assert_type solver xv real_type;
+  (* [Int] is the meet of [Int] and [Real]. *)
   ignore (Solver.solve solver : Solver_result.t);
   print_s [%sexp (Solver.get_type solver xv : Type_expr.t option)];
-  [%expect {| ((Base Float)) |}];
+  [%expect {| ((Base Int)) |}];
   Solver.pop solver;
   ignore (Solver.solve solver : Solver_result.t);
   print_s [%sexp (Solver.get_type solver xv : Type_expr.t option)];
   [%expect {| ((Base Int)) |}]
 ;;
 
-let%expect_test "Type_eq: TypeEq(a, Int) and TypeEq(a, Float) conflict via \
-                 type-level EUF"
-  =
+let%expect_test "Has_type: type variable Int and Real constraints meet" =
   let a = Tvar.of_string "a" in
   let solver = Solver.create () in
   assert_ok solver (type_eq (Var a) ft_int);
-  assert_ok solver (type_eq (Var a) ft_float);
+  assert_ok solver (type_eq (Var a) ft_real);
   print_result (Solver.solve solver);
   [%expect
     {|
-    (Unsat
-     (core
-      ((Theory_lemma
-        (Or
-         ((Not (Eq (Type_var a) Float)) (Not (Eq (Type_var a) Int))
-          (Eq Int Float))))
-       (Asserted (Eq (Var a) Float)) (Asserted (Eq (Var a) Int))
-       (Asserted (Not (Eq Int Float))))))
+    (Sat
+     (tvar_assignments ((a ((type_ ((Base Int))) (numeric ()) (euf_repr ()))))))
+    |}]
+;;
+
+let%expect_test "Type_eq: exact Int and Real type identity is false" =
+  let solver = Solver.create () in
+  assert_ok solver (Eq (Int, Real));
+  print_result (Solver.solve solver);
+  [%expect {|
+    UNSAT (at assert time)
+    (Sat (tvar_assignments ()))
     |}]
 ;;
 
@@ -685,25 +788,25 @@ let%expect_test "bare-variable equality does not eagerly create a type equality"
     |}]
 ;;
 
-let%expect_test "lazy bare-variable type equality detects incompatible types" =
+let%expect_test "lazy bare-variable type equality detects disjoint types" =
   let solver = Solver.create () in
   assert_ok solver (eq x y);
   ignore (Solver.solve solver : Solver_result.t);
   Solver.assert_type solver xv int_type;
-  Solver.assert_type solver yv float_type;
+  Solver.assert_type solver yv (Base Bool);
   print_result (Solver.solve solver);
   [%expect
     {|
     (Unsat
      (core
       ((Theory_lemma
-        (Or
-         ((Not (Eq (Type_var x) (Type_var y))) (Not (Eq (Type_var y) Float))
-          (Not (Eq (Type_var x) Int)) (Eq Int Float))))
+        (Or ((Not (Eq (Type_var y) Int)) (Not (Eq (Type_var y) Bool)))))
        (Theory_lemma
-        (Or ((Eq (Type_var x) (Type_var y)) (Not (Eq (Var x) (Var y))))))
-       (Asserted (Eq (Var x) (Var y))) (Asserted (Eq (Type_var y) Float))
-       (Asserted (Eq (Type_var x) Int)) (Asserted (Not (Eq Int Float))))))
+        (Or
+         ((Eq (Type_var y) Int) (Not (Eq (Var x) (Var y)))
+          (Not (Eq (Type_var x) Int)))))
+       (Asserted (Eq (Var x) (Var y))) (Asserted (Eq (Type_var x) Int))
+       (Asserted (Eq (Type_var y) Bool)))))
     |}]
 ;;
 
@@ -943,23 +1046,24 @@ let%expect_test "Nelson-Oppen: non-convex integer case needs a disjunction of \
     |}]
 ;;
 
-let%expect_test "Nelson-Oppen: LA-implied equality with conflicting types" =
+let%expect_test "Nelson-Oppen: LA-implied equality with disjoint types" =
   let solver = Solver.create () in
   assert_ok solver (Formula.La_compare (x, `Le, y));
   assert_ok solver (Formula.La_compare (y, `Le, x));
   Solver.assert_type solver xv int_type;
-  Solver.assert_type solver yv float_type;
+  Solver.assert_type solver yv (Base Bool);
   print_result (Solver.solve solver);
   [%expect
     {|
     (Unsat
      (core
       ((Theory_lemma
-        (Or
-         ((Not (Eq (Type_var x) (Type_var y))) (Not (Eq (Type_var y) Float))
-          (Not (Eq (Type_var x) Int)) (Eq Int Float))))
+        (Or ((Not (Eq (Type_var y) Int)) (Not (Eq (Type_var y) Bool)))))
        (Theory_lemma
-        (Or ((Eq (Type_var x) (Type_var y)) (Not (Eq (Var x) (Var y))))))
+        (Or
+         ((Eq (Type_var y) Int) (Not (Eq (Type_var x) Int))
+          (Not (Eq (Var x) (Var y))))))
+       (Asserted (Eq (Type_var x) Int))
        (Theory_lemma
         (Or
          ((Eq (Var x) (Var y))
@@ -975,8 +1079,7 @@ let%expect_test "Nelson-Oppen: LA-implied equality with conflicting types" =
             Le (La_const ((num 0) (den 1))))))))
        (Asserted (La_compare (Var x) Le (Var y)))
        (Asserted (La_compare (Var y) Le (Var x)))
-       (Asserted (Eq (Type_var y) Float)) (Asserted (Eq (Type_var x) Int))
-       (Asserted (Not (Eq Int Float))))))
+       (Asserted (Eq (Type_var y) Bool)))))
     |}]
 ;;
 

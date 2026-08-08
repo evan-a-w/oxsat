@@ -251,7 +251,8 @@ let static_type t (term : Formula.any) =
   | Datatype_tester _
   | Bool
   | Int
-  | Float
+  | Real
+  | Int64
   | Type
   | Function_type _
   | Array_type _
@@ -269,7 +270,7 @@ let check_expected_type ~term ~expected ~actual =
   | Some actual
     when type_expr_is_ground expected
          && type_expr_is_ground actual
-         && not ([%compare.equal: Type_expr.t] expected actual) ->
+         && not (Type_lattice.is_subtype actual ~of_:expected) ->
     Or_error.error_s
       [%message
         "ADT term has an incompatible field type"

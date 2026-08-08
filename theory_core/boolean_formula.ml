@@ -38,7 +38,8 @@ let rec shape_of : type a. a Formula.t -> Shape.t =
   | Datatype_tester _ -> Bool
   | Bool
   | Int
-  | Float
+  | Real
+  | Int64
   | Type
   | Function_type _
   | Array_type _
@@ -65,7 +66,8 @@ let rec type_expr_of : type a. a Formula.t -> Type_expr.t Or_error.t =
   | Var v | Type_var v -> Ok (Type_expr.Var v)
   | Bool -> Ok (Type_expr.Base Bool)
   | Int -> Ok (Type_expr.Base Int)
-  | Float -> Ok (Type_expr.Base Float)
+  | Real -> Ok (Type_expr.Base Real)
+  | Int64 -> Ok (Type_expr.Base Int64)
   | Type -> Ok Type_expr.Type
   | Function_type (a, b) ->
     let%bind.Or_error a = type_expr_of a in
@@ -136,6 +138,28 @@ let le_atoms_of_eq a b =
   [ `Le (diff, Q.zero); `Le (Linear_expr.neg diff, Q.zero) ]
 ;;
 
+let has_type_atom
+  : type a. a Formula.t -> a Formula.t -> Atom.t option Or_error.t
+  =
+  fun a b ->
+  match a, b with
+  | Var v, _ ->
+    let%map.Or_error type_expr = type_expr_of b in
+    Some (`Has_type (v, type_expr))
+  | _, Var v ->
+    let%map.Or_error type_expr = type_expr_of a in
+    Some (`Has_type (v, type_expr))
+  | Type_var a, Type_var b ->
+    Ok (Some (`Type_eq (Type_expr.Var a, Type_expr.Var b)))
+  | Type_var v, _ ->
+    let%map.Or_error type_expr = type_expr_of b in
+    Some (`Has_type (v, type_expr))
+  | _, Type_var v ->
+    let%map.Or_error type_expr = type_expr_of a in
+    Some (`Has_type (v, type_expr))
+  | _ -> Ok None
+;;
+
 let compare_atom a op b =
   match op with
   | `Le -> Atom (`Le (Linear_expr.(a - b), Q.zero))
@@ -181,9 +205,13 @@ and eq_formula_of : type a. a Formula.t -> a Formula.t -> t Or_error.t =
     let%map.Or_error b = of_formula (Formula.widen b) in
     And [ Or [ Not a; b ]; Or [ a; Not b ] ]
   | Type, _ | _, Type ->
-    let%bind.Or_error a = type_expr_of a in
-    let%map.Or_error b = type_expr_of b in
-    Atom (`Type_eq (a, b))
+    let%bind.Or_error has_type = has_type_atom a b in
+    (match has_type with
+     | Some atom -> Ok (Atom atom)
+     | None ->
+       let%bind.Or_error a = type_expr_of a in
+       let%map.Or_error b = type_expr_of b in
+       Atom (`Type_eq (a, b)))
   | La, _ | _, La ->
     let%bind.Or_error a = linear_expr_of a in
     let%map.Or_error b = linear_expr_of b in
@@ -210,9 +238,13 @@ and neq_formula_of : type a. a Formula.t -> a Formula.t -> t Or_error.t =
     let%map.Or_error equality = eq_formula_of a b in
     Not equality
   | Type, _ | _, Type ->
-    let%bind.Or_error a = type_expr_of a in
-    let%map.Or_error b = type_expr_of b in
-    Not (Atom (`Type_eq (a, b)))
+    let%bind.Or_error has_type = has_type_atom a b in
+    (match has_type with
+     | Some atom -> Ok (Not (Atom atom))
+     | None ->
+       let%bind.Or_error a = type_expr_of a in
+       let%map.Or_error b = type_expr_of b in
+       Not (Atom (`Type_eq (a, b))))
   | La, _ | _, La ->
     let%bind.Or_error a = linear_expr_of a in
     let%map.Or_error b = linear_expr_of b in

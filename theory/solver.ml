@@ -38,6 +38,15 @@ module Atoms_key = struct
   ;;
 end
 
+module Domain_lemma_key = struct
+  module T = struct
+    type t = Atom.t * Atom.t [@@deriving compare, hash, sexp]
+  end
+
+  include T
+  include functor Hashable.Make
+end
+
 module Combined_theory = struct
   type t =
     { egraph : Formula_egraph_uf.t
@@ -48,6 +57,7 @@ module Combined_theory = struct
     ; arrays : Arrays.t
     ; adts : Adts.t
     ; shared_tvars : Tvar.Hash_set.t
+    ; domain_lemma_emitted : Domain_lemma_key.Hash_set.t
     ; produce_proofs : bool
     ; certificate_by_atoms : Lemma_certificate.t Atoms_key.Table.t
     }
@@ -67,12 +77,17 @@ module Combined_theory = struct
         t.egraph
         ~decision_level
         ~atom:(`Type_eq (a, b))
+        ~value
+    | Some (`Has_type (var, type_expr)) ->
+      Tvar_types.assert_atom
+        t.tt
+        ~decision_level
+        ~atom:(`Has_type (var, type_expr))
         ~value;
-      Tvar_types.assert_atom t.tt ~decision_level ~atom:(`Type_eq (a, b)) ~value;
       Branch_and_bound.assert_atom
         t.bb
         ~decision_level
-        ~atom:(`Type_eq (a, b))
+        ~atom:(`Has_type (var, type_expr))
         ~value
     | Some (`Le _ as atom) ->
       Branch_and_bound.assert_atom t.bb ~decision_level ~atom ~value
@@ -97,8 +112,7 @@ module Combined_theory = struct
     (in_egraph a && in_egraph b)
     ||
     match Tvar_types.get_type t.tt a, Tvar_types.get_type t.tt b with
-    | Some type_a, Some type_b ->
-      not ([%compare.equal: Type_expr.t] type_a type_b)
+    | Some type_a, Some type_b -> Type_lattice.disjoint type_a type_b
     | None, _ | _, None -> true
   ;;
 
@@ -125,19 +139,23 @@ module Combined_theory = struct
           Bare_var_eq.register_candidate t.bare_var_eq first tvar))
   ;;
 
-  (* Reconstruct the [Type_theory] certificate from the lemma clause, which is
-     [(Type_eq (Var v, type1), false); (Type_eq (Var v, type2), false)] with
-     [type1]/[type2] structurally incompatible. *)
   let type_theory_certificate (literals : (Tvar_types.Atom.t * bool) list)
     : Lemma_certificate.t
     =
     match literals with
-    | [ ((`Type_eq (_, type1) as a1), _); ((`Type_eq (_, type2) as a2), _) ] ->
+    | [ ((`Has_type (_, type1) as a1), false)
+      ; ((`Has_type (_, type2) as a2), false)
+      ] ->
       Type_theory
         { left = type1
         ; right = type2
         ; premises = [ (a1 :> Atom.t); (a2 :> Atom.t) ]
         }
+    | [ ((`Has_type (_, subtype) as guard), false)
+      ; ((`Has_type (_, supertype) as consequence), true)
+      ]
+      when Type_lattice.is_subtype subtype ~of_:supertype ->
+      Type_domain { guard :> Atom.t; consequence :> Atom.t }
     | _ -> raise_s [%message "unexpected type-theory lemma shape"]
   ;;
 
@@ -149,8 +167,8 @@ module Combined_theory = struct
             List.map combination ~f:(fun (atom, coeff) ->
               (atom :> Atom.t), coeff)
         }
-    | Integer_split { variable; floor; ceil } ->
-      Integer_split { variable; floor; ceil }
+    | Integer_split { guard; variable; floor; ceil } ->
+      Integer_split { guard :> Atom.t; variable; floor; ceil }
     | None -> raise_s [%message "branch-and-bound produced no lemma to explain"]
   ;;
 
@@ -169,6 +187,18 @@ module Combined_theory = struct
       when Option.is_some (var_of_uf uf) ->
       ignore (var_of_uf uf);
       Bare_var_eq (Equality_implies_type_equality (a, b))
+    | [ (`Has_type (target, type_), true)
+      ; (`Has_type (source, same_type), false)
+      ; (uf, false)
+      ]
+      when Option.is_some (var_of_uf uf)
+           && [%compare.equal: Type_expr.t] type_ same_type ->
+      let left, right = Option.value_exn (var_of_uf uf) in
+      if not
+           ((Tvar.equal source left && Tvar.equal target right)
+            || (Tvar.equal source right && Tvar.equal target left))
+      then raise_s [%message "unexpected equality-implies-has-type lemma"];
+      Bare_var_eq (Equality_implies_has_type { source; target; type_ })
     | [ (`Le (le, bound), true); (uf, false) ]
       when Option.is_some (var_of_uf uf) ->
       let left, right = Option.value_exn (var_of_uf uf) in
@@ -193,6 +223,44 @@ module Combined_theory = struct
         t.certificate_by_atoms
         ~key:(Atoms_key.of_atoms atoms)
         ~data:certificate
+  ;;
+
+  let mark_domain_lemma t ~guard ~consequence =
+    let key = guard, consequence in
+    if Hash_set.mem t.domain_lemma_emitted key
+    then None
+    else (
+      Hash_set.add t.domain_lemma_emitted key;
+      Some [ guard, false; consequence, true ])
+  ;;
+
+  let type_domain_consequences ~var ~type_expr =
+    let subtype_consequences =
+      Type_lattice.strict_supertypes type_expr
+      |> List.map ~f:(fun supertype : Atom.t -> `Has_type (var, supertype))
+    in
+    let bound_consequences =
+      match Numeric_domain.of_type_expr type_expr with
+      | Some { bounds = Some { lower; upper }; _ } ->
+        [ `Le (Linear_expr.var var, upper)
+        ; `Le (Linear_expr.neg (Linear_expr.var var), Q.neg lower)
+        ]
+        |> List.map ~f:(fun atom -> (atom :> Atom.t))
+      | Some { bounds = None; _ } | None -> []
+    in
+    subtype_consequences @ bound_consequences
+  ;;
+
+  let maybe_get_type_domain_lemma t =
+    Encoding.atoms t.encoding
+    |> List.find_map ~f:(fun (atom, _sat_var) ->
+      match atom with
+      | `Has_type (var, type_expr) ->
+        let guard : Atom.t = `Has_type (var, type_expr) in
+        type_domain_consequences ~var ~type_expr
+        |> List.find_map ~f:(fun consequence ->
+          mark_domain_lemma t ~guard ~consequence)
+      | `Eq _ | `Type_eq _ | `Le _ -> None)
   ;;
 
   let maybe_get_lemma t = exclave_
@@ -246,40 +314,60 @@ module Combined_theory = struct
                  ~certificate:(type_theory_certificate literals);
                lemma_to_clause
                  literals
-                 ~sat_var_for_atom:(fun (`Type_eq (a, b) : Tvar_types.Atom.t) ->
-                   Encoding.sat_var_for_atom t.encoding (`Type_eq (a, b)))
+                 ~sat_var_for_atom:
+                   (fun
+                     (`Has_type (var, type_expr) : Tvar_types.Atom.t) ->
+                   Encoding.sat_var_for_atom
+                     t.encoding
+                     (`Has_type (var, type_expr)))
              | `Consistent ->
-               (match Branch_and_bound.maybe_get_lemma t.bb [@nontail] with
-                | `Lemma literals ->
+               (match maybe_get_type_domain_lemma t with
+                | Some literals ->
                   record_certificate
                     t
-                    ~atoms:
-                      (List.map literals ~f:(fun (atom, _) -> (atom :> Atom.t)))
-                    ~certificate:(bb_certificate t);
-                  lemma_to_clause
-                    literals
-                    ~sat_var_for_atom:(fun (atom : Branch_and_bound.Atom.t) ->
-                      Encoding.sat_var_for_atom t.encoding (atom :> Atom.t))
-                | `Consistent ->
-                  register_shared_candidates t;
-                  (match
-                     Bare_var_eq.maybe_get_lemma
-                       t.bare_var_eq
-                       ~eq_value:(fun a b ->
-                         Formula_egraph_uf.atom_value
-                           t.egraph
-                           ~atom:(`Eq (Formula.Var a, Formula.Var b)))
-                       ~theory_of:(Encoding.theory_for_tvar t.encoding)
-                       ~get_type:(Tvar_types.get_type t.tt)
-                   with
-                   | `Consistent -> `Consistent
+                    ~atoms:(List.map literals ~f:fst)
+                    ~certificate:
+                      (Type_domain
+                         { guard = fst (List.hd_exn literals)
+                         ; consequence = fst (List.last_exn literals)
+                         });
+                  lemma_to_clause literals ~sat_var_for_atom:(fun atom ->
+                    Encoding.sat_var_for_atom t.encoding atom)
+                | None ->
+                  (match Branch_and_bound.maybe_get_lemma t.bb [@nontail] with
                    | `Lemma literals ->
                      record_certificate
                        t
-                       ~atoms:(List.map literals ~f:fst)
-                       ~certificate:(bare_var_eq_certificate literals);
-                     lemma_to_clause literals ~sat_var_for_atom:(fun atom ->
-                       Encoding.sat_var_for_atom t.encoding atom))))))
+                       ~atoms:
+                         (List.map literals ~f:(fun (atom, _) ->
+                            (atom :> Atom.t)))
+                       ~certificate:(bb_certificate t);
+                     lemma_to_clause
+                       literals
+                       ~sat_var_for_atom:
+                         (fun
+                           (atom : Branch_and_bound.Atom.t) ->
+                         Encoding.sat_var_for_atom t.encoding (atom :> Atom.t))
+                   | `Consistent ->
+                     register_shared_candidates t;
+                     (match
+                        Bare_var_eq.maybe_get_lemma
+                          t.bare_var_eq
+                          ~eq_value:(fun a b ->
+                            Formula_egraph_uf.atom_value
+                              t.egraph
+                              ~atom:(`Eq (Formula.Var a, Formula.Var b)))
+                          ~theory_of:(Encoding.theory_for_tvar t.encoding)
+                          ~get_type:(Tvar_types.get_type t.tt)
+                      with
+                      | `Consistent -> `Consistent
+                      | `Lemma literals ->
+                        record_certificate
+                          t
+                          ~atoms:(List.map literals ~f:fst)
+                          ~certificate:(bare_var_eq_certificate literals);
+                        lemma_to_clause literals ~sat_var_for_atom:(fun atom ->
+                          Encoding.sat_var_for_atom t.encoding atom)))))))
   ;;
 
   let certificate_for_atoms t atoms =
@@ -297,6 +385,7 @@ module Combined_theory = struct
   let on_new_var t ~var =
     match Encoding.atom_for_sat_var t.encoding var with
     | None | Some (`Le _) -> ()
+    | Some (`Has_type (_var, type_expr)) -> Arrays.add_type t.arrays ~type_expr
     | Some (`Eq (a, b)) ->
       Formula_egraph_uf.add_atom t.egraph ~atom:(`Eq (a, b));
       Arrays.add_atom t.arrays ~atom:(`Eq (a, b));
@@ -348,6 +437,7 @@ let create ?(config = Config.default) () =
     ; arrays
     ; adts
     ; shared_tvars = Tvar.Hash_set.create ()
+    ; domain_lemma_emitted = Domain_lemma_key.Hash_set.create ()
     ; produce_proofs = config.produce_proofs
     ; certificate_by_atoms = Atoms_key.Table.create ()
     }
@@ -376,17 +466,15 @@ let create ?(config = Config.default) () =
     }
   in
   (* Pre-register pairwise disequalities between distinct base types. This makes
-     the type-level EGRAPH aware that e.g. [Int ≠ Float], so that asserting
-     types unifying a variable with both [Int] and [Float] yields a conflict. *)
+     the type-level EGRAPH aware that e.g. [Int ≠ Real] for exact type-equality
+     atoms. Type-membership facts use [`Has_type] and are interpreted through
+     {!Type_lattice} instead. *)
   let base_types = Type_expr.Base.all in
   List.iter base_types ~f:(fun b1 ->
     List.iter base_types ~f:(fun b2 ->
       if [%compare: Type_expr.Base.t] b1 b2 < 0
       then (
-        let (`Type_eq (a, b) : Tvar_types.Atom.t) =
-          `Type_eq (Type_expr.Base b1, Type_expr.Base b2)
-        in
-        let atom : Atom.t = `Type_eq (a, b) in
+        let atom : Atom.t = `Type_eq (Type_expr.Base b1, Type_expr.Base b2) in
         let sat_var = Encoding.sat_var_for_atom t.encoding atom in
         let axiom = Formula.Not (Encoding.atom_to_formula atom) in
         Hashtbl.set t.formula_by_root_lit ~key:(-sat_var) ~data:axiom;
@@ -669,7 +757,9 @@ let active_asserted_formulas t =
   let axioms =
     Hashtbl.data t.formula_by_root_lit
     |> List.filter ~f:(function
-      | Formula.Not (Eq ((Bool | Int | Float), (Bool | Int | Float))) -> true
+      | Formula.Not
+          (Eq ((Bool | Int | Real | Int64), (Bool | Int | Real | Int64))) ->
+        true
       | _ -> false)
   in
   axioms @ asserted
