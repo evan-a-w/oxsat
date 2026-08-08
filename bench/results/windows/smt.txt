@@ -1,14 +1,3 @@
-Q small-int fast path after Real/Int64 Bigint-backed Q refactor. A/B vs
-checked-in smt baseline: geomean time 1.17x, alloc 2.12x. Compared with the
-plain Bigint Q run just before this patch (geomean time 1.29x, alloc 1.44x),
-this recovers some arithmetic time but leaves allocation higher; likely follow-up
-is reducing Small-rational representation allocation.
-
-$ eval $(opam env) && bench/compare.sh smt
-Worst time regressions vs baseline: LP feasible n=20 2.37x, Bin packing 10x3
-2.13x, LP feasible n=50 1.53x. Bin packing p50s roughly 3.59ms/26.60ms/57.21ms
-for 10/15/20 item cases; allocations 15.78MiB/143.29MiB/306.44MiB.
-
 egx node-index allocation round: lazy by-op lookup, list-backed persistent
 Node_index, lazy canonical_node replacement, and moderate egraph/UF table sizing
 
