@@ -30,6 +30,22 @@ val num : t -> Bigint.t
 
 val den : t -> Bigint.t
 
+module Num_den : sig
+  type t =
+    | Small of
+        { num : int
+        ; den : int
+        }
+    | Big of
+        { num : Bigint.t
+        ; den : Bigint.t
+        }
+end
+
+(** Like {!num}/{!den}, but avoids allocating [Bigint.t] values when the
+    rational is represented by small OCaml ints. *)
+val num_den : t -> Num_den.t
+
 (** For debug printing only; not exact. *)
 val to_float : t -> float
 
