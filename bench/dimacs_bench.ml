@@ -31,6 +31,10 @@ let dimacs_instance ~name dimacs =
   Instance.{ name; dimacs; clauses }
 ;;
 
+let dimacs_file_instance ~name path =
+  dimacs_instance ~name (In_channel.read_all path)
+;;
+
 let default_instances () =
   [ dimacs_instance ~name:"SUDOKU" Examples.Dimacs.sudoku
   ; dimacs_instance ~name:"SUCC_EG" Examples.Dimacs.succ_eg
@@ -38,6 +42,12 @@ let default_instances () =
   ; dimacs_instance ~name:"FACTOR_1235321" Examples.Dimacs.factor_1235321
   ; dimacs_instance ~name:"FAIL_EG" Examples.Dimacs.fail_eg
   ; dimacs_instance ~name:"SUBSETS_100" Examples.Dimacs.subsets_100
+  ; dimacs_file_instance
+      ~name:"ROCKS_HARD_3SAT_N120"
+      "bench/problems/rocks_hard_3sat_n120.cnf"
+  ; dimacs_file_instance
+      ~name:"ROCKS_HARD_3SAT_N160"
+      "bench/problems/rocks_hard_3sat_n160.cnf"
   ]
 ;;
 
