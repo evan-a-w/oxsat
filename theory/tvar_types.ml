@@ -3,7 +3,7 @@ open! Import
 module Type = Type_expr.Base
 
 module Atom = struct
-  type t = [ `Type_eq of Type_expr.t * Type_expr.t ]
+  type t = [ `Has_type of Tvar.t * Type_expr.t ]
   [@@deriving sexp, compare, hash]
 
   let normalize x = x
@@ -12,124 +12,162 @@ module Atom = struct
   include functor Hashable.Make
 end
 
-let has_type var type_expr : Atom.t = `Type_eq (Type_expr.Var var, type_expr)
+let has_type var type_expr : Atom.t = `Has_type (var, type_expr)
 
-module Trail_entry = struct
+module Constraint = struct
   type t =
     { decision_level : int
-    ; var : Tvar.t
-    ; old_type : Type_expr.t option
-    ; caused_conflict : bool
+    ; atom : Atom.t
+    ; value : bool
     }
+  [@@deriving compare]
 
-  let default =
-    { decision_level = 0
-    ; var = Tvar.of_string ""
-    ; old_type = None
-    ; caused_conflict = false
-    }
-  ;;
+  let var { atom = `Has_type (var, _); _ } = var
 end
 
 type t =
-  { types : Type_expr.t Tvar.Table.t
-  ; trail : Trail_entry.t Ext.t Vec.Value.t
-  ; trail_entry_pool : Trail_entry.t Ext.Pool.t
-  ; mutable conflict : (Atom.t * Atom.t) option
+  { constraints_by_var : Constraint.t list Tvar.Table.t
+  ; trail : Constraint.t Vec.Value.t
+  ; mutable conflict : (Atom.t * bool) list option
   }
 
 let create () =
-  { types = Tvar.Table.create ()
+  { constraints_by_var = Tvar.Table.create ()
   ; trail = Vec.Value.create ()
-  ; trail_entry_pool = Ext.Pool.create_unchecked ~default:Trail_entry.default ()
   ; conflict = None
   }
 ;;
 
-let get_type t var = Hashtbl.find t.types var
-let all_typed_vars t = Hashtbl.keys t.types
+let meet_types types =
+  List.fold_until
+    types
+    ~init:None
+    ~f:(fun acc type_expr ->
+      match acc with
+      | None -> Continue (Some type_expr)
+      | Some acc ->
+        (match Type_lattice.meet acc type_expr with
+         | Some meet -> Continue (Some meet)
+         | None -> Stop None))
+    ~finish:Fn.id
+;;
 
-(* True if [t1] and [t2] have incompatible heads — they cannot be unified. Type
-   variables ([Var _]) are never incompatible since they can unify with
-   anything; deeper argument mismatches are caught by type-level EUF. *)
-let are_structurally_incompatible t1 t2 =
-  match t1, t2 with
-  | Type_expr.Base b1, Type_expr.Base b2 -> not (Type_expr.Base.equal b1 b2)
-  | Type_expr.App (c1, _), Type_expr.App (c2, _) -> not (Tvar.equal c1 c2)
-  | Type_expr.Function_type _, Type_expr.Function_type _ -> false
-  | Type_expr.Array_type _, Type_expr.Array_type _ -> false
-  | Type_expr.Type, Type_expr.Type -> false
-  | Type_expr.Var _, _
-  | _, Type_expr.Var _
-  | Type_expr.Type_of _, _
-  | _, Type_expr.Type_of _ -> false
-  | Type_expr.Base _, Type_expr.App _
-  | Type_expr.App _, Type_expr.Base _
-  | Type_expr.Base _, Type_expr.Function_type _
-  | Type_expr.Function_type _, Type_expr.Base _
-  | Type_expr.Base _, Type_expr.Array_type _
-  | Type_expr.Array_type _, Type_expr.Base _
-  | Type_expr.Base _, Type_expr.Type
-  | Type_expr.Type, Type_expr.Base _
-  | Type_expr.App _, Type_expr.Function_type _
-  | Type_expr.Function_type _, Type_expr.App _
-  | Type_expr.App _, Type_expr.Array_type _
-  | Type_expr.Array_type _, Type_expr.App _
-  | Type_expr.App _, Type_expr.Type
-  | Type_expr.Type, Type_expr.App _
-  | Type_expr.Function_type _, Type_expr.Array_type _
-  | Type_expr.Array_type _, Type_expr.Function_type _
-  | Type_expr.Function_type _, Type_expr.Type
-  | Type_expr.Type, Type_expr.Function_type _
-  | Type_expr.Array_type _, Type_expr.Type
-  | Type_expr.Type, Type_expr.Array_type _ -> true
+let positive_types constraints =
+  List.filter_map constraints ~f:(fun ({ atom; value; _ } : Constraint.t) ->
+    match atom, value with
+    | `Has_type (_, type_expr), true -> Some type_expr
+    | `Has_type _, false -> None)
+;;
+
+let get_type t var =
+  Hashtbl.find t.constraints_by_var var
+  |> Option.bind ~f:(fun constraints ->
+    let types = positive_types constraints in
+    match meet_types types with
+    | Some _ as type_ -> type_
+    | None -> List.hd types)
+;;
+
+let all_typed_vars t =
+  Hashtbl.keys t.constraints_by_var
+  |> List.filter ~f:(fun var -> Option.is_some (get_type t var))
+;;
+
+let positive_conflict constraints =
+  let positives =
+    List.filter constraints ~f:(fun ({ value; _ } : Constraint.t) -> value)
+  in
+  List.find_map
+    positives
+    ~f:
+      (fun
+        ({ atom = `Has_type (_, left) as left_atom; _ } as left_c :
+          Constraint.t)
+      ->
+      List.find_map
+        positives
+        ~f:
+          (fun
+            ({ atom = `Has_type (_, right) as right_atom; _ } as right_c :
+              Constraint.t)
+          ->
+          if Constraint.compare left_c right_c < 0
+             && Type_lattice.disjoint left right
+          then Some [ left_atom, false; right_atom, false ]
+          else None))
+;;
+
+let negative_conflict constraints =
+  let positives, negatives =
+    List.partition_tf constraints ~f:(fun ({ value; _ } : Constraint.t) ->
+      value)
+  in
+  List.find_map
+    positives
+    ~f:(fun ({ atom = `Has_type (_, sub) as positive; _ } : Constraint.t) ->
+      List.find_map
+        negatives
+        ~f:
+          (fun
+            ({ atom = `Has_type (_, super) as negative; _ } : Constraint.t) ->
+          if Type_lattice.is_subtype sub ~of_:super
+          then Some [ positive, false; negative, true ]
+          else None))
+;;
+
+let recompute_conflict t =
+  t.conflict
+  <- Hashtbl.data t.constraints_by_var
+     |> List.find_map ~f:(fun constraints ->
+       match positive_conflict constraints with
+       | Some _ as conflict -> conflict
+       | None -> negative_conflict constraints)
 ;;
 
 let assert_atom t ~decision_level ~(atom : Atom.t) ~value =
-  match value, atom with
-  | true, `Type_eq (Type_expr.Var var, type_expr)
-  | true, `Type_eq (type_expr, Type_expr.Var var) ->
-    let old_type = Hashtbl.find t.types var in
-    let caused_conflict =
-      match old_type with
-      | Some old when not ([%compare.equal: Type_expr.t] old type_expr) ->
-        if are_structurally_incompatible old type_expr
-        then (
-          t.conflict <- Some (atom, has_type var old);
-          true)
-        else false
-      | _ -> false
-    in
-    Vec.Value.push
-      t.trail
-      (Ext.alloc_set
-         t.trail_entry_pool
-         (stack_ { decision_level; var; old_type; caused_conflict }
-          : Trail_entry.t));
-    Hashtbl.set t.types ~key:var ~data:type_expr
-  | true, `Type_eq (_, _) | false, `Type_eq _ -> ()
+  let constraint_ = { Constraint.decision_level; atom; value } in
+  Vec.Value.push t.trail constraint_;
+  Hashtbl.update t.constraints_by_var (Constraint.var constraint_) ~f:(function
+    | None -> [ constraint_ ]
+    | Some constraints -> constraint_ :: constraints);
+  recompute_conflict t
 ;;
 
 let maybe_get_lemma t =
   match t.conflict with
   | None -> `Consistent
-  | Some (a1, a2) -> `Lemma [ a1, false; a2, false ]
+  | Some literals -> `Lemma literals
+;;
+
+let remove_first constraints target =
+  let rec go rev_prefix = function
+    | [] -> List.rev rev_prefix
+    | constraint_ :: rest ->
+      if [%compare.equal: Constraint.t] constraint_ target
+      then List.rev_append rev_prefix rest
+      else go (constraint_ :: rev_prefix) rest
+  in
+  go [] constraints
 ;;
 
 let undo t ~to_decision_level_excl =
   let rec go () =
     match Vec.Value.last t.trail with
-    | Some entry_ext
-      when (Ext.get entry_ext).decision_level > to_decision_level_excl ->
-      let entry_ext = Vec.Value.pop_exn t.trail in
-      let entry = Ext.get entry_ext in
-      if entry.caused_conflict then t.conflict <- None;
-      (match entry.old_type with
-       | None -> Hashtbl.remove t.types entry.var
-       | Some type_expr -> Hashtbl.set t.types ~key:entry.var ~data:type_expr);
-      Ext.free entry_ext;
+    | Some constraint_ when constraint_.decision_level > to_decision_level_excl
+      ->
+      let constraint_ = Vec.Value.pop_exn t.trail in
+      let var = Constraint.var constraint_ in
+      let constraints =
+        Hashtbl.find t.constraints_by_var var
+        |> Option.value ~default:[]
+        |> fun constraints -> remove_first constraints constraint_
+      in
+      if List.is_empty constraints
+      then Hashtbl.remove t.constraints_by_var var
+      else Hashtbl.set t.constraints_by_var ~key:var ~data:constraints;
       go ()
     | None | Some _ -> ()
   in
-  go ()
+  go ();
+  recompute_conflict t
 ;;

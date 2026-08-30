@@ -61,6 +61,7 @@ type t =
   | Euf of Euf.t
   | Linear_arithmetic of Linear_arithmetic.t
   | Integer_split of Proof.Theory_certificate.Integer_split.t
+  | Type_domain of Proof.Theory_certificate.Type_domain.t
   | Type_theory of Type_theory.t
   | Array of Array.t
   | Adt of Adt.t
@@ -130,6 +131,7 @@ let to_theory_certificate clause (t : t) : Proof.Theory_certificate.t =
             })
       }
   | Integer_split certificate -> Integer_split certificate
+  | Type_domain certificate -> Type_domain certificate
   | Type_theory { left; right; premises } ->
     Type_theory
       { left

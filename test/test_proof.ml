@@ -789,29 +789,35 @@ let%expect_test "a solver refutation proof prints as human-readable text" =
     {|
     Assumptions:
       a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: a = b ∨ c = d
-      a4: a ≠ b
-      a5: c ≠ d
+      a1: bool ≠ real
+      a2: bool ≠ int64
+      a3: int ≠ real
+      a4: int ≠ int64
+      a5: real ≠ int64
+      a6: a = b ∨ c = d
+      a7: a ≠ b
+      a8: c ≠ d
     Steps:
       s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: a = b ∨ c = d   [assumption a3]
-      s4: a ≠ b   [assumption a4]
-      s5: c ≠ d   [assumption a5]
-      s6: false   [refutation of [s0, s1, s2, s3, s4, s5]]
+      s1: bool ≠ real   [assumption a1]
+      s2: bool ≠ int64   [assumption a2]
+      s3: int ≠ real   [assumption a3]
+      s4: int ≠ int64   [assumption a4]
+      s5: real ≠ int64   [assumption a5]
+      s6: a = b ∨ c = d   [assumption a6]
+      s7: a ≠ b   [assumption a7]
+      s8: c ≠ d   [assumption a8]
+      s9: false   [refutation of [s0, s1, s2, s3, s4, s5, s6, s7, s8]]
         refutation:
           extensions:
             e0 := (a = b ∨ c = d)
           steps:
             r0: a = b ∨ c = d ∨ ¬(e0)   [definition of e0]
-            r1: e0   [s3]
-            r2: a ≠ b   [s4]
-            r3: c ≠ d   [s5]
+            r1: e0   [s6]
+            r2: a ≠ b   [s7]
+            r3: c ≠ d   [s8]
             r4: ⊥   [RUP over [r1, r2, r3, r0]]
-    Conclusion: s6
+    Conclusion: s9
 
     (check (result (Ok ())))
     |}]
@@ -833,13 +839,17 @@ let%expect_test "bare equality bridge and integer split certificates are \
   in
   let integer_clause =
     clause_exn
-      [ theory_literal
-          (`Type_eq (Type_expr.Var x, Type_expr.Base Int))
-          ~positive:false
+      [ theory_literal (`Has_type (x, Type_expr.Base Int)) ~positive:false
       ; theory_literal (`Le (Linear_expr.var x, Q.one)) ~positive:true
       ; theory_literal
           (`Le (Linear_expr.neg (Linear_expr.var x), Q.of_int (-2)))
           ~positive:true
+      ]
+  in
+  let subtype_clause =
+    clause_exn
+      [ theory_literal (`Has_type (x, Type_expr.Base Int64)) ~positive:false
+      ; theory_literal (`Has_type (x, Type_expr.Base Int)) ~positive:true
       ]
   in
   let check clause certificate =
@@ -856,14 +866,44 @@ let%expect_test "bare equality bridge and integer split certificates are \
         ~integer:
           (check
              integer_clause
-             (Integer_split { variable = x; floor = Q.one; ceil = Q.of_int 2 })
+             (Integer_split
+                { guard = `Has_type (x, Type_expr.Base Int)
+                ; variable = x
+                ; floor = Q.one
+                ; ceil = Q.of_int 2
+                })
+           : bool)
+        ~subtype:
+          (check
+             subtype_clause
+             (Type_domain
+                { guard = `Has_type (x, Type_expr.Base Int64)
+                ; consequence = `Has_type (x, Type_expr.Base Int)
+                })
+           : bool)
+        ~bad_subtype:
+          (check
+             subtype_clause
+             (Type_domain
+                { guard = `Has_type (x, Type_expr.Base Int)
+                ; consequence = `Has_type (x, Type_expr.Base Int64)
+                })
            : bool)
         ~bad_integer:
           (check
              integer_clause
-             (Integer_split { variable = x; floor = Q.one; ceil = Q.of_int 3 })
+             (Integer_split
+                { guard = `Has_type (x, Type_expr.Base Int)
+                ; variable = x
+                ; floor = Q.one
+                ; ceil = Q.of_int 3
+                })
            : bool)];
-  [%expect {| (certificates (bare true) (integer true) (bad_integer false)) |}]
+  [%expect
+    {|
+    (certificates (bare true) (integer true) (subtype true) (bad_subtype false)
+     (bad_integer false))
+    |}]
 ;;
 
 let%expect_test "kernel quantifier introduction accepts hand-built proofs" =

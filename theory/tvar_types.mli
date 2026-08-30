@@ -3,7 +3,7 @@ open! Import
 module Type = Type_expr.Base
 
 module Atom : sig
-  type t = [ `Type_eq of Type_expr.t * Type_expr.t ]
+  type t = [ `Has_type of Tvar.t * Type_expr.t ]
   [@@deriving sexp, compare, hash]
 
   val normalize : t -> t
@@ -12,7 +12,7 @@ module Atom : sig
   include Hashable.S with type t := t
 end
 
-(** [Type_eq (Var var, type_expr)], asserting that [var] has type [type_expr]. *)
+(** [Has_type (var, type_expr)], asserting that [var] has type [type_expr]. *)
 val has_type : Tvar.t -> Type_expr.t -> Atom.t
 
 type t

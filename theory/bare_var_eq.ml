@@ -43,7 +43,7 @@ let uf_atom a b : Atom.t = `Eq (Formula.Var a, Formula.Var b)
 let type_atom a b : Atom.t = `Type_eq (Type_expr.Var a, Type_expr.Var b)
 
 let is_numeric : Type_expr.t option -> bool = function
-  | Some (Base (Int | Float)) -> true
+  | Some (Base base) -> Numeric_domain.is_numeric_base base
   | _ -> false
 ;;
 
@@ -52,9 +52,25 @@ let la_atoms a b : Atom.t list =
   [ `Le (diff, Q.zero); `Le (Linear_expr.neg diff, Q.zero) ]
 ;;
 
-(* eq -> type_eq *)
-let type_forward_clauses (a, b) =
-  [ [ type_atom a b, true; uf_atom a b, false ] ]
+(* eq -> shared type facts *)
+let type_forward_clauses ~get_type (a, b) =
+  [ [ type_atom a b, true; uf_atom a b, false ]
+  ; (match get_type a with
+     | Some type_ ->
+       [ `Has_type (b, type_), true
+       ; `Has_type (a, type_), false
+       ; uf_atom a b, false
+       ]
+     | None -> [])
+  ; (match get_type b with
+     | Some type_ ->
+       [ `Has_type (a, type_), true
+       ; `Has_type (b, type_), false
+       ; uf_atom a b, false
+       ]
+     | None -> [])
+  ]
+  |> List.filter ~f:(fun clause -> not (List.is_empty clause))
 ;;
 
 (* eq -> le, for each of the two [le]s encoding numeric equality *)
@@ -119,7 +135,7 @@ let maybe_get_lemma t ~eq_value ~theory_of ~get_type =
             ~is_ready:(fun ((a, b) as pair) ->
               [%equal: bool option] (eq_value pair) (Some true)
               && (type_member a || type_member b))
-            ~clauses:type_forward_clauses)
+            ~clauses:(type_forward_clauses ~get_type))
       ; (fun () ->
           fire
             ~injected:t.la_forward_injected

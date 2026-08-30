@@ -401,7 +401,7 @@ let%expect_test "ADT field types constrain constructor arguments" =
   let solver =
     Solver.create ~config:{ Solver.Config.default with datatype_env } ()
   in
-  Solver.assert_type solver x (Base Float);
+  Solver.assert_type solver x (Base Real);
   assert_ok solver (eq box_x box_x);
   print_result (Solver.solve solver);
   [%expect
@@ -410,7 +410,7 @@ let%expect_test "ADT field types constrain constructor arguments" =
     ((Base Int))
     Sat
     (((App box ())) ((Base Int)))
-    Unsat
+    Sat
     |}]
 ;;
 
@@ -683,25 +683,31 @@ let%expect_test "ADT proofs print human-readable certificate text" =
     injectivity: check = true
     Assumptions:
       a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: a : list()
-      a4: c : list()
-      a5: Cons(a, Nil()) = Cons(c, Nil())
-      a6: a ≠ c
+      a1: bool ≠ real
+      a2: bool ≠ int64
+      a3: int ≠ real
+      a4: int ≠ int64
+      a5: real ≠ int64
+      a6: a : list()
+      a7: c : list()
+      a8: Cons(a, Nil()) = Cons(c, Nil())
+      a9: a ≠ c
     Steps:
       s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: a : list()   [assumption a3]
-      s4: c : list()   [assumption a4]
-      s5: Cons(a, Nil()) = Cons(c, Nil())   [assumption a5]
-      s6: a ≠ c   [assumption a6]
-      s7: false   [refutation of [s0, s1, s2, s3, s4, s5, s6]]
+      s1: bool ≠ real   [assumption a1]
+      s2: bool ≠ int64   [assumption a2]
+      s3: int ≠ real   [assumption a3]
+      s4: int ≠ int64   [assumption a4]
+      s5: real ≠ int64   [assumption a5]
+      s6: a : list()   [assumption a6]
+      s7: c : list()   [assumption a7]
+      s8: Cons(a, Nil()) = Cons(c, Nil())   [assumption a8]
+      s9: a ≠ c   [assumption a9]
+      s10: false   [refutation of [s0, s1, s2, s3, s4, s5, s6, s7, s8, s9]]
         refutation:
           steps:
-            r0: Cons(a, Nil()) = Cons(c, Nil())   [s5]
-            r1: a ≠ c   [s6]
+            r0: Cons(a, Nil()) = Cons(c, Nil())   [s8]
+            r1: a ≠ c   [s9]
             r2: a = c ∨ Cons(a, Nil()) ≠ Cons(c, Nil())   [ADT: (Injectivity (constructor ((datatype ((name list))) (name Cons) (arity 2)))
      (left_args
       ((Var a)
@@ -711,52 +717,64 @@ let%expect_test "ADT proofs print human-readable certificate text" =
        (Datatype_constructor ((datatype ((name list))) (name Nil) (arity 0)) ())))
      (field_index 0))]
             r3: ⊥   [RUP over [r0, r1, r2]]
-    Conclusion: s7
+    Conclusion: s10
 
     disjointness: check = true
     Assumptions:
       a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: t : list()
-      a4: h : list()
-      a5: Nil() = Cons(h, t)
+      a1: bool ≠ real
+      a2: bool ≠ int64
+      a3: int ≠ real
+      a4: int ≠ int64
+      a5: real ≠ int64
+      a6: t : list()
+      a7: h : list()
+      a8: Nil() = Cons(h, t)
     Steps:
       s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: t : list()   [assumption a3]
-      s4: h : list()   [assumption a4]
-      s5: Nil() = Cons(h, t)   [assumption a5]
-      s6: false   [refutation of [s0, s1, s2, s3, s4, s5]]
+      s1: bool ≠ real   [assumption a1]
+      s2: bool ≠ int64   [assumption a2]
+      s3: int ≠ real   [assumption a3]
+      s4: int ≠ int64   [assumption a4]
+      s5: real ≠ int64   [assumption a5]
+      s6: t : list()   [assumption a6]
+      s7: h : list()   [assumption a7]
+      s8: Nil() = Cons(h, t)   [assumption a8]
+      s9: false   [refutation of [s0, s1, s2, s3, s4, s5, s6, s7, s8]]
         refutation:
           steps:
-            r0: Nil() = Cons(h, t)   [s5]
+            r0: Nil() = Cons(h, t)   [s8]
             r1: Nil() ≠ Cons(h, t)   [ADT: (Disjointness
      (left_constructor ((datatype ((name list))) (name Nil) (arity 0)))
      (left_args ())
      (right_constructor ((datatype ((name list))) (name Cons) (arity 2)))
      (right_args ((Var h) (Var t))))]
             r2: ⊥   [RUP over [r0, r1]]
-    Conclusion: s6
+    Conclusion: s9
 
     selector: check = true
     Assumptions:
       a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: h : list()
-      a4: head(Cons(h, Nil())) ≠ h
+      a1: bool ≠ real
+      a2: bool ≠ int64
+      a3: int ≠ real
+      a4: int ≠ int64
+      a5: real ≠ int64
+      a6: h : list()
+      a7: head(Cons(h, Nil())) ≠ h
     Steps:
       s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: h : list()   [assumption a3]
-      s4: head(Cons(h, Nil())) ≠ h   [assumption a4]
-      s5: false   [refutation of [s0, s1, s2, s3, s4]]
+      s1: bool ≠ real   [assumption a1]
+      s2: bool ≠ int64   [assumption a2]
+      s3: int ≠ real   [assumption a3]
+      s4: int ≠ int64   [assumption a4]
+      s5: real ≠ int64   [assumption a5]
+      s6: h : list()   [assumption a6]
+      s7: head(Cons(h, Nil())) ≠ h   [assumption a7]
+      s8: false   [refutation of [s0, s1, s2, s3, s4, s5, s6, s7]]
         refutation:
           steps:
-            r0: h ≠ head(Cons(h, Nil()))   [s4]
+            r0: h ≠ head(Cons(h, Nil()))   [s7]
             r1: h = head(Cons(h, Nil()))   [ADT: (Selector
      (selector
       ((constructor ((datatype ((name list))) (name Cons) (arity 2))) (name head)
@@ -769,25 +787,31 @@ let%expect_test "ADT proofs print human-readable certificate text" =
       ((Var h)
        (Datatype_constructor ((datatype ((name list))) (name Nil) (arity 0)) ()))))]
             r2: ⊥   [RUP over [r0, r1]]
-    Conclusion: s5
+    Conclusion: s8
 
     tester: check = true
     Assumptions:
       a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: h : list()
-      a4: is-Nil(Cons(h, Nil()))
+      a1: bool ≠ real
+      a2: bool ≠ int64
+      a3: int ≠ real
+      a4: int ≠ int64
+      a5: real ≠ int64
+      a6: h : list()
+      a7: is-Nil(Cons(h, Nil()))
     Steps:
       s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: h : list()   [assumption a3]
-      s4: is-Nil(Cons(h, Nil()))   [assumption a4]
-      s5: false   [refutation of [s0, s1, s2, s3, s4]]
+      s1: bool ≠ real   [assumption a1]
+      s2: bool ≠ int64   [assumption a2]
+      s3: int ≠ real   [assumption a3]
+      s4: int ≠ int64   [assumption a4]
+      s5: real ≠ int64   [assumption a5]
+      s6: h : list()   [assumption a6]
+      s7: is-Nil(Cons(h, Nil()))   [assumption a7]
+      s8: false   [refutation of [s0, s1, s2, s3, s4, s5, s6, s7]]
         refutation:
           steps:
-            r0: true = is-Nil(Cons(h, Nil()))   [s4]
+            r0: true = is-Nil(Cons(h, Nil()))   [s7]
             r1: true ≠ is-Nil(Cons(h, Nil()))   [ADT: (Tester (tester_constructor ((datatype ((name list))) (name Nil) (arity 0)))
      (argument
       (Datatype_constructor ((datatype ((name list))) (name Cons) (arity 2))
@@ -799,25 +823,31 @@ let%expect_test "ADT proofs print human-readable certificate text" =
        (Datatype_constructor ((datatype ((name list))) (name Nil) (arity 0)) ())))
      (value false))]
             r2: ⊥   [RUP over [r0, r1]]
-    Conclusion: s5
+    Conclusion: s8
 
     acyclicity: check = true
     Assumptions:
       a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: x : list()
-      a4: x = Cons(x, Nil())
+      a1: bool ≠ real
+      a2: bool ≠ int64
+      a3: int ≠ real
+      a4: int ≠ int64
+      a5: real ≠ int64
+      a6: x : list()
+      a7: x = Cons(x, Nil())
     Steps:
       s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: x : list()   [assumption a3]
-      s4: x = Cons(x, Nil())   [assumption a4]
-      s5: false   [refutation of [s0, s1, s2, s3, s4]]
+      s1: bool ≠ real   [assumption a1]
+      s2: bool ≠ int64   [assumption a2]
+      s3: int ≠ real   [assumption a3]
+      s4: int ≠ int64   [assumption a4]
+      s5: real ≠ int64   [assumption a5]
+      s6: x : list()   [assumption a6]
+      s7: x = Cons(x, Nil())   [assumption a7]
+      s8: false   [refutation of [s0, s1, s2, s3, s4, s5, s6, s7]]
         refutation:
           steps:
-            r0: x = Cons(x, Nil())   [s4]
+            r0: x = Cons(x, Nil())   [s7]
             r1: x ≠ Cons(x, Nil())   [ADT: (Acyclicity
      (cycle
       (((constructor_term
@@ -827,7 +857,7 @@ let%expect_test "ADT proofs print human-readable certificate text" =
             ()))))
         (field (Var x))))))]
             r2: ⊥   [RUP over [r0, r1]]
-    Conclusion: s5
+    Conclusion: s8
     |}]
 ;;
 

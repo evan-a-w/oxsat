@@ -53,11 +53,13 @@ val create : unit -> t
     are candidates for extensionality. *)
 val add_atom : t -> atom:Atom.Equality.t -> unit
 
+val add_type : t -> type_expr:Type_expr.t -> unit
+
 val maybe_get_lemma
   :  t
   -> egraph:Formula_egraph_uf.t
   -> get_type:(Tvar.t -> Type_expr.t option)
-  -> [ `Consistent | `Lemma of (Atom.Equality.t * bool) list ]
+  -> [ `Consistent | `Lemma of (Atom.t * bool) list ]
 
 val last_certificate : t -> Lemma_certificate.Array.t option
 val undo : t -> to_decision_level_excl:int -> unit

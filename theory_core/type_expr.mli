@@ -6,7 +6,8 @@ module Base : sig
   type t =
     | Bool
     | Int
-    | Float
+    | Real
+    | Int64
   [@@deriving sexp, compare, equal, hash, enumerate]
 
   include Comparable.S with type t := t

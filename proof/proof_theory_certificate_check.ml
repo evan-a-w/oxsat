@@ -37,7 +37,7 @@ let check_array clause certificate =
   let eq = eq_literal in
   let neq = neq_literal in
   let not_has_type (var, type_expr) =
-    theory_literal (`Type_eq (Type_expr.Var var, type_expr)) false
+    theory_literal (`Has_type (var, type_expr)) false
   in
   let expected =
     match certificate with
@@ -260,6 +260,11 @@ let check_bare_var_eq clause certificate =
     match certificate with
     | Equality_implies_type_equality (a, b) ->
       [ theory_literal (type_eq a b) true; theory_literal (uf a b) false ]
+    | Equality_implies_has_type { source; target; type_ } ->
+      [ theory_literal (`Has_type (target, type_)) true
+      ; theory_literal (`Has_type (source, type_)) false
+      ; theory_literal (uf source target) false
+      ]
     | Equality_implies_le { left; right; direction } ->
       let left_le_right, right_le_left = le_atoms left right in
       let le =
@@ -282,24 +287,61 @@ let check_bare_var_eq clause certificate =
 
 let check_integer_split
   clause
-  ({ variable; floor; ceil } : Proof_theory_certificate.Integer_split.t)
+  ({ guard; variable; floor; ceil } : Proof_theory_certificate.Integer_split.t)
   =
   if not (Q.equal ceil (Q.( + ) floor Q.one))
   then error "integer split bounds are not adjacent"
   else (
-    let expected =
-      [ theory_literal
-          (`Type_eq (Type_expr.Var variable, Type_expr.Base Int))
-          false
-      ; theory_literal (`Le (Linear_expr.var variable, floor)) true
-      ; theory_literal
-          (`Le (Linear_expr.neg (Linear_expr.var variable), Q.neg ceil))
-          true
-      ]
-    in
-    if clause_equal clause expected
-    then Ok ()
-    else error "integer split certificate does not match its clause")
+    match guard with
+    | `Has_type (guard_variable, type_expr)
+      when Tvar.equal guard_variable variable
+           && Option.value_map
+                (Numeric_domain.of_type_expr type_expr)
+                ~default:false
+                ~f:(fun domain -> domain.integral) ->
+      let expected =
+        [ theory_literal guard false
+        ; theory_literal (`Le (Linear_expr.var variable, floor)) true
+        ; theory_literal
+            (`Le (Linear_expr.neg (Linear_expr.var variable), Q.neg ceil))
+            true
+        ]
+      in
+      if clause_equal clause expected
+      then Ok ()
+      else error "integer split certificate does not match its clause"
+    | _ -> error "integer split guard is not an integral type premise")
+;;
+
+let check_type_domain
+  clause
+  ({ guard; consequence } : Proof_theory_certificate.Type_domain.t)
+  =
+  let valid =
+    match guard, consequence with
+    | `Has_type (variable, type_expr), `Le (expr, bound) ->
+      (match Numeric_domain.of_type_expr type_expr with
+       | Some { bounds = Some { lower; upper }; _ } ->
+         ([%compare.equal: Linear_expr.t] expr (Linear_expr.var variable)
+          && Q.equal bound upper)
+         || ([%compare.equal: Linear_expr.t]
+               expr
+               (Linear_expr.neg (Linear_expr.var variable))
+             && Q.equal bound (Q.neg lower))
+       | Some { bounds = None; _ } | None -> false)
+    | ( `Has_type (guard_variable, subtype)
+      , `Has_type (consequence_variable, supertype) ) ->
+      Tvar.equal guard_variable consequence_variable
+      && Type_lattice.is_subtype subtype ~of_:supertype
+    | _ -> false
+  in
+  if not valid
+  then error "type-domain certificate is not a valid type-domain implication"
+  else if clause_equal
+            clause
+            [ theory_literal guard false; theory_literal consequence true ]
+  then Ok ()
+  else error "type-domain certificate does not match its clause"
 ;;
 
 let check_linear_arithmetic
@@ -327,7 +369,7 @@ let check_linear_arithmetic
               Linear_expr.neg expression)
           in
           Ok Linear_expr.(sum + scale term.coefficient expression)
-        | `Eq _ | `Type_eq _ ->
+        | `Eq _ | `Type_eq _ | `Has_type _ ->
           error "linear certificate referenced a non-linear atom"))
   in
   if not (Map.is_empty sum.coeffs)
@@ -337,49 +379,12 @@ let check_linear_arithmetic
   else error "Farkas combination does not produce a contradiction"
 ;;
 
-let structurally_incompatible left right =
-  match left, right with
-  | Type_expr.Base a, Type_expr.Base b -> not (Type_expr.Base.equal a b)
-  | Type_expr.App (a, _), Type_expr.App (b, _) -> not (Tvar.equal a b)
-  | Type_expr.Function_type _, Type_expr.Function_type _
-  | Type_expr.Array_type _, Type_expr.Array_type _
-  | Type_expr.Type, Type_expr.Type -> false
-  | Type_expr.Var _, _
-  | _, Type_expr.Var _
-  | Type_expr.Type_of _, _
-  | _, Type_expr.Type_of _ -> false
-  | ( Type_expr.Base _
-    , ( Type_expr.App _
-      | Type_expr.Function_type _
-      | Type_expr.Array_type _
-      | Type_expr.Type ) )
-  | ( Type_expr.App _
-    , ( Type_expr.Base _
-      | Type_expr.Function_type _
-      | Type_expr.Array_type _
-      | Type_expr.Type ) )
-  | ( Type_expr.Function_type _
-    , ( Type_expr.Base _
-      | Type_expr.App _
-      | Type_expr.Array_type _
-      | Type_expr.Type ) )
-  | ( Type_expr.Array_type _
-    , ( Type_expr.Base _
-      | Type_expr.App _
-      | Type_expr.Function_type _
-      | Type_expr.Type ) )
-  | ( Type_expr.Type
-    , ( Type_expr.Base _
-      | Type_expr.App _
-      | Type_expr.Function_type _
-      | Type_expr.Array_type _ ) ) -> true
-;;
+let structurally_incompatible left right = Type_lattice.disjoint left right
 
 let type_assignment atom positive =
   match atom, positive with
-  | `Type_eq (Type_expr.Var variable, type_), false
-  | `Type_eq (type_, Type_expr.Var variable), false -> Some (variable, type_)
-  | `Eq _, _ | `Le _, _ | `Type_eq _, _ -> None
+  | `Has_type (variable, type_), false -> Some (variable, type_)
+  | `Eq _, _ | `Le _, _ | `Type_eq _, _ | `Has_type _, _ -> None
 ;;
 
 let check_type_theory
@@ -396,7 +401,7 @@ let check_type_theory
            match type_assignment atom positive with
            | Some assignment -> Ok assignment
            | None ->
-             error "type premise is not a negated variable type equality"))
+             error "type premise is not a negated variable type membership"))
     in
     match assignments with
     | [ (variable1, type1); (variable2, type2) ]
@@ -450,7 +455,7 @@ let equality_endpoints : Proof_atom.t -> (Formula.any * Formula.any) option
   | Theory (`Eq (left, right)) -> Some (left, right)
   | Theory (`Type_eq (left, right)) ->
     Some (Formula.type_expr_to_formula left, Formula.type_expr_to_formula right)
-  | Theory (`Le _) | Extension _ -> None
+  | Theory (`Le _ | `Has_type _) | Extension _ -> None
 ;;
 
 let check_equality_proof
@@ -554,6 +559,7 @@ let check ?(datatype_env = Datatype.Env.empty) ~clause = function
   | Proof_theory_certificate.Bare_var_eq certificate ->
     check_bare_var_eq clause certificate
   | Integer_split certificate -> check_integer_split clause certificate
+  | Type_domain certificate -> check_type_domain clause certificate
   | Linear_arithmetic certificate -> check_linear_arithmetic clause certificate
   | Type_theory certificate -> check_type_theory clause certificate
   | Array certificate -> check_array clause certificate

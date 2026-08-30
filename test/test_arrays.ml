@@ -383,21 +383,27 @@ let%expect_test "row1 proof prints human-readable certificate text" =
     {|
     Assumptions:
       a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: select(store(a, i, value), i) ≠ value
+      a1: bool ≠ real
+      a2: bool ≠ int64
+      a3: int ≠ real
+      a4: int ≠ int64
+      a5: real ≠ int64
+      a6: select(store(a, i, value), i) ≠ value
     Steps:
       s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: select(store(a, i, value), i) ≠ value   [assumption a3]
-      s4: false   [refutation of [s0, s1, s2, s3]]
+      s1: bool ≠ real   [assumption a1]
+      s2: bool ≠ int64   [assumption a2]
+      s3: int ≠ real   [assumption a3]
+      s4: int ≠ int64   [assumption a4]
+      s5: real ≠ int64   [assumption a5]
+      s6: select(store(a, i, value), i) ≠ value   [assumption a6]
+      s7: false   [refutation of [s0, s1, s2, s3, s4, s5, s6]]
         refutation:
           steps:
-            r0: value ≠ select(store(a, i, value), i)   [s3]
+            r0: value ≠ select(store(a, i, value), i)   [s6]
             r1: value = select(store(a, i, value), i)   [array row1: select(store(a, i, value), i) = value]
             r2: ⊥   [RUP over [r0, r1]]
-    Conclusion: s4
+    Conclusion: s7
     |}]
 ;;
 
@@ -418,24 +424,30 @@ let%expect_test "row2 proof prints human-readable certificate text" =
     {|
     Assumptions:
       a0: bool ≠ int
-      a1: bool ≠ float
-      a2: int ≠ float
-      a3: i ≠ j
-      a4: select(store(a, i, value), j) ≠ select(a, j)
+      a1: bool ≠ real
+      a2: bool ≠ int64
+      a3: int ≠ real
+      a4: int ≠ int64
+      a5: real ≠ int64
+      a6: i ≠ j
+      a7: select(store(a, i, value), j) ≠ select(a, j)
     Steps:
       s0: bool ≠ int   [assumption a0]
-      s1: bool ≠ float   [assumption a1]
-      s2: int ≠ float   [assumption a2]
-      s3: i ≠ j   [assumption a3]
-      s4: select(store(a, i, value), j) ≠ select(a, j)   [assumption a4]
-      s5: false   [refutation of [s0, s1, s2, s3, s4]]
+      s1: bool ≠ real   [assumption a1]
+      s2: bool ≠ int64   [assumption a2]
+      s3: int ≠ real   [assumption a3]
+      s4: int ≠ int64   [assumption a4]
+      s5: real ≠ int64   [assumption a5]
+      s6: i ≠ j   [assumption a6]
+      s7: select(store(a, i, value), j) ≠ select(a, j)   [assumption a7]
+      s8: false   [refutation of [s0, s1, s2, s3, s4, s5, s6, s7]]
         refutation:
           steps:
-            r0: i ≠ j   [s3]
-            r1: select(a, j) ≠ select(store(a, i, value), j)   [s4]
+            r0: i ≠ j   [s6]
+            r1: select(a, j) ≠ select(store(a, i, value), j)   [s7]
             r2: i = j ∨ select(a, j) = select(store(a, i, value), j)   [array row2: i ≠ j ⟹ select(store(a, i, value), j) = select(a, j)]
             r3: ⊥   [RUP over [r0, r1, r2]]
-    Conclusion: s5
+    Conclusion: s8
     |}]
 ;;
 
@@ -471,9 +483,9 @@ let%expect_test "extensionality proof prints certificate lines" =
   [%expect
     {|
     (check (result (Ok ())))
-      s10: select(x, array_extensionality.<fresh>) = select(y, array_extensionality.<fresh>)   [∀-instantiation {k.bound.<fresh> := array_extensionality.<fresh>} over [s0]]
+      s13: select(x, array_extensionality.<fresh>) = select(y, array_extensionality.<fresh>)   [∀-instantiation {k.bound.<fresh> := array_extensionality.<fresh>} over [s0]]
             r3: a = b ∨ select(a, array_extensionality.<fresh>) ≠ select(b, array_extensionality.<fresh>)   [array extensionality: a ≠ b ⟹ select(a, array_extensionality.<fresh>) ≠ select(b, array_extensionality.<fresh>)]
-            r4: select(x, array_extensionality.<fresh>) = select(y, array_extensionality.<fresh>)   [s10]
+            r4: select(x, array_extensionality.<fresh>) = select(y, array_extensionality.<fresh>)   [s13]
             r5: x ≠ a ∨ y ≠ b ∨ select(x, array_extensionality.<fresh>) ≠ select(y, array_extensionality.<fresh>) ∨ select(a, array_extensionality.<fresh>) = select(b, array_extensionality.<fresh>)   [EUF: select(a, array_extensionality.<fresh>) = select(b, array_extensionality.<fresh>) via [x = a; congruence(select(a, array_extensionality.<fresh>) = select(x, array_extensionality.<fresh>) from [a = x, array_extensionality.<fresh> = array_extensionality.<fresh>]); select(x, array_extensionality.<fresh>) = select(y, array_extensionality.<fresh>); y = b; congruence(select(y, array_extensionality.<fresh>) = select(b, array_extensionality.<fresh>) from [y = b, array_extensionality.<fresh> = array_extensionality.<fresh>])]]
     |}]
 ;;

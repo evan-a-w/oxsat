@@ -54,14 +54,14 @@ let%expect_test "Type_eq atoms are handled natively" =
   let t = Formula_egraph_uf.create ~atoms:[] in
   let a = Type_expr.Var (Tvar.of_string "a") in
   let int_ : Type_expr.t = Base Int in
-  let float_ : Type_expr.t = Base Float in
+  let real_ : Type_expr.t = Base Real in
   Formula_egraph_uf.add_atom t ~atom:(`Type_eq (a, int_));
-  Formula_egraph_uf.add_atom t ~atom:(`Type_eq (a, float_));
-  Formula_egraph_uf.add_atom t ~atom:(`Type_eq (int_, float_));
+  Formula_egraph_uf.add_atom t ~atom:(`Type_eq (a, real_));
+  Formula_egraph_uf.add_atom t ~atom:(`Type_eq (int_, real_));
   Formula_egraph_uf.assert_atom
     t
     ~decision_level:0
-    ~atom:(`Type_eq (int_, float_))
+    ~atom:(`Type_eq (int_, real_))
     ~value:false;
   Formula_egraph_uf.assert_atom
     t
@@ -71,14 +71,14 @@ let%expect_test "Type_eq atoms are handled natively" =
   Formula_egraph_uf.assert_atom
     t
     ~decision_level:0
-    ~atom:(`Type_eq (a, float_))
+    ~atom:(`Type_eq (a, real_))
     ~value:true;
   print_lemma (Formula_egraph_uf.maybe_get_lemma t);
   [%expect
     {|
     (Lemma
-     (((Type_eq ((Base Int) (Base Float))) true)
-      ((Type_eq ((Var a) (Base Float))) false)
+     (((Type_eq ((Base Int) (Base Real))) true)
+      ((Type_eq ((Var a) (Base Real))) false)
       ((Type_eq ((Var a) (Base Int))) false)))
     |}]
 ;;

@@ -55,7 +55,8 @@ let representatives : Formula.quantified list =
   ; q (Datatype_tester (nil, vx))
   ; q Bool
   ; q Int
-  ; q Float
+  ; q Real
+  ; q Int64
   ; q Type
   ; q (Function_type (Int, Int))
   ; q (Array_type (Int, Int))
@@ -78,7 +79,32 @@ let%expect_test "formula compare/rank distinguishes constructor representatives"
         ~unique:(Set.length set : int)
         ~duplicates:(List.length representatives - Set.length set : int)];
   [%expect
-    {| (("List.length representatives" 29) (unique 29) (duplicates 0)) |}]
+    {| (("List.length representatives" 30) (unique 30) (duplicates 0)) |}]
+;;
+
+let%expect_test "type lattice numeric bases" =
+  let show type_expr = [%sexp (type_expr : Type_expr.t)] in
+  let meet a b = Option.map (Type_lattice.meet a b) ~f:show in
+  print_s
+    [%message
+      "lattice"
+        ~int64_int:(Type_lattice.is_subtype (Base Int64) ~of_:(Base Int) : bool)
+        ~int_real:(Type_lattice.is_subtype (Base Int) ~of_:(Base Real) : bool)
+        ~int64_real:
+          (Type_lattice.is_subtype (Base Int64) ~of_:(Base Real) : bool)
+        ~int_real_exact:
+          (Type_lattice.is_subtype (Base Real) ~of_:(Base Int) : bool)
+        ~meet_int64_int:(meet (Base Int64) (Base Int) : Sexp.t option)
+        ~meet_int_real:(meet (Base Int) (Base Real) : Sexp.t option)
+        ~meet_int64_real:(meet (Base Int64) (Base Real) : Sexp.t option)
+        ~bool_int_disjoint:(Type_lattice.disjoint (Base Bool) (Base Int) : bool)];
+  [%expect
+    {|
+    (lattice (int64_int true) (int_real true) (int64_real true)
+     (int_real_exact false) (meet_int64_int ((Base Int64)))
+     (meet_int_real ((Base Int))) (meet_int64_real ((Base Int64)))
+     (bool_int_disjoint true))
+    |}]
 ;;
 
 let%expect_test "nested quantifier sexp" =

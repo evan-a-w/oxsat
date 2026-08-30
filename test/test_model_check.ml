@@ -153,7 +153,17 @@ let%expect_test "linear-arithmetic model checks" =
 let%expect_test "type model checks" =
   let solver = Solver.create () in
   Solver.assert_type solver xv (Base Int);
-  Solver.assert_type solver yv (Base Float);
+  Solver.assert_type solver yv (Base Real);
+  check solver;
+  [%expect {| (Ok ()) |}]
+;;
+
+let%expect_test "subtype membership model checks" =
+  let solver = Solver.create () in
+  Solver.assert_type solver xv (Base Int64);
+  assert_ok solver (Eq (Type_var xv, Int));
+  assert_ok solver (Eq (Type_var xv, Real));
+  assert_ok solver (Not (Eq (Type_var xv, Bool)));
   check solver;
   [%expect {| (Ok ()) |}]
 ;;
@@ -178,6 +188,33 @@ let%expect_test "Nelson-Oppen model checks (shared var, consistent)" =
 
 (* A deliberately corrupted model must be rejected: flipping a linear atom's
    truth value contradicts the numeric witness. *)
+let%expect_test "Int64 numeric-domain witness is checked" =
+  let solver = Solver.create () in
+  Solver.assert_type solver xv (Base Int64);
+  (match Solver.solve solver with
+   | Unsat _ -> print_endline "unexpectedly unsat"
+   | Sat { model } ->
+     print_s [%sexp (Solver.check_model solver model : unit Or_error.t)];
+     let corrupted =
+       { model with
+         Model.tvar_assignments =
+           Map.update model.tvar_assignments xv ~f:(function
+             | None -> assert false
+             | Some a ->
+               { a with numeric = Some (Simplex.Q_eps.of_q Q.(one / of_int 2)) })
+       }
+     in
+     print_s [%sexp (Solver.check_model solver corrupted : unit Or_error.t)]);
+  [%expect
+    {|
+    (Ok ())
+    (Error
+     ("integral type has a non-integral numeric witness" (var x)
+      (type_expr (Base Int64)) (value ((num 1) (den 2)))
+      (eps_coeff ((num 0) (den 1)))))
+    |}]
+;;
+
 let%expect_test "corrupted model is rejected" =
   let solver = Solver.create () in
   assert_ok solver (Formula.La_compare (x, `Ge, La_const (Q.of_int 3)));
@@ -192,7 +229,7 @@ let%expect_test "corrupted model is rejected" =
            Map.mapi model.atom_values ~f:(fun ~key ~data ->
              match key with
              | `Le _ -> not data
-             | `Eq _ | `Type_eq _ -> data)
+             | `Eq _ | `Type_eq _ | `Has_type _ -> data)
        }
      in
      print_s [%sexp (Solver.check_model solver corrupted : unit Or_error.t)]);
@@ -480,7 +517,7 @@ let%expect_test "ADT constructor completeness violation in a corrupted model \
 let%expect_test "type disequality checks; corrupted type witness is rejected" =
   let solver = Solver.create () in
   Solver.assert_type solver xv (Base Int);
-  Solver.assert_type solver yv (Base Float);
+  Solver.assert_type solver yv (Base Real);
   assert_ok solver (neq (Type_var xv) (Type_var yv));
   (match Solver.solve solver with
    | Unsat _ -> print_endline "unexpectedly unsat"

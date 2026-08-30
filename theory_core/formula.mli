@@ -53,7 +53,8 @@ type _ t =
   (* Types *)
   | Bool : [> `Type ] t
   | Int : [> `Type ] t
-  | Float : [> `Type ] t
+  | Real : [> `Type ] t
+  | Int64 : [> `Type ] t
   | Type : [> `Type ] t
   | Function_type : 'a t * 'a t -> ([> `Type ] as 'a) t
   | Array_type : 'a t * 'a t -> ([> `Type ] as 'a) t
@@ -155,7 +156,8 @@ module Op : sig
     | Datatype_tester of Datatype.Constructor.t
     | Bool
     | Int
-    | Float
+    | Real
+    | Int64
     | Type
     | Function_type
     | Array_type

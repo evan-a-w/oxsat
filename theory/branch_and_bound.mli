@@ -3,12 +3,12 @@ open! Import
 
 (** Decision procedure for linear arithmetic over [Tvar.t] variables, combining
     {!Simplex} (for the rationals) with a branch-and-bound search (for [Tvar.t]s
-    asserted to be integral via [`Type_eq]). *)
+    asserted to have an integral type via [`Has_type]). *)
 
 module Atom : sig
   type t =
     [ `Le of Linear_expr.t * Q.t
-    | `Type_eq of Type_expr.t * Type_expr.t
+    | `Has_type of Tvar.t * Type_expr.t
     ]
   [@@deriving sexp, compare, hash]
 end
@@ -33,7 +33,8 @@ module Last_lemma : sig
     | None
     | Linear_arithmetic of (Atom.t * Q.t) list
     | Integer_split of
-        { variable : Tvar.t
+        { guard : Atom.t
+        ; variable : Tvar.t
         ; floor : Q.t
         ; ceil : Q.t
         }
